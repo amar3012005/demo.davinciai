@@ -825,41 +825,50 @@ async def save_case(request: SaveCaseRequest):
                 message="Qdrant not configured - case not saved"
             )
 
-        issue = request.issue
-        solution = request.solution
-
-        # AUTO-DISTILL: If history provided, use LLM to extract core issue/solution
-        if request.history_context and (not issue or not solution):
+        # Determine the cases to be saved
+        effective_cases = []
+        
+        # 1. Try Distillation if history is provided and manual info is missing
+        if request.history_context and (not request.issue or not request.solution):
             logger.info(f"🧠 Distilling history for User {request.user_id[:10]}...")
-            distilled = await app.state.rag_engine.distill_history_to_case(request.history_context)
-            if distilled:
-                issue = issue or distilled.get('issue')
-                solution = solution or distilled.get('solution')
+            distilled_list = await app.state.rag_engine.distill_history_to_case(request.history_context)
+            for c in distilled_list:
+                i = c.get('issue')
+                s = c.get('solution')
+                if i and s:
+                    effective_cases.append((i, s))
+        
+        # 2. Fallback to manual issue/solution if distillation didn't yield anything
+        if not effective_cases and request.issue and request.solution:
+            effective_cases.append((request.issue, request.solution))
 
-        if not issue or not solution:
+        if not effective_cases:
             return SaveCaseResponse(
                 status="failed",
                 message="Missing issue/solution and distillation failed"
             )
         
-        # Embed the issue for vector storage
-        issue_vector = app.state.rag_engine.embeddings.embed_query(issue)
-        
-        # Save to Qdrant
-        await app.state.rag_engine.qdrant.upsert_case(
-            user_id=request.user_id,
-            issue=issue,
-            solution=solution,
-            vector=issue_vector,
-            tenant_id=request.tenant_id,
-            metadata=request.metadata
-        )
-        
-        logger.info(f"🧠 Saved distilled case to Hive Mind: {issue[:50]}...")
+        # 3. Save each effective case to Qdrant
+        saved_count = 0
+        for issue_text, solution_text in effective_cases:
+            # Embed the issue for vector storage
+            issue_vector = app.state.rag_engine.embeddings.embed_query(issue_text)
+            
+            # Save to Qdrant
+            await app.state.rag_engine.qdrant.upsert_case(
+                user_id=request.user_id,
+                issue=issue_text,
+                solution=solution_text,
+                vector=issue_vector,
+                tenant_id=request.tenant_id,
+                metadata=request.metadata
+            )
+            saved_count += 1
+            logger.info(f"🧠 Saved case to Hive Mind: {issue_text[:50]}...")
         
         return SaveCaseResponse(
             status="success",
-            message="Case distilled and saved successfully"
+            message=f"{saved_count} case(s) yielded and saved to Hive Mind successfully"
         )
     
     except Exception as e:
@@ -1112,7 +1121,7 @@ async def get_hive_mind_insights(limit: int = 10):
                 solution=p.payload.get("solution", "")[:200] + "..." if len(p.payload.get("solution", "")) > 200 else p.payload.get("solution", ""),
                 issue_type=p.payload.get("issue_type"),
                 customer_segment=p.payload.get("customer_segment"),
-                timestamp=p.payload.get("timestamp")
+                timestamp=str(p.payload.get("timestamp")) if p.payload.get("timestamp") else None
             )
             for p in recent
         ]

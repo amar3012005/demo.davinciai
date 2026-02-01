@@ -61,6 +61,8 @@ services:
     port: 6382
     db: 0
     enabled: true  # For state persistence only
+  
+  davinciai_backend_url: "https://api.davinciai.eu/api/metrics/session-report"
 
 dialogue:
   en:

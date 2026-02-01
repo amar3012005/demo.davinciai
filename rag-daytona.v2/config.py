@@ -59,7 +59,7 @@ class RAGConfig:
     # LLM Provider settings (NEW - replaces Gemini-specific config)
     llm_provider: str = "groq"  # "gemini", "openai", "openrouter", "claude", "ollama", "groq"
     llm_api_key: str = ""  # API key for the provider
-    llm_model: str = "llama-3.1-8b-instant"  # Model name
+    llm_model: str = "openai/gpt-oss-20b"  # Model name
     
     # Provider-specific options (optional)
     llm_options: dict = field(default_factory=dict)  # Additional provider config

@@ -66,16 +66,26 @@ class STTClient:
     
     async def send_audio(self, audio_bytes: bytes):
         """Send audio chunk to STT service with event loop yielding to prevent starvation"""
-        if self.ws and not self.ws.closed:
+        if not self.ws or self.ws.closed:
+            return
+
+        try:
             # CRITICAL: Yield BEFORE sending to give receive loop a chance to run
-            # This prevents the continuous audio stream from starving the receive_transcript task
             await asyncio.sleep(0)
             await self.ws.send_bytes(audio_bytes)
             # CRITICAL: Yield AFTER sending to ensure fair scheduling
             await asyncio.sleep(0)
             logger.debug(f"STT: Sent {len(audio_bytes)} bytes to STT service")
-        else:
-            logger.warning("STT WebSocket not connected")
+        except (aiohttp.ClientConnectionError, RuntimeError) as e:
+            logger.warning(f"⚠️ STT send failed: {e}")
+            # Ensure we don't try to use this dead connection again
+            try:
+                await self.close()
+            except Exception:
+                pass
+            self.ws = None
+        except Exception as e:
+            logger.error(f"❌ Unexpected STT send error: {e}")
     
     async def receive_transcript(self) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -615,10 +625,18 @@ class RAGClient:
                                 try:
                                     data = json.loads(line_str)
                                     token = data.get("text", "")
-                                    logger.debug(f"RAG streaming received: '{token}' (is_final={data.get('is_final', False)})")
-                                    if not data.get("is_final", False) and token:
+                                    is_final = data.get("is_final", False)
+                                    
+                                    logger.debug(f"RAG streaming received: '{token}' (is_final={is_final})")
+                                    
+                                    # Yield token if it has content, even if it's the final chunk
+                                    # (Conversational fast-paths often send only one chunk marked as final)
+                                    if token:
                                         logger.debug(f"RAG yielding token: '{token}'")
                                         yield token
+                                    
+                                    if is_final:
+                                        logger.debug(f"RAG streaming marked as final")
                                 except json.JSONDecodeError as e:
                                     logger.error(f"RAG JSON parse error: {e} for line: {line_str}")
                                     continue

@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 import base64
 import uuid
 import secrets
@@ -102,7 +103,7 @@ class OrchestratorSession:
 
     # TTS configuration (synced from TTS service)
     tts_sample_rate: int = 44100
-    tts_format: str = "pcm_s16le"
+    tts_format: str = "pcm_f32le"
 
     # Task limiting
     task_semaphore: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(10))  # Max 10 concurrent tasks
@@ -122,12 +123,19 @@ class OrchestratorSession:
     tts_connected_event: asyncio.Event = field(default_factory=asyncio.Event)
     stt_connected_event: asyncio.Event = field(default_factory=asyncio.Event)
     
+    # Concurrency control for WebSocket sends
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    
     # FSM Appointment booking
     appointment_fsm: Optional[SimpleAppointmentFSM] = None  # Active FSM instance
     fsm_active: bool = False  # True when in FSM mode
 
     # Host-based configuration overrides
     agent_name: str = "demo"
+    agent_id: Optional[str] = None
+    tenant_id: Optional[str] = None
+    secondary_language: Optional[str] = None
+    flow_config: Dict[str, Any] = field(default_factory=dict)
     rag_url: Optional[str] = None
     voice_id_override: Optional[str] = None
 
@@ -202,13 +210,14 @@ class OrchestratorWSHandler:
             logger.warning("❌ Invalid message format: not a dictionary")
             return False
             
-        # Check basic structure
-        if "type" not in msg:
-            logger.warning("❌ Invalid message: missing 'type' field")
+        # Check basic structure (accept 'type' or 'action')
+        identifier = msg.get("type") or msg.get("action")
+        if not identifier:
+            logger.warning("❌ Invalid message: missing identifier ('type' or 'action')")
             return False
             
-        if not isinstance(msg["type"], str):
-            logger.warning("❌ Invalid message: 'type' must be a string")
+        if not isinstance(identifier, str):
+            logger.warning("❌ Invalid message: identifier ('type' or 'action') must be a string")
             return False
             
         # Check size (rough estimation) - limit to 1MB
@@ -569,7 +578,8 @@ class OrchestratorWSHandler:
     
     async def _route_message(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Route incoming message to appropriate handler"""
-        msg_type = msg.get("type")
+        # Support both 'type' (standard) and 'action' (new format) identifiers
+        msg_type = msg.get("type") or msg.get("action")
         
         if msg_type == "audio_chunk":
             await self._handle_audio_chunk(session, msg)
@@ -673,7 +683,11 @@ class OrchestratorWSHandler:
                 if session.audio_chunks_received % 50 == 1:
                     logger.warning(f"[{session.session_id}] ⚠️ STT client not connected, audio chunk #{session.audio_chunks_received} not sent")
         except Exception as e:
-            logger.error(f"[{session.session_id}] ❌ Binary audio error: {e}", exc_info=True)
+            # Log transport errors at debug level to avoid spam
+            if "closing transport" in str(e).lower() or "connection reset" in str(e).lower():
+                logger.debug(f"[{session.session_id}] STT transport closed during binary send")
+            else:
+                logger.error(f"[{session.session_id}] ❌ Binary audio error: {e}", exc_info=True)
     
     async def _handle_text_input(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """
@@ -813,6 +827,16 @@ class OrchestratorWSHandler:
                         session.current_turn_timers["first_audio"] = time.time()
                         ttfc = (session.current_turn_timers["first_audio"] - session.current_turn_timers["speech_end"]) * 1000
                         logger.info(f"[{session.session_id}] 🔊 TTFC: {ttfc:.1f}ms (Turn: {session.current_turn_timers.get('user_text', 'unknown')[:30]}...)")
+                        
+                        # UPDATE TURN METRICS (fix for 0.0 average in session report)
+                        if session.turn_metrics:
+                            # The metrics entry for this turn was already appended to turn_metrics
+                            # in _process_user_input, but ttfc_ms was likely None at that time.
+                            # We update the last entry if the user_text matches.
+                            last_metrics = session.turn_metrics[-1]
+                            if last_metrics.get("user_text") == session.current_turn_timers.get("user_text"):
+                                last_metrics["ttfc_ms"] = ttfc
+                                logger.debug(f"[{session.session_id}] 📊 Updated turn_metrics with TTFC: {ttfc:.1f}ms")
                 
                 if not session.is_closed:
                     logger.warning(f"[{session.session_id}] ⚠️ TTS connection dropped, attempting reconnection...")
@@ -1618,6 +1642,11 @@ class OrchestratorWSHandler:
                 await session.tts_client.connect(session.session_id)
             
             if session.tts_client.ws and not session.tts_client.ws.closed:
+                # CRITICAL: Cancel any existing playback timer at the start of a new stream
+                if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+                    session.audio_playback_server_timer.cancel()
+                    logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new FSM stream")
+                
                 # Send to TTS for voice output (using correct stream_chunk method)
                 await session.tts_client.stream_chunk(response_text, language=output_language, voice_id=session.voice_id_override)
                 await session.tts_client.stream_end()
@@ -1629,6 +1658,7 @@ class OrchestratorWSHandler:
                 # Receive and forward audio from TTS (same pattern as _stream_response_and_tts)
                 audio_received = False
                 session.tts_total_bytes = 0  # Reset for this response
+                session.audio_playback_start_time = None # Reset timing
                 
                 async for data in session.tts_client.receive_audio():
                     if session.is_closed:
@@ -1716,6 +1746,11 @@ class OrchestratorWSHandler:
         session.tts_total_bytes = 0
         session.audio_playback_duration = None
         session.audio_playback_start_time = None
+        
+        # Also cancel any existing playback timer that might cut off this stream
+        if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+            session.audio_playback_server_timer.cancel()
+            logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new RAG stream")
 
         try:
             # Connect to TTS service for streaming (avoid double connection)
@@ -1835,7 +1870,10 @@ class OrchestratorWSHandler:
                     "total_turn_ms": (now - timers["speech_end"]) * 1000
                 }
                 session.turn_metrics.append(metrics)
-                logger.info(f"[{session.session_id}] 📊 Turn complete: TTFT={metrics['ttft_ms']:.0f}ms, TTFC={metrics['ttfc_ms']:.0f}ms")
+                # Log with safety check for None values
+                ttft_str = f"{metrics['ttft_ms']:.0f}ms" if metrics['ttft_ms'] is not None else "N/A"
+                ttfc_str = f"{metrics['ttfc_ms']:.0f}ms" if metrics['ttfc_ms'] is not None else "N/A"
+                logger.info(f"[{session.session_id}] 📊 Turn complete: TTFT={ttft_str}, TTFC={ttfc_str}")
 
             # Add agent response to conversation history
             if response_text:
@@ -2078,10 +2116,9 @@ class OrchestratorWSHandler:
             # CRITICAL: Reset tracking for THIS specific stream to ensure accurate duration
             # Also cancel any existing playback timer that might cut off this stream
             session.tts_total_bytes = 0
-            if not cancellation_task:
-                if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
-                    session.audio_playback_server_timer.cancel()
-                    logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new TTS stream")
+            if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+                session.audio_playback_server_timer.cancel()
+                logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new TTS stream")
             
             # Clear any stale data from tts_audio_queue before starting fresh
             while not session.tts_audio_queue.empty():
@@ -2250,10 +2287,9 @@ class OrchestratorWSHandler:
         
         try:
             # CRITICAL: Cancel any existing playback timer at the start of a new stream
-            if not cancellation_task:
-                if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
-                    session.audio_playback_server_timer.cancel()
-                    logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new audio file stream")
+            if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+                session.audio_playback_server_timer.cancel()
+                logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new audio file stream")
 
             audio_file = Path(audio_path)
             if not audio_file.exists():
@@ -2338,13 +2374,26 @@ class OrchestratorWSHandler:
                     padding = np.zeros(chunk_size_samples - len(chunk_samples), dtype=dtype)
                     chunk_samples = np.concatenate([chunk_samples, padding])
                 
-                # Convert back to bytes
-                if dtype == np.int16:
-                    chunk_bytes = chunk_samples.tobytes()
+                # Convert back to bytes based on session format
+                if session.tts_format == "pcm_f32le":
+                    # Convert to float32 normalized to [-1.0, 1.0]
+                    if dtype == np.int16:
+                        chunk_samples_f32 = chunk_samples.astype(np.float32) / 32768.0
+                    elif dtype == np.int32:
+                        chunk_samples_f32 = chunk_samples.astype(np.float32) / 2147483648.0
+                    else:
+                        chunk_samples_f32 = chunk_samples.astype(np.float32)
+                    chunk_bytes = chunk_samples_f32.tobytes()
+                    encoding = "pcm_f32le"
                 else:
-                    # Convert to int16 if needed
-                    chunk_samples_int16 = (chunk_samples / (2**(sampwidth*8-1)) * 32767).astype(np.int16)
-                    chunk_bytes = chunk_samples_int16.tobytes()
+                    # Default to pcm_s16le
+                    if dtype == np.int16:
+                        chunk_bytes = chunk_samples.tobytes()
+                    else:
+                        # Convert to int16 if needed
+                        chunk_samples_int16 = (chunk_samples / (2**(sampwidth*8-1)) * 32767).astype(np.int16)
+                        chunk_bytes = chunk_samples_int16.tobytes()
+                    encoding = "pcm_s16le"
                 
                 # Encode to base64
                 audio_b64 = base64.b64encode(chunk_bytes).decode('utf-8')
@@ -2352,12 +2401,13 @@ class OrchestratorWSHandler:
                 # Send chunk (stop if client disconnected)
                 if not await self._send_json(session.websocket, {
                     "type": "audio_chunk",
-                    "audio": audio_b64,
+                    "data": audio_b64,
                     "sample_rate": sample_rate,
-                    "format": "pcm_s16le" if dtype == np.int16 else "pcm_s32le",
+                    "format": encoding,
                     "chunk_id": f"{session.session_id}_filler_{chunk_counter}",
-                    "is_final": False,
-                    "timestamp": time.time()
+                    "is_final": False,  # Not final yet
+                    "timestamp": time.time(),
+                    "duration_ms": chunk_duration_ms
                 }, session):
                     break
                 chunk_counter += 1
@@ -2567,6 +2617,11 @@ class OrchestratorWSHandler:
         if session.pipeline_task and not session.pipeline_task.done():
             session.pipeline_task.cancel()
         
+        # CRITICAL: Always cancel audio playback timer on interrupt
+        if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+            session.audio_playback_server_timer.cancel()
+            logger.debug(f"[{session.session_id}] ⏸️ Cancelled playback timer due to interrupt")
+        
         # Notify browser
         await self._send_json(session.websocket, {
             "type": "playback_stop",
@@ -2600,20 +2655,36 @@ class OrchestratorWSHandler:
         await self._broadcast_state(session, State.LISTENING)
     
     async def _handle_start_session(self, session: OrchestratorSession, msg: Dict[str, Any] = None):
-        """Handle session start with mode configuration"""
-        # Extract mode settings from message
-        stt_mode = msg.get("stt_mode", "audio") if msg else "audio"
-        tts_mode = msg.get("tts_mode", "audio") if msg else "audio"
+        """Handle session start with mode configuration and metadata"""
+        if not msg:
+            msg = {}
 
-        # Store modes in session
+        # 1. Extract Extended Metadata (New Format)
+        meta = msg.get("meta", {})
+        if meta:
+            session.agent_id = meta.get("agent_id")
+            session.tenant_id = meta.get("tenant_id")
+            session.user_id = meta.get("user_id") or session.user_id
+            session.agent_name = meta.get("agent_name") or session.agent_name
+
+        # 2. Language Configuration
+        session.current_language = msg.get("language") or session.current_language
+        session.secondary_language = msg.get("secondary_language")
+        
+        # 3. Flow & Mode Configuration
+        flow_config = msg.get("flow_config", {})
+        session.flow_config = flow_config
+        
+        stt_mode = flow_config.get("stt_mode") or msg.get("stt_mode", "audio")
+        tts_mode = flow_config.get("tts_mode") or msg.get("tts_mode", "audio")
         session.stt_mode = stt_mode
         session.tts_mode = tts_mode
 
         detected_language = session.current_language or self.config.languages.default
         # Determine output language based on stream_out setting
-        output_language = self._get_output_language(detected_language)
+        output_language = self._get_output_language(detected_language, session)
 
-        logger.info(f"[{session.session_id}] 🎬 Starting session - STT: {stt_mode}, TTS: {tts_mode}, Input: {detected_language}, Output: {output_language} (stream_out={self.config.languages.stream_out})")
+        logger.info(f"[{session.session_id}] 🎬 Starting session - Agent: {session.agent_name} ({session.agent_id}), Tenant: {session.tenant_id}, STT: {stt_mode}, TTS: {tts_mode}")
 
         # Connect to STT/TTS service if needed (handled by _stt_receive_loop and _stream_tts_to_browser)
         # We no longer connect here to avoid double connection race with background tasks
@@ -2631,30 +2702,50 @@ class OrchestratorWSHandler:
             except asyncio.TimeoutError:
                 logger.warning(f"[{session.session_id}] ⚠️ Proceeding with intro despite connection instability")
 
-        # Get intro (prefers assets with audio files) - use output language
-        intro_asset = self.dialogue_manager.get_intro(output_language)
-        if not intro_asset:
-            logger.warning(f"[{session.session_id}] ⚠️ No intro asset found for language '{output_language}', using fallback")
-            intro_text = f"Hello! Welcome to {self.config.organization.name}."
-            # Transition to SPEAKING (with side effects: cancel_filler)
-            speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start")
+        # 5. Play Introduction (Prioritize flow_config)
+        intro_text = None
+        if output_language == session.current_language:
+            intro_text = flow_config.get("intro_in_primary_lang")
+        elif output_language == session.secondary_language:
+            intro_text = flow_config.get("intro_in_secondary_lang")
+
+        if intro_text:
+            logger.info(f"[{session.session_id}] 🔊 Playing custom intro from flow_config ({output_language})")
+            # Transition to SPEAKING
+            speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start", data={"response": intro_text})
             await self._execute_side_effects(session, speaking_side_effects, output_language)
             await self._broadcast_state(session, State.SPEAKING)
             session.tts_task = asyncio.create_task(
                 self._stream_tts_to_browser(session, intro_text, output_language)
             )
-            return
-        
-        # Transition to SPEAKING BEFORE playing intro (critical for state consistency)
-        logger.info(f"[{session.session_id}] 🔄 Transitioning to SPEAKING for intro (current state: {session.state_manager.state.value})")
-        speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start", data={"response": intro_asset.text})
-        await self._execute_side_effects(session, speaking_side_effects, output_language)
-        await self._broadcast_state(session, State.SPEAKING)
-        # Stream intro via TTS (default behavior)
-        logger.info(f"[{session.session_id}] 🔊 Playing intro: {intro_asset.text[:50]}...")
-        session.tts_task = asyncio.create_task(
-            self._stream_tts_to_browser(session, intro_asset.text, output_language)
-        )
+        else:
+            # Fallback to dialogue manager assets
+            intro_asset = self.dialogue_manager.get_intro(output_language)
+            if not intro_asset:
+                logger.warning(f"[{session.session_id}] ⚠️ No intro asset found for language '{output_language}', using fallback")
+                fallback_text = f"Hello! Welcome to {session.agent_name}."
+                # Transition to SPEAKING
+                speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start")
+                await self._execute_side_effects(session, speaking_side_effects, output_language)
+                await self._broadcast_state(session, State.SPEAKING)
+                session.tts_task = asyncio.create_task(
+                    self._stream_tts_to_browser(session, fallback_text, output_language)
+                )
+            else:
+                # Transition to SPEAKING (with side effects: cancel_filler)
+                speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start", data={"response": intro_asset.text})
+                await self._execute_side_effects(session, speaking_side_effects, output_language)
+                await self._broadcast_state(session, State.SPEAKING)
+                
+                # Prefer audio file if available
+                if intro_asset.has_audio():
+                    logger.info(f"[{session.session_id}] 💿 Using pre-generated intro: {intro_asset.audio_path}")
+                    session.tts_task = asyncio.create_task(self._stream_audio_file(session, intro_asset.audio_path))
+                else:
+                    logger.info(f"[{session.session_id}] 🔊 Generating intro via TTS: {intro_asset.text[:50]}...")
+                    session.tts_task = asyncio.create_task(
+                        self._stream_tts_to_browser(session, intro_asset.text, output_language)
+                    )
 
     async def _handle_text_input(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """
@@ -2962,7 +3053,11 @@ class OrchestratorWSHandler:
                 logger.debug(f"[{session.session_id if session else 'unknown'}] WebSocket not connected, skipping message: {data.get('type')}")
                 return False
 
-            await websocket.send_json(data)
+            if session:
+                async with session.send_lock:
+                    await websocket.send_json(data)
+            else:
+                await websocket.send_json(data)
             return True
         except (RuntimeError, ConnectionError, Exception) as e:
             # Mark session as closed if we get a transport error
@@ -2977,10 +3072,28 @@ class OrchestratorWSHandler:
             else:
                 logger.error(f"Failed to send message ({type(e).__name__}): {e}")
             return False
+    async def _send_bytes(self, websocket: WebSocket, data: bytes, session: Optional[OrchestratorSession] = None) -> bool:
+        """
+        Send binary data to WebSocket with locking.
+        """
+        if session and session.is_closed:
+            return False
 
-    # ════════════════════════════════════════════════════════════════════════════════
-    # PHONE INTEGRATION METHODS
-    # ════════════════════════════════════════════════════════════════════════════════
+        try:
+            if websocket.client_state.name != "CONNECTED":
+                return False
+
+            if session:
+                async with session.send_lock:
+                    await websocket.send_bytes(data)
+            else:
+                await websocket.send_bytes(data)
+            return True
+        except Exception as e:
+            if session: session.is_closed = True
+            logger.debug(f"Failed to send bytes: {e}")
+            return False
+
 
     async def handle_phone_connection(self, websocket: WebSocket, call_sid: str, session_id: str):
         """
@@ -3025,9 +3138,38 @@ class OrchestratorWSHandler:
 
     async def _cleanup_session(self, session: OrchestratorSession):
         """Cleanup session resources (Metadata saving + removal from dict)"""
-        logger.info(f"[{session.session_id}] Cleaning up session...")
+        """Cleanup session resources (Metadata saving + removal from dict)"""
         
-        # Save session to Hive Mind (fallback to anonymous ID if user_id is missing)
+        # 1. 📊 GENERATE SESSION REPORT
+        now_ts = time.time()
+        report = {
+            "session_id": session.session_id,
+            "user_id": session.user_id or "anonymous",
+            "agent_name": session.agent_name,
+            "agent_id": session.agent_id,
+            "tenant_id": session.tenant_id,
+            "start_time": datetime.fromtimestamp(session.created_at).isoformat(),
+            "end_time": datetime.fromtimestamp(now_ts).isoformat(),
+            "timestamp": datetime.fromtimestamp(now_ts).isoformat(),
+            "duration_seconds": now_ts - session.created_at,
+            "total_turns": len(session.turn_metrics),
+            "avg_ttft_ms": 0.0,
+            "avg_ttfc_ms": 0.0,
+            "status": "completed"
+        }
+
+        # Calculate averages from metrics
+        ttft_values = [m.get("ttft_ms") for m in session.turn_metrics if m.get("ttft_ms") is not None]
+        ttfc_values = [m.get("ttfc_ms") for m in session.turn_metrics if m.get("ttfc_ms") is not None]
+        
+        if ttft_values:
+            report["avg_ttft_ms"] = sum(ttft_values) / len(ttft_values)
+        if ttfc_values:
+            report["avg_ttfc_ms"] = sum(ttfc_values) / len(ttfc_values)
+            
+        logger.info(f"[{session.session_id}] 📑 SESSION REPORT: {json.dumps(report)}")
+        
+        # 2. 🧠 HIVE MIND SYNC
         if session.history_manager:
             try:
                 # Format full conversation history for distillation
@@ -3041,26 +3183,38 @@ class OrchestratorWSHandler:
                     user_id = session.user_id or f"anonymous_{session.session_id}"
                     
                     # Call RAG service to save with history_context
+                    # Use session override if available, otherwise global default
+                    base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
+                    save_url = f"{base_rag_url}/api/v1/save_case"
+                    
                     try:
                         async with aiohttp.ClientSession() as http_session:
-                            async with http_session.post(
-                                f"{self.config.services.rag}/api/v1/save_case",
-                                json={
-                                    "user_id": user_id,
-                                    "tenant_id": session.agent_name,
-                                    "history_context": full_history,
-                                    "metadata": {
-                                        "session_id": session.session_id,
-                                        "timestamp": time.time()
-                                    }
+                            payload = {
+                                "user_id": user_id,
+                                "tenant_id": session.tenant_id or session.agent_name,
+                                "history_context": full_history,
+                                "metadata": {
+                                    "session_id": session.session_id,
+                                    "timestamp": time.time(),
+                                    "source": "orchestrator_cleanup"
                                 },
-                                timeout=aiohttp.ClientTimeout(total=15.0) # Distillation takes time
+                                "issue": "", # Let RAG distill these
+                                "solution": "" 
+                            }
+                            
+                            async with http_session.post(
+                                save_url,
+                                json=payload,
+                                timeout=aiohttp.ClientTimeout(total=30.0) # Distillation takes time
                             ) as resp:
                                 if resp.status == 200:
                                     logger.info(f"[{session.session_id}] ✅ Case distilled and saved to Hive Mind")
                                 else:
-                                    resp_data = await resp.json()
-                                    logger.warning(f"[{session.session_id}] ⚠️ Failed to save case: {resp.status} - {resp_data.get('message')}")
+                                    try:
+                                        resp_text = await resp.text()
+                                        logger.warning(f"[{session.session_id}] ⚠️ Failed to save case: {resp.status} - {resp_text}")
+                                    except:
+                                        logger.warning(f"[{session.session_id}] ⚠️ Failed to save case: {resp.status}")
                     except asyncio.TimeoutError:
                         logger.warning(f"[{session.session_id}] ⚠️ Save case timeout (summarization too long)")
                     except Exception as save_error:
@@ -3068,7 +3222,25 @@ class OrchestratorWSHandler:
             except Exception as e:
                 logger.debug(f"[{session.session_id}] Session summary preparation error: {e}")
         
-        # Cancel tasks
+        # 3. 📡 EXTERNAL METRICS WEBHOOK (BACKEND)
+        webhook_url = self.config.services.davinciai_backend_url
+        try:
+            logger.info(f"[{session.session_id}] 📡 Sending session report to backend...")
+            async with aiohttp.ClientSession() as http_session:
+                async with http_session.post(
+                    webhook_url,
+                    json=report,
+                    timeout=aiohttp.ClientTimeout(total=10.0)
+                ) as resp:
+                    if resp.status in [200, 201]:
+                        logger.info(f"[{session.session_id}] ✅ Session report delivered to backend")
+                    else:
+                        resp_text = await resp.text()
+                        logger.warning(f"[{session.session_id}] ⚠️ Backend rejected report: {resp.status} - {resp_text}")
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] ⚠️ Could not deliver report to backend: {e}")
+
+        # 4. Cancel tasks
         for task in [session.tts_task, session.pipeline_task, session.filler_task, session.final_accumulation_timer, session.audio_playback_server_timer]:
             if task and not task.done():
                 task.cancel()
@@ -3104,7 +3276,9 @@ class PhoneOrchestratorSession(OrchestratorSession):
         if self.audio_format == "g711":
             # Convert PCM to G.711 μ-law for phone
             phone_audio = self.convert_pcm_to_g711(audio_bytes)
-            await self.websocket.send_bytes(phone_audio)
+            # CRITICAL: Use lock for thread-safety to avoid AssertionError in websockets
+            async with self.send_lock:
+                await self.websocket.send_bytes(phone_audio)
         else:
             # Default behavior
             await super().send_audio_chunk(audio_bytes)

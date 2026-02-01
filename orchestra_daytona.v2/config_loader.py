@@ -88,6 +88,7 @@ class ServicesConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
     intent: IntentConfig = field(default_factory=IntentConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
+    davinciai_backend_url: str = "https://api.davinciai.eu/api/metrics/session-report"
 
 
 @dataclass
@@ -303,6 +304,12 @@ class ConfigLoader:
                     db=int(os.getenv("REDIS_DB", redis_data.get("db", 0))),
                     enabled=os.getenv("REDIS_ENABLED", str(redis_data.get("enabled", True))).lower() == "true"
                 )
+            
+            # Davinciai Backend config (with env var overrides)
+            config.services.davinciai_backend_url = os.getenv(
+                "DAVINCIAI_BACKEND_URL", 
+                services_data.get("davinciai_backend_url", config.services.davinciai_backend_url)
+            )
         
         # Dialogue config (keep as raw dict for flexibility)
         if "dialogue" in data:
