@@ -107,6 +107,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"   Output format: {config.output_format}")
         logger.info("=" * 70)
         
+        app.state.start_time = time.time()
         yield
         
     except Exception as e:
@@ -327,6 +328,8 @@ async def websocket_stream(
         "context_id": session.context_id,
         "model": config.model if config else None,
         "voice_id": config.voice_id if config else None,
+        "sample_rate": config.sample_rate if config else 44100,
+        "format": config.output_format if config else "pcm_f32le",
     })
 
     def sanitize_config(incoming_voice: Optional[str], incoming_model: Optional[str]):

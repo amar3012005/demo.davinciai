@@ -19,6 +19,7 @@ from .prompts import prompt_manager
 from .optimized_embeddings import OptimizedEmbeddings
 from .xml_prompts import XMLPromptManager
 from .qdrant_addon import QdrantAddon
+from .distillprompt_hivemind_savecase import CaseDistiller
 
 try:
     from groq import Groq
@@ -608,15 +609,15 @@ class RAGEngine:
             language=original_language
         )
         
-        logger.info(f"📝 Prompt assembled via ContextArchitect. Total size: {len(prompt)} chars")
-        logger.info(f"✨ PROMPT HEAD (System Config): {prompt[:300]}...")
-        
         # 5. Generation
         gen_start = time.time()
         accumulated = ""
         first_chunk_at = None
         
         try:
+            # Log the full prompt for debugging 0-token issues
+            logger.debug(f"DEBUG PROMPT: {prompt}")
+            
             # Note: GroqProvider might return an AsyncGenerator or Coroutine
             result = self.llm.generate(prompt=prompt, stream=True, temperature=0.7)
             
@@ -648,6 +649,13 @@ class RAGEngine:
                 if first_chunk_at is None: first_chunk_at = time.time()
                 if streaming_callback: streaming_callback(accumulated, False)
             
+            # Check for empty response and provide a fallback to prevent TTS errors
+            if not accumulated.strip():
+                logger.warning(f"⚠️ LLM returned empty response for query: '{query}'")
+                # Provide a natural fallback response
+                accumulated = "I'm sorry, I couldn't process that. Could you please repeat or rephrase your question?"
+                if streaming_callback: streaming_callback(accumulated, False)
+
             if streaming_callback: streaming_callback("", True)
             
         except Exception as e:
@@ -739,26 +747,16 @@ class RAGEngine:
             logger.warning(f"Web search failed: {e}")
             return ""
 
-    async def distill_history_to_case(self, history: str) -> Optional[Dict[str, str]]:
+    async def distill_history_to_case(self, history: str) -> List[Dict[str, str]]:
         """
-        Distill conversation history into a concise Issue/Solution case.
-        Used for Hive Mind learning.
+        Distill conversation history into professional Daytona support cases.
+        Supports multi-issue segmentation and GDPR/PII anonymization.
+        Uses the CaseDistiller for robust prompt handling.
         """
         try:
-            prompt = f"""
-Distill the following conversation into a professional Daytona support case.
-Rules:
-1. 'Issue': Concise summary of what the user was asking or struggling with (1-2 sentences).
-2. 'Solution': Brief summary of the answer or guidance provided (2-3 sentences max).
-3. Be professional and technical.
-4. Output ONLY valid JSON in format: {{"issue": "...", "solution": "..."}}
-
-Conversation History:
-{history}
-"""
-            import asyncio
-            import inspect
+            prompt = CaseDistiller.get_prompt(history)
             
+            import inspect
             # Call generate - may return string, coroutine, or generator
             result = self.llm.generate(prompt=prompt, stream=False)
             
@@ -768,18 +766,18 @@ Conversation History:
             else:
                 response = result
             
-            # Extract JSON from response (handle potential markdown tags)
-            import re
-            json_match = re.search(r'\{.*\}', str(response), re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-                logger.info(f"✅ Distilled case: {result.get('issue', '')[:50]}...")
-                return result
-            logger.warning(f"No JSON found in distillation response: {str(response)[:100]}")
-            return None
+            # Use CaseDistiller to extract list of cases from response
+            cases = CaseDistiller.clean_json_response(str(response))
+            
+            if cases:
+                logger.info(f"✅ Distilled {len(cases)} cases from history")
+                return cases
+            
+            logger.warning(f"No valid cases found in distillation response: {str(response)[:100]}")
+            return []
         except Exception as e:
             logger.error(f"Distillation failed: {e}")
-            return None
+            return []
 
     def validate_response_quality(self, response: str) -> Dict[str, Any]:
 

@@ -1262,7 +1262,7 @@
                                 this.metricTtfcEl.textContent = `${ttfc}ms`;
                                 this.hasTtfcForTurn = true;
                             }
-                            await this.processAudioChunk(audioB64);
+                            await this.processAudioChunk(audioB64, data.sample_rate || 44100, data.format || 'pcm_f32le');
                         }
                         break;
 
@@ -1745,7 +1745,7 @@
                 }
             }
 
-            async processAudioChunk(base64Data) {
+            async processAudioChunk(base64Data, sampleRate, format) {
                 if (!base64Data) return;
 
                 try {
@@ -1761,13 +1761,22 @@
                         bytes[i] = binaryString.charCodeAt(i);
                     }
 
-                    // Convert to Float32 (assuming pcm_f32le from server)
-                    // The server sends straight bytes, so we need a DataView or similar to read floats
-                    // Alternatively, if the server sends raw bytes of floats:
-                    const float32Data = new Float32Array(bytes.buffer);
+                    let float32Data;
+                    if (format === 'pcm_s16le') {
+                        // Convert Int16 to Float32
+                        const int16Data = new Int16Array(bytes.buffer);
+                        float32Data = new Float32Array(int16Data.length);
+                        for (let i = 0; i < int16Data.length; i++) {
+                            float32Data[i] = int16Data[i] / 32768.0;
+                        }
+                    } else {
+                        // Assume pcm_f32le
+                        float32Data = new Float32Array(bytes.buffer);
+                    }
 
                     // Create AudioBuffer
-                    const audioBuffer = this.audioContext.createBuffer(1, float32Data.length, PLAYBACK_SAMPLE_RATE);
+                    // Use the provided sampleRate (the AudioContext will handle resampling)
+                    const audioBuffer = this.audioContext.createBuffer(1, float32Data.length, sampleRate || 44100);
                     audioBuffer.getChannelData(0).set(float32Data);
 
                     // Schedule playback (Gapless)
@@ -1781,18 +1790,28 @@
 
                     // Schedule accurately
                     const currentTime = this.audioContext.currentTime;
-                    // Provide a small buffer (0.1s) if we fell behind, otherwise strict scheduling
-                    const startAt = Math.max(currentTime, this.nextPlayTime);
 
-                    // If we're starting fresh or had a gap, reset nextPlayTime to avoiding fast-forwarding
-                    if (startAt > this.nextPlayTime + 0.5) {
-                        // Gap detected (or start), play immediately
-                        this.nextPlayTime = startAt;
+                    // If this is the start of a stream, record start time
+                    if (!this.isPlayingAudio) {
+                        this.isPlayingAudio = true;
+                        this.playbackStartTime = Date.now();
+                        this.nextPlayTime = currentTime + 0.05; // Small initial buffer
                     }
 
-                    source.start(this.nextPlayTime);
-                    // Advance time
-                    this.nextPlayTime += audioBuffer.duration;
+                    // Schedule logic
+                    let startAt = this.nextPlayTime;
+
+                    // drift correction: if we're falling behind too much, jump to current
+                    if (startAt < currentTime) {
+                        startAt = currentTime;
+                    }
+                    // if there's a huge gap (over 200ms), also jump
+                    else if (startAt > currentTime + 0.2) {
+                        // startAt is fine, but maybe re-align if needed
+                    }
+
+                    source.start(startAt);
+                    this.nextPlayTime = startAt + audioBuffer.duration;
 
                     this.chunkCountDisplay.textContent = this.chunkCount;
 
