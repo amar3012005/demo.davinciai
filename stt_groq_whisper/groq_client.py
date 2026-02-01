@@ -1,0 +1,270 @@
+"""
+Groq Whisper API Client
+
+Async HTTP client for Groq's transcription endpoint with retry logic and latency tracking.
+"""
+
+import asyncio
+import io
+import logging
+import time
+import wave
+from typing import Optional, Dict, Any, List
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+class GroqTranscriptionResult:
+    """Parsed result from Groq transcription API"""
+    
+    def __init__(self, response_data: Dict[str, Any]):
+        self.text: str = response_data.get("text", "").strip()
+        self.language: Optional[str] = response_data.get("language")
+        self.duration: Optional[float] = response_data.get("duration")
+        
+        # Verbose JSON metadata
+        self.segments: List[Dict] = response_data.get("segments", [])
+        self.words: List[Dict] = response_data.get("words", [])
+        
+        # Quality metrics from segments
+        self.avg_logprob: Optional[float] = None
+        self.no_speech_prob: Optional[float] = None
+        self.compression_ratio: Optional[float] = None
+        
+        if self.segments:
+            # Average quality metrics across segments
+            logprobs = [s.get("avg_logprob", 0) for s in self.segments if "avg_logprob" in s]
+            no_speech = [s.get("no_speech_prob", 0) for s in self.segments if "no_speech_prob" in s]
+            compression = [s.get("compression_ratio", 0) for s in self.segments if "compression_ratio" in s]
+            
+            if logprobs:
+                self.avg_logprob = sum(logprobs) / len(logprobs)
+            if no_speech:
+                self.no_speech_prob = sum(no_speech) / len(no_speech)
+            if compression:
+                self.compression_ratio = sum(compression) / len(compression)
+                
+            # Range and temperature
+            self.start = self.segments[0].get("start", 0)
+            self.end = self.segments[-1].get("end", 0)
+            self.temperature = self.segments[0].get("temperature", 0)
+        else:
+            self.start = 0
+            self.end = 0
+            self.temperature = 0
+    
+    @property
+    def is_empty(self) -> bool:
+        """Check if transcription is empty or just noise"""
+        return not self.text or len(self.text.strip()) == 0
+    
+    @property
+    def is_low_quality(self) -> bool:
+        """Check if transcription quality is poor (likely noise/silence)"""
+        if self.no_speech_prob and self.no_speech_prob > 0.8:
+            return True
+        if self.avg_logprob and self.avg_logprob < -1.0:
+            return True
+        return False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "text": self.text,
+            "language": self.language,
+            "duration": self.duration,
+            "words": self.words,
+            "avg_logprob": self.avg_logprob,
+            "no_speech_prob": self.no_speech_prob,
+            "compression_ratio": self.compression_ratio,
+        }
+
+
+class GroqWhisperClient:
+    """
+    Async client for Groq's Whisper transcription API.
+    
+    Handles audio conversion, API calls with retry logic, and latency tracking.
+    """
+    
+    def __init__(self, config):
+        """
+        Initialize Groq Whisper client.
+        
+        Args:
+            config: GroqWhisperConfig instance
+        """
+        self.config = config
+        self._client: Optional[httpx.AsyncClient] = None
+        
+        # Metrics
+        self.total_requests = 0
+        self.successful_requests = 0
+        self.failed_requests = 0
+        self.total_latency_ms = 0.0
+        self.last_latency_ms = 0.0
+    
+    async def _ensure_client(self) -> httpx.AsyncClient:
+        """Ensure HTTP client is initialized"""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.config.api_timeout_seconds),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                verify=not self.config.skip_ssl_verify
+            )
+        return self._client
+    
+    def _convert_pcm_to_wav(self, pcm_bytes: bytes) -> bytes:
+        """
+        Convert raw PCM bytes to WAV format for Groq API.
+        
+        Args:
+            pcm_bytes: Raw PCM audio (16kHz, 16-bit, mono)
+            
+        Returns:
+            WAV file bytes
+        """
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(self.config.sample_rate)
+            wav_file.writeframes(pcm_bytes)
+        
+        buffer.seek(0)
+        return buffer.read()
+    
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        prompt: Optional[str] = None,
+        language: Optional[str] = None
+    ) -> Optional[GroqTranscriptionResult]:
+        """
+        Transcribe audio chunk using Groq API.
+        
+        Args:
+            audio_bytes: Raw PCM audio bytes (16kHz, 16-bit, mono)
+            prompt: Optional context from previous transcription
+            language: Optional language code (ISO-639-1)
+            
+        Returns:
+            GroqTranscriptionResult or None on failure
+        """
+        if not audio_bytes or len(audio_bytes) < 100:
+            logger.debug("Skipping transcription - audio chunk too small")
+            return None
+        
+        start_time = time.time()
+        self.total_requests += 1
+        
+        # Convert PCM to WAV
+        wav_bytes = self._convert_pcm_to_wav(audio_bytes)
+        
+        # Prepare multipart form data
+        files = {
+            "file": ("audio.wav", wav_bytes, "audio/wav")
+        }
+        
+        data = {
+            "model": self.config.model,
+            "response_format": self.config.response_format,
+            "temperature": str(self.config.temperature),
+        }
+        
+        # Add optional parameters
+        if language or self.config.language:
+            data["language"] = language or self.config.language
+        
+        if prompt:
+            # Limit prompt to 224 tokens (~1000 chars) per Groq docs
+            truncated_prompt = prompt[:1000] if len(prompt) > 1000 else prompt
+            data["prompt"] = truncated_prompt
+        
+        # Add timestamp granularities for word-level timing
+        if self.config.include_word_timestamps and self.config.response_format == "verbose_json":
+            data["timestamp_granularities[]"] = "word"
+        
+        # Prepare headers
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}"
+        }
+        
+        # Retry loop with exponential backoff
+        last_error = None
+        for attempt in range(self.config.max_retries):
+            try:
+                client = await self._ensure_client()
+                
+                response = await client.post(
+                    self.config.transcription_url,
+                    headers=headers,
+                    data=data,
+                    files=files
+                )
+                
+                elapsed_ms = (time.time() - start_time) * 1000
+                self.last_latency_ms = elapsed_ms
+                self.total_latency_ms += elapsed_ms
+                
+                if response.status_code == 200:
+                    self.successful_requests += 1
+                    result = GroqTranscriptionResult(response.json())
+                    
+                    if result.text:
+                        logger.info(f"✅ Groq transcription ({elapsed_ms:.0f}ms): '{result.text[:50]}...'")
+                    else:
+                        logger.debug(f"📭 Groq returned empty transcription ({elapsed_ms:.0f}ms)")
+                    
+                    return result
+                    
+                elif response.status_code == 429:
+                    # Rate limited - wait and retry
+                    wait_time = 2 ** attempt
+                    logger.warning(f"⏳ Groq rate limited, waiting {wait_time}s before retry")
+                    await asyncio.sleep(wait_time)
+                    last_error = f"Rate limited: {response.text}"
+                    
+                else:
+                    last_error = f"API error {response.status_code}: {response.text}"
+                    logger.error(f"❌ Groq API error: {last_error}")
+                    break  # Don't retry on non-retryable errors
+                    
+            except httpx.TimeoutException:
+                last_error = "Request timeout"
+                logger.warning(f"⏰ Groq request timeout (attempt {attempt + 1}/{self.config.max_retries})")
+                await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"❌ Groq request error: {e}")
+                break
+        
+        # All retries failed
+        self.failed_requests += 1
+        logger.error(f"❌ Groq transcription failed after {self.config.max_retries} attempts: {last_error}")
+        return None
+    
+    async def close(self):
+        """Close HTTP client"""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get client statistics"""
+        avg_latency = (
+            self.total_latency_ms / self.successful_requests
+            if self.successful_requests > 0
+            else 0
+        )
+        
+        return {
+            "total_requests": self.total_requests,
+            "successful_requests": self.successful_requests,
+            "failed_requests": self.failed_requests,
+            "avg_latency_ms": avg_latency,
+            "last_latency_ms": self.last_latency_ms,
+            "model": self.config.model,
+        }

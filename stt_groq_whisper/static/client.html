@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Groq Whisper STT - Real-time Transcription</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #05070a;
+            --card-bg: #0f1219;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #f59e0b;
+            /* Groq Orange/Amber */
+            --accent-hover: #d97706;
+            --success: #10b981;
+            --error: #ef4444;
+            --border: #1e293b;
+            --code-bg: #020617;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            padding: 32px;
+            border: 1px solid var(--border);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.75rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--text-secondary);
+        }
+
+        .status-dot.connected {
+            background-color: var(--success);
+            box-shadow: 0 0 12px var(--success);
+        }
+
+        .status-dot.disconnected {
+            background-color: var(--error);
+            box-shadow: 0 0 12px var(--error);
+        }
+
+        .status-dot.connecting {
+            background-color: #f59e0b;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.5;
+                transform: scale(1.2);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        button {
+            padding: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn-start {
+            background: var(--success);
+            color: white;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
+        }
+
+        .btn-stop {
+            background: var(--error);
+            color: white;
+            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.25);
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: #dc2626;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.35);
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 24px;
+        }
+
+        .transcripts-panel {
+            background: var(--code-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            height: 600px;
+        }
+
+        .panel-header {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #transcripts {
+            padding: 20px;
+            overflow-y: auto;
+            flex-grow: 1;
+            scroll-behavior: smooth;
+        }
+
+        .transcript-item {
+            margin-bottom: 16px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid transparent;
+            animation: slideIn 0.3s ease-out;
+            position: relative;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .transcript-item.partial {
+            border-left: 4px solid var(--accent);
+            background: rgba(245, 158, 11, 0.03);
+        }
+
+        .transcript-item.final {
+            border-left: 4px solid var(--success);
+            background: rgba(16, 185, 129, 0.03);
+        }
+
+        .transcript-text {
+            font-size: 1.125rem;
+            line-height: 1.6;
+            margin-bottom: 12px;
+            word-break: break-word;
+        }
+
+        .transcript-footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .metric-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+        }
+
+        .metric-label {
+            color: #64748b;
+        }
+
+        .metric-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .metric-pill.success {
+            color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .metric-pill.warning {
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.1);
+        }
+
+        .metric-pill.danger {
+            color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .vad-visualizer {
+            height: 40px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin-bottom: 24px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            gap: 2px;
+        }
+
+        .vad-bar {
+            width: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: height 0.1s ease;
+        }
+
+        .metadata-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .stats-card {
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 20px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-icon {
+            font-size: 4rem;
+            opacity: 0.2;
+            margin-bottom: 20px;
+        }
+
+        .debug-panel {
+            margin-top: 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: #64748b;
+            max-height: 150px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .json-viewer {
+            color: #94a3b8;
+        }
+
+        .json-key {
+            color: #f59e0b;
+        }
+
+        .json-string {
+            color: #10b981;
+        }
+
+        .json-number {
+            color: #3b82f6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ Groq Whisper V3 Turbo</h1>
+            <div class="status-badge">
+                <div class="status-dot disconnected" id="statusDot"></div>
+                <span id="statusText">System Ready</span>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button id="startBtn" class="btn-start">
+                <span>🎤</span> Start Recording
+            </button>
+            <button id="stopBtn" class="btn-stop" disabled>
+                <span>⏹</span> Stop
+            </button>
+        </div>
+
+        <div class="vad-visualizer" id="vadVisualizer">
+            <!-- Bars will be added here via JS -->
+        </div>
+
+        <div class="main-layout">
+            <div class="transcripts-panel">
+                <div class="panel-header">
+                    <span>Live Transcription</span>
+                    <span id="sessionDisplay">No active session</span>
+                </div>
+                <div id="transcripts">
+                    <div class="empty-state">
+                        <div class="empty-icon">🎙️</div>
+                        <p>Waiting for audio input...</p>
+                        <p style="font-size: 0.8rem">Micro-chunks (300ms) will appear here in real-time</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="metadata-panel">
+                <div class="stats-card">
+                    <div class="stat-label">System Performance</div>
+                    <div class="stats-grid" style="margin-top: 12px;">
+                        <div class="stat-item">
+                            <span class="stat-label">Avg Latency</span>
+                            <span class="stat-value" id="avgLatency">0ms</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Chunks</span>
+                            <span class="stat-value" id="chunkCount">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-card">
+                    <div class="stat-label">Latest Quality Metrics</div>
+                    <div id="currentMetrics"
+                        style="margin-top: 12px; display: flex; flex-direction: column; gap: 10px;">
+                        <div class="metric-pill">
+                            <span class="metric-label">LogProb:</span>
+                            <span class="metric-value" id="metricLogProb">N/A</span>
+                        </div>
+                        <div class="metric-pill">
+                            <span class="metric-label">No Speech:</span>
+                            <span class="metric-value" id="metricNoSpeech">N/A</span>
+                        </div>
+                        <div class="metric-pill">
+                            <span class="metric-label">Comp Ratio:</span>
+                            <span class="metric-value" id="metricCompRatio">N/A</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="debug-panel" id="debugLogs">
+                    <div>[READY] Awaiting user action...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const WS_URL = `${protocol}//${window.location.host}/api/v1/transcribe/stream`;
+
+        let socket = null;
+        let mediaStream = null;
+        let audioContext = null;
+        let processor = null;
+        let isRecording = false;
+
+        // Metrics tracking
+        let totalLatency = 0;
+        let successfulResponses = 0;
+        let chunkCounter = 0;
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const transcriptsDiv = document.getElementById('transcripts');
+        const vadVisualizer = document.getElementById('vadVisualizer');
+        const debugLogs = document.getElementById('debugLogs');
+
+        // Initialize VAD bars
+        for (let i = 0; i < 40; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'vad-bar';
+            bar.style.height = '4px';
+            vadVisualizer.appendChild(bar);
+        }
+
+        function log(msg, type = 'info') {
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            if (type === 'error') entry.style.color = 'var(--error)';
+            debugLogs.prepend(entry);
+        }
+
+        function updateVAD(level) {
+            const bars = vadVisualizer.children;
+            const normalizedLevel = Math.min(100, (level / 128) * 100);
+
+            // Shift bars left
+            for (let i = 0; i < bars.length - 1; i++) {
+                bars[i].style.height = bars[i + 1].style.height;
+            }
+            // Add new bar at end
+            bars[bars.length - 1].style.height = `${Math.max(4, normalizedLevel)}px`;
+            bars[bars.length - 1].style.background = level > 30 ? 'var(--accent)' : '#1e293b';
+        }
+
+        function connectWebSocket() {
+            return new Promise((resolve, reject) => {
+                log(`Connecting to ${WS_URL}...`);
+                socket = new WebSocket(WS_URL);
+
+                socket.onopen = () => {
+                    statusDot.className = 'status-dot connected';
+                    statusText.textContent = 'Connected & Active';
+                    log('WebSocket connected');
+                    resolve();
+                };
+
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleServerMessage(data);
+                    } catch (e) {
+                        console.error('Parse error:', e);
+                    }
+                };
+
+                socket.onerror = (err) => {
+                    log('WebSocket error', 'error');
+                    statusDot.className = 'status-dot disconnected';
+                    statusText.textContent = 'Connection Failed';
+                    reject(err);
+                };
+
+                socket.onclose = () => {
+                    log('WebSocket closed');
+                    statusDot.className = 'status-dot disconnected';
+                    statusText.textContent = 'Session Ended';
+                    stopRecording();
+                };
+            });
+        }
+
+        function handleServerMessage(msg) {
+            if (msg.type === 'connected') {
+                document.getElementById('sessionDisplay').textContent = `ID: ${msg.session_id.split('_').pop()}`;
+                log(`Session started: ${msg.session_id}`);
+            } else if (msg.type === 'data') {
+                const packet = msg.data;
+                const { transcript, is_final, latency_ms, avg_logprob, no_speech_prob, compression_ratio } = packet;
+
+                if (transcript.trim()) {
+                    addTranscriptItem(transcript, is_final, packet);
+                    updatePerformanceMetrics(packet);
+                }
+            } else if (msg.type === 'events') {
+                log(`Event: ${msg.data.signal_type} (${msg.data.event_type})`);
+            }
+        }
+
+        function updatePerformanceMetrics(data) {
+            if (data.latency_ms) {
+                totalLatency += data.latency_ms;
+                successfulResponses++;
+                document.getElementById('avgLatency').textContent = `${Math.round(totalLatency / successfulResponses)}ms`;
+            }
+
+            chunkCounter++;
+            document.getElementById('chunkCount').textContent = chunkCounter;
+
+            // Updated metrics - highlighting per user request
+            if (data.avg_logprob !== undefined) {
+                const el = document.getElementById('metricLogProb');
+                el.textContent = data.avg_logprob.toFixed(3);
+                el.parentElement.className = `metric-pill ${data.avg_logprob > -0.5 ? 'success' : 'warning'}`;
+            }
+
+            if (data.no_speech_prob !== undefined) {
+                const el = document.getElementById('metricNoSpeech');
+                el.textContent = (data.no_speech_prob * 100).toFixed(1) + '%';
+                el.parentElement.className = `metric-pill ${data.no_speech_prob < 0.1 ? 'success' : 'warning'}`;
+            }
+
+            if (data.compression_ratio !== undefined) {
+                document.getElementById('metricCompRatio').textContent = data.compression_ratio.toFixed(2);
+            }
+        }
+
+        function addTranscriptItem(text, isFinal, metrics) {
+            // Clear empty state
+            const empty = transcriptsDiv.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            // Check if we should update last item or create new
+            let item;
+            const lastItem = transcriptsDiv.lastElementChild;
+
+            if (!isFinal && lastItem && lastItem.classList.contains('partial')) {
+                item = lastItem;
+                item.querySelector('.transcript-text').textContent = text;
+            } else {
+                item = document.createElement('div');
+                item.className = `transcript-item ${isFinal ? 'final' : 'partial'}`;
+
+                const textDiv = document.createElement('div');
+                textDiv.className = 'transcript-text';
+                textDiv.textContent = text;
+                item.appendChild(textDiv);
+
+                const footer = document.createElement('div');
+                footer.className = 'transcript-footer';
+
+                const timeStr = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                footer.innerHTML = `<span class="metric-pill"><span class="metric-label">${timeStr}</span></span>`;
+
+                if (metrics.latency_ms) {
+                    footer.innerHTML += `<span class="metric-pill"><span class="metric-label">Latency:</span> <span class="metric-value">${Math.round(metrics.latency_ms)}ms</span></span>`;
+                }
+
+                if (metrics.start_time !== undefined && metrics.end_time !== undefined) {
+                    footer.innerHTML += `<span class="metric-pill"><span class="metric-label">Range:</span> <span class="metric-value">${metrics.start_time.toFixed(2)}s - ${metrics.end_time.toFixed(2)}s</span></span>`;
+                }
+
+                if (metrics.temperature !== undefined) {
+                    footer.innerHTML += `<span class="metric-pill"><span class="metric-label">Temp:</span> <span class="metric-value">${metrics.temperature}</span></span>`;
+                }
+
+                item.appendChild(footer);
+                transcriptsDiv.appendChild(item);
+
+                // If it was final and we had a partial, we don't necessarily remove it 
+                // because Groq mode accumulates into current_utterance on server side
+                // but for UI cleanup we can remove the previous partial
+                if (isFinal && lastItem && lastItem.classList.contains('partial')) {
+                    lastItem.remove();
+                }
+            }
+
+            transcriptsDiv.scrollTop = transcriptsDiv.scrollHeight;
+        }
+
+        async function startRecording() {
+            try {
+                statusDot.className = 'status-dot connecting';
+                statusText.textContent = 'Establishing Link...';
+
+                await connectWebSocket();
+
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                // Use smaller buffer for lower latency (2048 samples = 128ms at 16k)
+                processor = audioContext.createScriptProcessor(2048, 1, 1);
+
+                processor.onaudioprocess = (e) => {
+                    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+                    const inputData = e.inputBuffer.getChannelData(0);
+
+                    // Simple peak detection for VAD visualizer
+                    let peak = 0;
+                    const pcmData = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        const abs = Math.abs(s);
+                        if (abs > peak) peak = abs;
+                        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+
+                    updateVAD(peak * 128);
+                    socket.send(pcmData.buffer);
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                isRecording = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                log('Microphone active (16kHz PCM)');
+
+            } catch (err) {
+                log(`Startup error: ${err.message}`, 'error');
+                statusDot.className = 'status-dot disconnected';
+                statusText.textContent = 'Resource Error';
+            }
+        }
+
+        function stopRecording() {
+            if (!isRecording) return;
+            isRecording = false;
+
+            if (processor) { processor.disconnect(); processor = null; }
+            if (audioContext) { audioContext.close(); audioContext = null; }
+            if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+            if (socket) { socket.close(); socket = null; }
+
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusDot.className = 'status-dot disconnected';
+            statusText.textContent = 'Session Stopped';
+            log('Recording stopped');
+        }
+
+        startBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+        window.addEventListener('beforeunload', stopRecording);
+    </script>
+</body>
+
+</html>

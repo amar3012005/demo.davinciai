@@ -1,0 +1,1971 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TARA - Daytona V2 Voice Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════════════
+           CSS Custom Properties - Daytona Brand Palette
+           ═══════════════════════════════════════════════════════════════════════ */
+        :root {
+            --color-black: #171717;
+            --color-orange: #F25623;
+            --color-orange-dark: #d94a1d;
+            --color-orange-light: #ff6b3d;
+            --color-dark-gray: #4D4D4D;
+            --color-light-gray: #DEDEDE;
+            --color-white: #FFFFFF;
+            --color-background: #F5F5F5;
+            --color-success: #22c55e;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --color-info: #3b82f6;
+
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --border-radius: 12px;
+            --border-radius-sm: 8px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.12);
+            --transition: all 0.2s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background: var(--color-background);
+            color: var(--color-black);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════
+           Layout
+           ═══════════════════════════════════════════════════════════════════════ */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--color-black);
+            color: var(--color-white);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-brand .logo {
+            width: 36px;
+            height: 36px;
+            background: var(--color-orange);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-brand .logo .material-icons-round {
+            font-size: 22px;
+            color: var(--color-white);
+        }
+
+        .header-brand h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--color-dark-gray);
+        }
+
+        .status-indicator.connected {
+            background: var(--color-success);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+        }
+
+        .status-indicator.connecting {
+            background: var(--color-warning);
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator.error {
+            background: var(--color-error);
+        }
+
+        .status-text {
+            font-size: 0.875rem;
+            color: var(--color-light-gray);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 0;
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Chat Panel */
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            background: var(--color-white);
+            border-right: 1px solid var(--color-light-gray);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 14px 18px;
+            border-radius: 16px;
+            font-size: 0.9375rem;
+            line-height: 1.5;
+            animation: slideIn 0.2s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: var(--color-black);
+            color: var(--color-white);
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.agent {
+            align-self: flex-start;
+            background: var(--color-background);
+            color: var(--color-black);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message .timestamp {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            margin-top: 6px;
+        }
+
+        .message.agent .timestamp {
+            color: var(--color-dark-gray);
+        }
+
+        /* Chat Input Area */
+        .chat-input-area {
+            padding: 16px 24px 24px;
+            background: var(--color-white);
+            border-top: 1px solid var(--color-light-gray);
+        }
+
+        .input-container {
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            background: var(--color-background);
+            border-radius: var(--border-radius);
+            padding: 8px 12px;
+        }
+
+        .text-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            font-family: var(--font-family);
+            font-size: 0.9375rem;
+            padding: 8px 4px;
+            resize: none;
+            outline: none;
+            min-height: 24px;
+            max-height: 120px;
+        }
+
+        .text-input::placeholder {
+            color: var(--color-dark-gray);
+        }
+
+        .text-input:disabled {
+            background: transparent;
+        }
+
+        /* Microphone Button */
+        .mic-button {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: var(--color-light-gray);
+            color: var(--color-dark-gray);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+            flex-shrink: 0;
+        }
+
+        .mic-button:hover:not(:disabled) {
+            background: var(--color-black);
+            color: var(--color-white);
+        }
+
+        .mic-button.active {
+            background: var(--color-orange);
+            color: var(--color-white);
+            animation: micPulse 1.5s infinite;
+        }
+
+        .mic-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        @keyframes micPulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(242, 86, 35, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 0 12px rgba(242, 86, 35, 0);
+            }
+        }
+
+        .send-button {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: var(--color-orange);
+            color: var(--color-white);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+            flex-shrink: 0;
+        }
+
+        .send-button:hover:not(:disabled) {
+            background: var(--color-orange-dark);
+            transform: scale(1.05);
+        }
+
+        .send-button:disabled {
+            background: var(--color-light-gray);
+            color: var(--color-dark-gray);
+            cursor: not-allowed;
+        }
+
+        /* Controls Panel */
+        .controls-panel {
+            background: var(--color-black);
+            color: var(--color-white);
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            margin-bottom: 24px;
+        }
+
+        .panel-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-dark-gray);
+            margin-bottom: 12px;
+        }
+
+        /* Session Control */
+        .session-input {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--color-dark-gray);
+            border-radius: var(--border-radius-sm);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            color: var(--color-white);
+            margin-bottom: 12px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .session-input:focus {
+            border-color: var(--color-orange);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Session Control */
+        .session-button {
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: var(--border-radius-sm);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .session-button.start {
+            background: var(--color-orange);
+            color: var(--color-white);
+        }
+
+        .session-button.start:hover:not(:disabled) {
+            background: var(--color-orange-dark);
+        }
+
+        .session-button.end {
+            background: transparent;
+            border: 1px solid var(--color-dark-gray);
+            color: var(--color-light-gray);
+        }
+
+        .session-button.end:hover:not(:disabled) {
+            border-color: var(--color-error);
+            color: var(--color-error);
+        }
+
+        .session-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Toggle */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: var(--border-radius-sm);
+            margin-bottom: 8px;
+        }
+
+        .toggle-label {
+            font-size: 0.875rem;
+            color: var(--color-light-gray);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toggle-label .material-icons-round {
+            font-size: 20px;
+            color: var(--color-dark-gray);
+        }
+
+        .toggle-switch {
+            width: 44px;
+            height: 24px;
+            background: var(--color-dark-gray);
+            border-radius: 12px;
+            cursor: pointer;
+            position: relative;
+            transition: var(--transition);
+        }
+
+        .toggle-switch.active {
+            background: var(--color-orange);
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: var(--color-white);
+            border-radius: 50%;
+            transition: var(--transition);
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(20px);
+        }
+
+        /* Info Grid */
+        .info-grid {
+            display: grid;
+            gap: 8px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: var(--border-radius-sm);
+        }
+
+        .info-label {
+            font-size: 0.8125rem;
+            color: var(--color-dark-gray);
+        }
+
+        .info-value {
+            font-size: 0.8125rem;
+            font-weight: 500;
+            color: var(--color-light-gray);
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+
+        .info-value.state-listening {
+            color: var(--color-info);
+        }
+
+        .info-value.state-speaking {
+            color: var(--color-orange);
+        }
+
+        .info-value.state-thinking {
+            color: #a855f7;
+        }
+
+        /* Language Toggle */
+        .language-toggle {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .lang-label {
+            font-size: 0.875rem;
+            color: var(--color-dark-gray);
+            transition: var(--transition);
+        }
+
+        .lang-label.active {
+            color: var(--color-white);
+            font-weight: 500;
+        }
+
+        /* Logs Section */
+        .logs-container {
+            max-height: 250px;
+            overflow-y: auto;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: var(--border-radius-sm);
+            padding: 12px;
+        }
+
+        .log-item {
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-size: 0.75rem;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: var(--color-light-gray);
+        }
+
+        .log-item:last-child {
+            border-bottom: none;
+        }
+
+        .log-item.info {
+            color: #60a5fa;
+        }
+
+        .log-item.success {
+            color: #4ade80;
+        }
+
+        .log-item.warning {
+            color: #fbbf24;
+        }
+
+        .log-item.error {
+            color: #f87171;
+        }
+
+        .log-time {
+            opacity: 0.6;
+            margin-right: 8px;
+        }
+
+        /* VAD Visualizer */
+        .vad-visualizer {
+            height: 40px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: var(--border-radius-sm);
+            margin: 16px 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            gap: 2px;
+        }
+
+        .vad-bar {
+            width: 4px;
+            background: var(--color-orange);
+            border-radius: 2px;
+            transition: height 0.1s ease;
+        }
+
+        /* Metric Pills */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .metric-pill {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            font-size: 0.7rem;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--color-light-gray);
+        }
+
+        .metric-label {
+            opacity: 0.6;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            color: var(--color-white);
+            font-weight: 500;
+        }
+
+        .metric-pill.success .metric-value {
+            color: #4ade80;
+        }
+
+        .metric-pill.warning .metric-value {
+            color: #fbbf24;
+        }
+
+        .metric-pill.error .metric-value {
+            color: #f87171;
+        }
+
+        /* Empty State */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 48px;
+            color: var(--color-dark-gray);
+        }
+
+        .empty-state .material-icons-round {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .empty-state h3 {
+            font-size: 1.125rem;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--color-black);
+        }
+
+        .empty-state p {
+            font-size: 0.875rem;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--color-light-gray);
+            border-radius: 3px;
+        }
+
+        .controls-panel::-webkit-scrollbar-thumb {
+            background: var(--color-dark-gray);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <div class="logo">
+                    <span class="material-icons-round">smart_toy</span>
+                </div>
+                <h1>TARA V2</h1>
+            </div>
+            <div class="header-status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span class="status-text" id="statusText">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Chat Panel -->
+            <div class="chat-panel">
+                <div class="vad-visualizer" id="vadVisualizer">
+                    <!-- Bars added via JS -->
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="empty-state" id="emptyState">
+                        <span class="material-icons-round">chat_bubble_outline</span>
+                        <h3>Start a conversation</h3>
+                        <p>Click "Start Session" then use the microphone or type a message</p>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="chat-input-area">
+                    <div class="input-container">
+                        <textarea class="text-input" id="textInput" placeholder="Type your message..." rows="1"
+                            disabled></textarea>
+                        <button class="mic-button" id="micButton" disabled title="Toggle microphone">
+                            <span class="material-icons-round">mic</span>
+                        </button>
+                        <button class="send-button" id="sendButton" disabled title="Send message">
+                            <span class="material-icons-round">send</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls Panel -->
+            <aside class="controls-panel">
+                <!-- Session Control -->
+                <div class="panel-section">
+                    <h4 class="section-title">Identity</h4>
+                    <input type="tel" class="session-input" id="phoneNumber" placeholder="Phone Number (e.g. +1...)" />
+
+                    <h4 class="section-title" style="margin-top: 16px;">Session</h4>
+                    <button class="session-button start" id="startSession">
+                        <span class="material-icons-round">play_arrow</span>
+                        Start Session
+                    </button>
+                    <button class="session-button end hidden" id="endSession">
+                        <span class="material-icons-round">stop</span>
+                        End Session
+                    </button>
+                </div>
+
+                <!-- Mode Toggle -->
+                <div class="panel-section">
+                    <h4 class="section-title">Mode</h4>
+                    <div class="toggle-row">
+                        <span class="toggle-label">
+                            <span class="material-icons-round">bug_report</span>
+                            Mock Mode (Text Only)
+                        </span>
+                        <div class="toggle-switch" id="mockModeToggle"></div>
+                    </div>
+                </div>
+
+                <!-- Session Info -->
+                <div class="panel-section">
+                    <h4 class="section-title">Status</h4>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">State</span>
+                            <span class="info-value" id="currentState">Idle</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Session ID</span>
+                            <span class="info-value" id="sessionId">—</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Audio Chunks</span>
+                            <span class="info-value" id="chunkCount">0</span>
+                        </div>
+                    </div>
+
+                    <div class="metrics-grid">
+                        <div class="metric-pill" id="metricLatencyContainer">
+                            <span class="metric-label">Latency</span>
+                            <span class="metric-value" id="avgLatency">0ms</span>
+                        </div>
+                        <div class="metric-pill" id="metricLogProbContainer">
+                            <span class="metric-label">LogProb</span>
+                            <span class="metric-value" id="metricLogProb">N/A</span>
+                        </div>
+                        <div class="metric-pill" id="metricNoSpeechContainer">
+                            <span class="metric-label">NoSpeech</span>
+                            <span class="metric-value" id="metricNoSpeech">N/A</span>
+                        </div>
+                        <div class="metric-pill" id="metricRatioContainer">
+                            <span class="metric-label">Ratio</span>
+                            <span class="metric-value" id="metricCompRatio">N/A</span>
+                        </div>
+                        <div class="metric-pill" id="metricTtftContainer">
+                            <span class="metric-label">TTFT</span>
+                            <span class="metric-value" id="metricTtft">0ms</span>
+                        </div>
+                        <div class="metric-pill" id="metricTtfcContainer">
+                            <span class="metric-label">TTFC</span>
+                            <span class="metric-value" id="metricTtfc">0ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Language -->
+                <div class="panel-section">
+                    <h4 class="section-title">Response Language</h4>
+                    <div class="language-toggle">
+                        <span class="lang-label active" id="langEn">EN</span>
+                        <div class="toggle-switch" id="languageToggle"></div>
+                        <span class="lang-label" id="langDe">DE</span>
+                    </div>
+                </div>
+
+                <!-- System Logs -->
+                <div class="panel-section">
+                    <h4 class="section-title">System Logs</h4>
+                    <div class="logs-container" id="logsContainer"></div>
+                </div>
+                <!-- Pod Logs -->
+                <div class="panel-section">
+                    <h4 class="section-title">Pod Logs (Debug)</h4>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <button class="session-button start" id="viewOrchLogs"
+                            style="flex: 1; padding: 10px; font-size: 0.75rem;">
+                            <span class="material-icons-round" style="font-size: 16px;">terminal</span>
+                            Orchestrator
+                        </button>
+                        <button class="session-button start" id="viewRagLogs"
+                            style="flex: 1; padding: 10px; font-size: 0.75rem;">
+                            <span class="material-icons-round" style="font-size: 16px;">storage</span>
+                            RAG
+                        </button>
+                    </div>
+                    <div class="logs-container" id="podLogsContainer" style="display: none; max-height: 300px;"></div>
+                    <button class="session-button end" id="closePodLogs"
+                        style="display: none; margin-top: 8px; padding: 8px; font-size: 0.75rem;">
+                        Close Logs
+                    </button>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- EmailJS SDK for appointment confirmation emails -->
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script>
+        // ═══════════════════════════════════════════════════════════════════════
+        // EmailJS Configuration for Appointment Confirmations
+        // ═══════════════════════════════════════════════════════════════════════
+        // 
+        // To enable email confirmations:
+        // 1. Go to https://www.emailjs.com and create a free account
+        // 2. Connect your email service (Gmail, Outlook, etc.)
+        // 3. Create an email template with these variables:
+        //    - {{to_email}} - Recipient's email
+        //    - {{customer_name}} - Customer's name  
+        //    - {{topic}} - Appointment topic
+        //    - {{timestamp}} - Booking timestamp
+        //    - {{appointment_id}} - Unique appointment ID
+        // 4. Replace the values below with your credentials
+        //
+        const EMAILJS_CONFIG = {
+            publicKey: 'YOUR_PUBLIC_KEY',        // Replace with your EmailJS public key
+            serviceId: 'YOUR_SERVICE_ID',        // Replace with your EmailJS service ID
+            templateId: 'YOUR_TEMPLATE_ID',      // Replace with your EmailJS template ID
+            enabled: false                        // Set to true after configuring
+        };
+
+        // Initialize EmailJS if enabled
+        if (EMAILJS_CONFIG.enabled && EMAILJS_CONFIG.publicKey !== 'YOUR_PUBLIC_KEY') {
+            emailjs.init(EMAILJS_CONFIG.publicKey);
+            console.log('📧 EmailJS initialized for appointment confirmations');
+        }
+    </script>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════════
+        // TARA Client - Daytona Voice Assistant
+        // Unified WebSocket connection with mock mode support
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const MIC_SAMPLE_RATE = 16000;      // Standard for STT (Whisper)
+        const PLAYBACK_SAMPLE_RATE = 44100; // Matches Cartesia TTS output
+        const WS_URL = window.location.protocol === 'https:'
+            ? `wss://${window.location.host}/ws`
+            : `ws://${window.location.host}/ws`;
+
+
+        class TARAClient {
+            constructor() {
+                this.ws = null;
+                this.sessionId = null;
+                this.state = 'idle';
+                this.audioContext = null;
+                this.audioQueue = [];
+                this.isProcessingQueue = false;
+                this.isPlayingAudio = false;
+                this.currentSource = null;
+                this.playbackStartTime = null;
+                this.audioStreamComplete = false;  // Track when server finished sending audio
+                this.playbackFallbackTimer = null;  // Fallback timer for audio_complete timeout
+                this.chunkCount = 0;
+
+                this.isMicActive = false;
+
+                // Metrics tracking
+                this.totalLatency = 0;
+                this.successfulResponses = 0;
+                this.chunkCounter = 0;
+
+                // Mode tracking
+                this.mockMode = false;  // Text-only mode
+                this.sessionActive = false;
+                this.fillerLanguage = 'en';  // 'en' or 'de'
+
+                // Agent response buffer for streaming
+                this.agentResponseBuffer = '';
+
+                // Conversation history for context-aware RAG queries
+                this.conversationHistory = [];
+
+                this.nextPlayTime = 0; // Track next playback time for gapless stitching
+
+                // Turn timing metrics
+                this.turnStartTime = null;
+                this.hasTtftForTurn = false;
+                this.hasTtfcForTurn = false;
+
+                this.init();
+            }
+
+            init() {
+                // DOM Elements
+                this.statusIndicator = document.getElementById('statusIndicator');
+                this.statusText = document.getElementById('statusText');
+                this.chatMessages = document.getElementById('chatMessages');
+                this.emptyState = document.getElementById('emptyState');
+                this.textInput = document.getElementById('textInput');
+                this.micButton = document.getElementById('micButton');
+                this.sendButton = document.getElementById('sendButton');
+                this.startSessionBtn = document.getElementById('startSession');
+                this.endSessionBtn = document.getElementById('endSession');
+                this.currentStateEl = document.getElementById('currentState');
+                this.sessionIdEl = document.getElementById('sessionId');
+                this.chunkCountDisplay = document.getElementById('chunkCount'); // Renamed from chunkCountEl
+                this.logsContainer = document.getElementById('logsContainer');
+                this.languageToggle = document.getElementById('languageToggle');
+                this.mockModeToggle = document.getElementById('mockModeToggle');
+                this.langEn = document.getElementById('langEn');
+                this.langDe = document.getElementById('langDe');
+                this.phoneNumberInput = document.getElementById('phoneNumber');
+
+                // New UI Elements
+                this.vadVisualizer = document.getElementById('vadVisualizer');
+                this.avgLatencyEl = document.getElementById('avgLatency');
+                this.metricLogProbEl = document.getElementById('metricLogProb');
+                this.metricNoSpeechEl = document.getElementById('metricNoSpeech');
+                this.metricCompRatioEl = document.getElementById('metricCompRatio');
+                this.metricTtftEl = document.getElementById('metricTtft');
+                this.metricTtfcEl = document.getElementById('metricTtfc');
+
+                // Initialize VAD bars (40 bars)
+                if (this.vadVisualizer) {
+                    this.vadVisualizer.innerHTML = '';
+                    for (let i = 0; i < 40; i++) {
+                        const bar = document.createElement('div');
+                        bar.className = 'vad-bar';
+                        bar.style.height = '4px';
+                        this.vadVisualizer.appendChild(bar);
+                    }
+                }
+
+                // Load saved phone number
+                const savedPhone = localStorage.getItem('TARA_phone_number');
+                if (savedPhone) {
+                    this.phoneNumberInput.value = savedPhone;
+                }
+
+                // Save phone number on change
+                this.phoneNumberInput.addEventListener('change', () => {
+                    localStorage.setItem('TARA_phone_number', this.phoneNumberInput.value);
+                });
+
+                // Event listeners
+                this.startSessionBtn.onclick = () => this.connect();
+                this.endSessionBtn.onclick = () => this.endSession();
+                this.micButton.onclick = () => this.toggleMicrophone();
+                this.sendButton.onclick = () => this.sendTextInput();
+
+                this.textInput.onkeydown = (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendTextInput();
+                    }
+                };
+
+                this.textInput.oninput = () => {
+                    this.textInput.style.height = 'auto';
+                    this.textInput.style.height = Math.min(this.textInput.scrollHeight, 120) + 'px';
+                };
+
+                this.languageToggle.onclick = () => this.toggleLanguage();
+                this.mockModeToggle.onclick = () => this.toggleMockMode();
+
+                this.addLog('Ready to connect', 'info');
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Connection
+            // ───────────────────────────────────────────────────────────────────
+
+            connect() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.addLog('Already connected', 'warning');
+                    return;
+                }
+
+                this.updateStatus('connecting', 'Connecting...');
+                this.addLog('Connecting to TARA...', 'info');
+
+                // Add phone number to URL if present
+                const phone = this.phoneNumberInput.value.trim();
+                let url = WS_URL;
+                if (phone) {
+                    url += `?user_id=${encodeURIComponent(phone)}`;
+                    this.addLog(`Identity: ${phone}`, 'info');
+                }
+
+                this.ws = new WebSocket(url);
+
+                this.ws.onopen = async () => {
+                    this.addLog('WebSocket connected', 'success');
+                    this.updateStatus('connected', 'Connected');
+
+                    // Initialize AudioContext early (on user gesture via Start button)
+                    await this.initAudio();
+
+                    this.startSessionBtn.classList.add('hidden');
+                    this.endSessionBtn.classList.remove('hidden');
+                    this.textInput.disabled = false;
+                    this.sendButton.disabled = false;
+                    this.phoneNumberInput.disabled = true;
+
+                    // Enable mic only if not in mock mode
+                    if (!this.mockMode) {
+                        this.micButton.disabled = false;
+                    }
+
+                    // Send session start with mode and language information
+                    this.send({
+                        type: 'start_session',
+                        mode: 'conversation',
+                        stt_mode: this.mockMode ? 'text' : 'audio',
+                        tts_mode: this.mockMode ? 'text' : 'audio',
+                        language: this.fillerLanguage
+                    });
+
+                    this.sessionActive = true;
+                };
+
+                this.ws.onmessage = async (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        await this.handleMessage(data);
+                    } catch (e) {
+                        console.error('Message handling error:', e);
+                    }
+                };
+
+                this.ws.onerror = () => {
+                    this.addLog('Connection error', 'error');
+                    this.updateStatus('error', 'Error');
+                };
+
+                this.ws.onclose = () => {
+                    this.addLog('Disconnected', 'warning');
+                    this.updateStatus('disconnected', 'Disconnected');
+                    this.resetUI();
+                };
+            }
+
+            send(data) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(data));
+                }
+            }
+
+            endSession() {
+                if (this.isMicActive) {
+                    this.stopMicrophone();
+                }
+                this.send({ type: 'end_session' });
+                if (this.ws) {
+                    this.ws.close();
+                }
+                this.resetUI();
+            }
+
+            resetUI() {
+                this.ws = null;
+                this.sessionId = null;
+                this.sessionActive = false;
+                this.nextPlayTime = 0; // Reset playback time
+
+                this.startSessionBtn.classList.remove('hidden');
+                this.endSessionBtn.classList.add('hidden');
+                this.micButton.disabled = true;
+                this.sendButton.disabled = true;
+                this.textInput.disabled = true;
+                this.phoneNumberInput.disabled = false;
+
+                this.sessionIdEl.textContent = '—';
+                this.currentStateEl.textContent = 'Idle';
+                this.currentStateEl.className = 'info-value';
+
+                // Reset metrics
+                this.chunkCounter = 0;
+                this.totalLatency = 0;
+                this.successfulResponses = 0;
+                if (this.avgLatencyEl) this.avgLatencyEl.textContent = '0ms';
+                if (this.chunkCountDisplay) this.chunkCountDisplay.textContent = '0';
+                if (this.metricLogProbEl) this.metricLogProbEl.textContent = 'N/A';
+                if (this.metricNoSpeechEl) this.metricNoSpeechEl.textContent = 'N/A';
+                if (this.metricCompRatioEl) this.metricCompRatioEl.textContent = 'N/A';
+                if (this.metricTtftEl) this.metricTtftEl.textContent = '0ms';
+                if (this.metricTtfcEl) this.metricTtfcEl.textContent = '0ms';
+
+                // Reset VAD bars
+                if (this.vadVisualizer) {
+                    const bars = this.vadVisualizer.children;
+                    for (let i = 0; i < bars.length; i++) {
+                        bars[i].style.height = '4px';
+                        bars[i].style.background = 'var(--color-dark-gray)';
+                    }
+                }
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Mode Toggles
+            // ───────────────────────────────────────────────────────────────────
+
+            toggleMockMode() {
+                if (this.sessionActive) {
+                    this.addLog('End session to change mode', 'warning');
+                    return;
+                }
+
+                this.mockMode = !this.mockMode;
+                this.mockModeToggle.classList.toggle('active', this.mockMode);
+
+                if (this.mockMode) {
+                    this.micButton.classList.add('hidden');
+                    this.addLog('Mock mode enabled (text-only)', 'info');
+                } else {
+                    this.micButton.classList.remove('hidden');
+                    this.addLog('Audio mode enabled', 'info');
+                }
+            }
+
+            toggleLanguage() {
+                this.fillerLanguage = this.fillerLanguage === 'en' ? 'de' : 'en';
+                this.updateLanguageUI();
+
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.send({
+                        type: 'change_language',
+                        language: this.fillerLanguage
+                    });
+                    this.addLog(`Language set to ${this.fillerLanguage.toUpperCase()}`, 'info');
+                }
+            }
+
+            updateLanguageUI() {
+                if (this.fillerLanguage === 'en') {
+                    this.languageToggle.classList.remove('active');
+                    this.langEn.classList.add('active');
+                    this.langDe.classList.remove('active');
+                } else {
+                    this.languageToggle.classList.add('active');
+                    this.langEn.classList.remove('active');
+                    this.langDe.classList.add('active');
+                }
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Message Handling
+            // ───────────────────────────────────────────────────────────────────
+
+            async handleMessage(data) {
+                const { type } = data;
+
+                switch (type) {
+                    case 'session_ready':
+                        this.sessionId = data.session_id;
+                        this.sessionIdEl.textContent = this.sessionId.substring(0, 12) + '...';
+                        this.addLog(`Session: ${this.sessionId.substring(0, 16)}...`, 'success');
+                        break;
+
+                    case 'state_update':
+                        this.state = data.state;
+                        this.updateStateDisplay(data.state);
+                        // Auto-start microphone when transitioning to LISTENING (if not in mock mode)
+                        if (data.state === 'listening' && !this.mockMode && !this.isMicActive) {
+                            this.startMicrophone();
+                        }
+                        break;
+
+                    case 'transcript':
+                        if (data.text && data.text.trim()) {
+                            if (data.is_final) {
+                                this.addMessage(data.text, 'user');
+                                // Mark turn start for TTFT/TTFC
+                                this.turnStartTime = performance.now();
+                                this.hasTtftForTurn = false;
+                                this.hasTtfcForTurn = false;
+                            }
+                            this.updatePerformanceMetrics(data);
+                        }
+                        break;
+
+                    case 'agent_response':
+                        if (data.text && data.text.trim()) {
+                            if (data.is_streaming) {
+                                // Record TTFT on first token
+                                if (this.turnStartTime && !this.hasTtftForTurn) {
+                                    const ttft = Math.round(performance.now() - this.turnStartTime);
+                                    this.metricTtftEl.textContent = `${ttft}ms`;
+                                    this.hasTtftForTurn = true;
+                                }
+
+                                this.agentResponseBuffer += data.text;
+                                this.updateAgentMessage(this.agentResponseBuffer);
+                            } else {
+                                // Non-streaming: complete message
+                                if (this.agentResponseBuffer) {
+                                    // Finalize streaming message
+                                    this.finalizeAgentMessage();
+                                } else {
+                                    this.addMessage(data.text, 'agent');
+                                }
+                            }
+                        }
+                        if (data.is_complete || data.is_final) {
+                            if (this.agentResponseBuffer) {
+                                this.finalizeAgentMessage();
+                            }
+                            this.agentResponseBuffer = '';
+                        }
+                        break;
+
+                    case 'audio_chunk':
+                        // Handle both 'data' and 'audio' fields for compatibility
+                        const audioB64 = data.data || data.audio;
+                        if (data.is_final) {
+                            this.addLog('Audio stream complete from server', 'info');
+                            this.audioStreamComplete = true;
+                            // Check if we can finalize now
+                            this.checkPlaybackComplete();
+                        } else if (audioB64) {
+                            // Record TTFC on first audio chunk
+                            if (this.turnStartTime && !this.hasTtfcForTurn) {
+                                const ttfc = Math.round(performance.now() - this.turnStartTime);
+                                this.metricTtfcEl.textContent = `${ttfc}ms`;
+                                this.hasTtfcForTurn = true;
+                            }
+                            await this.processAudioChunk(audioB64);
+                        }
+                        break;
+
+                    case 'audio_complete':
+                        this.addLog('Server signaled audio complete', 'info');
+                        this.audioStreamComplete = true;
+                        // Check if we can finalize now
+                        this.checkPlaybackComplete();
+                        break;
+
+                    case 'language_changed':
+                        this.addLog(`Language: ${data.language}`, 'success');
+                        break;
+
+                    case 'appointment_complete':
+                        // FSM appointment booking successful - send confirmation email
+                        this.addLog('Appointment booked! Sending confirmation email...', 'success');
+                        this.sendAppointmentEmail(data.appointment_data);
+                        break;
+
+                    case 'ping':
+                        // Respond to keep-alive ping
+                        this.send({ type: 'pong', timestamp: Date.now() / 1000 });
+                        break;
+                }
+            }
+
+            updateStateDisplay(state) {
+                this.currentStateEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+                this.currentStateEl.className = 'info-value';
+
+                if (state === 'listening') {
+                    this.currentStateEl.classList.add('state-listening');
+                } else if (state === 'speaking') {
+                    this.currentStateEl.classList.add('state-speaking');
+                } else if (state === 'thinking') {
+                    this.currentStateEl.classList.add('state-thinking');
+                }
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Chat Messages
+            // ───────────────────────────────────────────────────────────────────
+
+            addMessage(text, sender) {
+                this.emptyState.classList.add('hidden');
+
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}`;
+                messageDiv.innerHTML = `
+                    <div class="content">${this.escapeHtml(text)}</div>
+                    <div class="timestamp">${new Date().toLocaleTimeString()}</div>
+                `;
+
+                this.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+                return messageDiv;
+            }
+
+            updateAgentMessage(text) {
+                this.emptyState.classList.add('hidden');
+
+                let streamingMsg = this.chatMessages.querySelector('.message.agent.streaming');
+                if (!streamingMsg) {
+                    streamingMsg = document.createElement('div');
+                    streamingMsg.className = 'message agent streaming';
+                    streamingMsg.innerHTML = `<div class="content"></div>`;
+                    this.chatMessages.appendChild(streamingMsg);
+                }
+
+                streamingMsg.querySelector('.content').textContent = text;
+                this.scrollToBottom();
+            }
+
+            finalizeAgentMessage() {
+                const streamingMsg = this.chatMessages.querySelector('.message.agent.streaming');
+                if (streamingMsg) {
+                    streamingMsg.classList.remove('streaming');
+                    const timestamp = document.createElement('div');
+                    timestamp.className = 'timestamp';
+                    timestamp.textContent = new Date().toLocaleTimeString();
+                    streamingMsg.appendChild(timestamp);
+                }
+            }
+
+            scrollToBottom() {
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Text Input
+            // ───────────────────────────────────────────────────────────────────
+
+            async sendTextInput() {
+                const text = this.textInput.value.trim();
+                if (!text) return;
+
+                // Add user message to chat
+                this.addMessage(text, 'user');
+                this.textInput.value = '';
+                this.textInput.style.height = 'auto';
+
+                // Mark turn start for TTFT/TTFC
+                this.turnStartTime = performance.now();
+                this.hasTtftForTurn = false;
+                this.hasTtfcForTurn = false;
+
+                if (this.mockMode) {
+                    // MOCK MODE: Send directly to RAG API via HTTP
+                    await this.sendToRAGDirect(text);
+                } else {
+                    // AUDIO MODE: Send via WebSocket
+                    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                        this.addLog('Not connected', 'error');
+                        return;
+                    }
+                    this.send({
+                        type: 'text_input',
+                        text: text,
+                        timestamp: Date.now() / 1000
+                    });
+                    this.addLog('Sent via WebSocket: ' + text.substring(0, 40) + (text.length > 40 ? '...' : ''), 'info');
+                }
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // EmailJS - Appointment Confirmation
+            // ───────────────────────────────────────────────────────────────────
+
+            async sendAppointmentEmail(appointmentData) {
+                // Check if EmailJS is configured
+                if (!EMAILJS_CONFIG.enabled) {
+                    this.addLog('EmailJS not configured - skipping email', 'warning');
+                    console.warn('EmailJS not configured. Set EMAILJS_CONFIG.enabled = true and add your credentials.');
+                    return;
+                }
+
+                if (!appointmentData || !appointmentData.email) {
+                    this.addLog('No appointment data for email', 'error');
+                    return;
+                }
+
+                try {
+                    const templateParams = {
+                        to_email: appointmentData.email,
+                        customer_name: appointmentData.name || 'Valued Customer',
+                        topic: appointmentData.query || 'Daytona Consultation',
+                        timestamp: appointmentData.timestamp || new Date().toISOString(),
+                        appointment_id: appointmentData.id || 'N/A'
+                    };
+
+                    this.addLog(`📧 Sending confirmation to ${appointmentData.email}...`, 'info');
+
+                    const response = await emailjs.send(
+                        EMAILJS_CONFIG.serviceId,
+                        EMAILJS_CONFIG.templateId,
+                        templateParams
+                    );
+
+                    if (response.status === 200) {
+                        this.addLog('✅ Confirmation email sent!', 'success');
+                        this.addMessage(`📧 Confirmation email sent to ${appointmentData.email}`, 'assistant');
+                    } else {
+                        throw new Error(`EmailJS returned status ${response.status}`);
+                    }
+                } catch (error) {
+                    this.addLog(`❌ Email failed: ${error.text || error.message}`, 'error');
+                    console.error('EmailJS error:', error);
+                }
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Direct RAG API (Mock Mode)
+            // ───────────────────────────────────────────────────────────────────
+
+            async sendToRAGDirect(query) {
+                this.sendButton.disabled = true;
+                this.updateStatus('connecting', 'Processing...');
+                this.addLog('Sending to RAG...', 'info');
+
+                const startTime = Date.now();
+
+                try {
+                    // Build history context from conversation
+                    const historyContext = this.buildHistoryContext();
+
+                    // Map language for RAG
+                    const lang = this.fillerLanguage === 'de' ? 'german' : 'english';
+
+                    // Call RAG streaming endpoint directly
+                    const response = await fetch('/api/rag/stream_query', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            query: query,
+                            history_context: historyContext,
+                            language: lang
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                    }
+
+                    // Stream the response
+                    let fullResponse = '';
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    // Create streaming message placeholder
+                    this.agentResponseBuffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // Keep incomplete line
+
+                        for (const line of lines) {
+                            if (!line.trim()) continue;
+                            try {
+                                const data = JSON.parse(line);
+                                if (data.text) {
+                                    fullResponse += data.text;
+                                    this.agentResponseBuffer = fullResponse;
+                                    this.updateAgentMessage(fullResponse);
+                                }
+                                if (data.is_final) {
+                                    this.finalizeAgentMessage();
+                                }
+                            } catch (e) {
+                                // Skip parse errors
+                            }
+                        }
+                    }
+
+                    // Finalize if not already done
+                    if (this.agentResponseBuffer) {
+                        this.finalizeAgentMessage();
+                    }
+
+                    // Update conversation history
+                    this.conversationHistory.push({
+                        user: query,
+                        agent: fullResponse
+                    });
+
+                    const responseTime = Date.now() - startTime;
+                    this.addLog(`Response: ${responseTime}ms`, 'success');
+                    this.updateStatus('connected', 'Connected');
+
+                } catch (error) {
+                    console.error('RAG query error:', error);
+                    this.addMessage(`Error: ${error.message}`, 'agent');
+                    this.addLog(`Error: ${error.message}`, 'error');
+                    this.updateStatus('error', 'Error');
+                } finally {
+                    this.sendButton.disabled = false;
+                }
+            }
+
+            buildHistoryContext() {
+                if (this.conversationHistory.length === 0) return null;
+                return this.conversationHistory
+                    .slice(-5)
+                    .map(ex => `User: ${ex.user}\nAgent: ${ex.agent}`)
+                    .join('\n\n');
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Microphone
+            // ───────────────────────────────────────────────────────────────────
+
+            toggleMicrophone() {
+                if (this.isMicActive) {
+                    this.stopMicrophone();
+                } else {
+                    this.startMicrophone();
+                }
+            }
+
+            async startMicrophone() {
+                if (this.mockMode) {
+                    this.addLog('Mic disabled in mock mode', 'warning');
+                    return;
+                }
+
+                try {
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: MIC_SAMPLE_RATE,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        }
+                    });
+                    this.micAudioContext = new AudioContext({ sampleRate: MIC_SAMPLE_RATE });
+                    const source = this.micAudioContext.createMediaStreamSource(this.mediaStream);
+                    this.processor = this.micAudioContext.createScriptProcessor(2048, 1, 1);
+
+                    source.connect(this.processor);
+                    this.processor.connect(this.micAudioContext.destination);
+
+                    // Voice activity detection for barge-in
+                    const VAD_THRESHOLD = 0.02;
+                    let consecutiveVoiceFrames = 0;
+                    const VOICE_FRAMES_FOR_BARGE_IN = 3;
+
+                    this.processor.onaudioprocess = (e) => {
+                        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+                        if (!this.isMicActive) return;
+
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const pcmData = new Int16Array(inputData.length);
+
+                        // Calculate Peak for VAD animation
+                        let peak = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            const abs = Math.abs(inputData[i]);
+                            if (abs > peak) peak = abs;
+                        }
+                        this.updateVAD(peak * 128);
+
+                        // Calculate RMS for VAD logic
+                        let sum = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                            sum += inputData[i] * inputData[i];
+                        }
+                        const rms = Math.sqrt(sum / inputData.length);
+
+                        // Barge-in detection
+                        if (rms > VAD_THRESHOLD) {
+                            consecutiveVoiceFrames++;
+                            if (this.isPlayingAudio && consecutiveVoiceFrames >= VOICE_FRAMES_FOR_BARGE_IN) {
+                                this.interrupt();
+                                consecutiveVoiceFrames = 0;
+                            }
+                        } else {
+                            consecutiveVoiceFrames = 0;
+                        }
+
+                        // Send as RAW BINARY (Orchestrator now supports this for efficiency)
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            this.ws.send(pcmData.buffer);
+                        }
+                    };
+
+                    this.isMicActive = true;
+                    this.micButton.classList.add('active');
+                    this.addLog('Microphone active', 'success');
+
+                } catch (error) {
+                    this.addLog('Microphone access denied: ' + error.message, 'error');
+                    console.error('Microphone error:', error);
+                }
+            }
+
+            stopMicrophone() {
+                if (this.mediaStream) {
+                    this.mediaStream.getTracks().forEach(track => track.stop());
+                    this.mediaStream = null;
+                }
+                if (this.processor) {
+                    this.processor.disconnect();
+                    this.processor = null;
+                }
+                if (this.micAudioContext) {
+                    this.micAudioContext.close();
+                    this.micAudioContext = null;
+                }
+
+                this.isMicActive = false;
+                this.micButton.classList.remove('active');
+
+                // Clear VAD bars
+                if (this.vadVisualizer) {
+                    const bars = this.vadVisualizer.children;
+                    for (let i = 0; i < bars.length; i++) {
+                        bars[i].style.height = '4px';
+                        bars[i].style.background = 'var(--color-dark-gray)';
+                    }
+                }
+
+                this.addLog('Microphone stopped', 'info');
+            }
+
+            updateVAD(level) {
+                if (!this.vadVisualizer) return;
+                const bars = this.vadVisualizer.children;
+                if (!bars.length) return;
+
+                const normalizedLevel = Math.min(100, (level / 128) * 100);
+
+                // Shift bars left
+                for (let i = 0; i < bars.length - 1; i++) {
+                    bars[i].style.height = bars[i + 1].style.height;
+                }
+                // Add new bar at end
+                const lastBar = bars[bars.length - 1];
+                lastBar.style.height = `${Math.max(4, normalizedLevel)}px`;
+                lastBar.style.background = level > 30 ? 'var(--color-orange)' : 'var(--color-dark-gray)';
+            }
+
+            updatePerformanceMetrics(data) {
+                if (data.latency_ms) {
+                    this.totalLatency += data.latency_ms;
+                    this.successfulResponses++;
+                    this.avgLatencyEl.textContent = `${Math.round(this.totalLatency / this.successfulResponses)}ms`;
+                }
+
+                this.chunkCounter++;
+                this.chunkCountDisplay.textContent = this.chunkCounter;
+
+                if (data.avg_logprob !== undefined) {
+                    this.metricLogProbEl.textContent = data.avg_logprob.toFixed(3);
+                    this.metricLogProbEl.closest('.metric-pill').className = `metric-pill ${data.avg_logprob > -0.5 ? 'success' : 'warning'}`;
+                }
+
+                if (data.no_speech_prob !== undefined) {
+                    this.metricNoSpeechEl.textContent = (data.no_speech_prob * 100).toFixed(1) + '%';
+                    this.metricNoSpeechEl.closest('.metric-pill').className = `metric-pill ${data.no_speech_prob < 0.1 ? 'success' : 'warning'}`;
+                }
+
+                if (data.compression_ratio !== undefined) {
+                    this.metricCompRatioEl.textContent = data.compression_ratio.toFixed(2);
+                    this.metricCompRatioEl.closest('.metric-pill').className = `metric-pill ${data.compression_ratio < 2.4 ? 'success' : 'warning'}`;
+                }
+            }
+
+            arrayBufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return btoa(binary);
+            }
+
+            interrupt() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.send({ type: 'interrupt', timestamp: Date.now() / 1000 });
+                    this.addLog('Interrupted playback', 'warning');
+                }
+                this.stopAudioPlayback();
+            }
+
+            stopAudioPlayback() {
+                this.isPlayingAudio = false;
+                if (this.currentSource) {
+                    try {
+                        this.currentSource.stop();
+                    } catch (e) { }
+                    this.currentSource = null;
+                }
+                this.nextPlayTime = 0; // Reset nextPlayTime on interruption
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Audio Playback (Raw PCM from TTS)
+            // ───────────────────────────────────────────────────────────────────
+
+            async initAudio() {
+                if (!this.audioContext) {
+                    this.audioContext = new AudioContext({ sampleRate: PLAYBACK_SAMPLE_RATE });
+                    this.nextPlayTime = this.audioContext.currentTime;
+                }
+                if (this.audioContext.state === 'suspended') {
+                    await this.audioContext.resume();
+                    this.addLog('Audio context resumed', 'info');
+                }
+            }
+
+            async processAudioChunk(base64Data) {
+                if (!base64Data) return;
+
+                try {
+                    await this.initAudio();
+
+                    // Decode Base64 to binary string
+                    const binaryString = atob(base64Data);
+                    const len = binaryString.length;
+
+                    // Create Uint8Array from binary string
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    // Convert to Float32 (assuming pcm_f32le from server)
+                    // The server sends straight bytes, so we need a DataView or similar to read floats
+                    // Alternatively, if the server sends raw bytes of floats:
+                    const float32Data = new Float32Array(bytes.buffer);
+
+                    // Create AudioBuffer
+                    const audioBuffer = this.audioContext.createBuffer(1, float32Data.length, PLAYBACK_SAMPLE_RATE);
+                    audioBuffer.getChannelData(0).set(float32Data);
+
+                    // Schedule playback (Gapless)
+                    const source = this.audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(this.audioContext.destination);
+
+                    source.onended = () => {
+                        this.checkPlaybackComplete();
+                    };
+
+                    // Schedule accurately
+                    const currentTime = this.audioContext.currentTime;
+                    // Provide a small buffer (0.1s) if we fell behind, otherwise strict scheduling
+                    const startAt = Math.max(currentTime, this.nextPlayTime);
+
+                    // If we're starting fresh or had a gap, reset nextPlayTime to avoiding fast-forwarding
+                    if (startAt > this.nextPlayTime + 0.5) {
+                        // Gap detected (or start), play immediately
+                        this.nextPlayTime = startAt;
+                    }
+
+                    source.start(this.nextPlayTime);
+                    // Advance time
+                    this.nextPlayTime += audioBuffer.duration;
+
+                    this.chunkCountDisplay.textContent = this.chunkCount;
+
+                } catch (e) {
+                    console.error('Audio processing error:', e);
+                    this.addLog(`Audio error: ${e.message}`, 'error');
+                }
+            }
+
+            checkPlaybackComplete() {
+                // Called when audio_complete received - check if playback is done
+                if (this.playbackFallbackTimer) {
+                    clearTimeout(this.playbackFallbackTimer);
+                    this.playbackFallbackTimer = null;
+                }
+                if (this.audioStreamComplete && this.audioQueue.length === 0 && !this.isProcessingQueue) {
+                    this.finalizePlayback();
+                }
+            }
+
+            finalizePlayback() {
+                if (!this.isPlayingAudio) return;  // Already finalized
+
+                // Clear any pending fallback timer
+                if (this.playbackFallbackTimer) {
+                    clearTimeout(this.playbackFallbackTimer);
+                    this.playbackFallbackTimer = null;
+                }
+
+                const duration = this.playbackStartTime ? Date.now() - this.playbackStartTime : 0;
+                this.addLog(`Playback complete (${duration}ms)`, 'info');
+
+                this.isPlayingAudio = false;
+                this.playbackStartTime = null;
+                this.audioStreamComplete = false;  // Reset for next response
+
+                // Notify server that playback is done
+                this.send({
+                    type: 'playback_done',
+                    duration_ms: duration,
+                    timestamp: Date.now() / 1000
+                });
+            }
+
+            playAudioBuffer(buffer) {
+                return new Promise((resolve) => {
+                    if (!this.audioContext) {
+                        resolve();
+                        return;
+                    }
+
+                    this.currentSource = this.audioContext.createBufferSource();
+                    this.currentSource.buffer = buffer;
+                    this.currentSource.connect(this.audioContext.destination);
+                    this.currentSource.onended = () => {
+                        this.currentSource = null;
+                        resolve();
+                    };
+                    this.currentSource.start();
+                });
+            }
+
+            notifyPlaybackDone() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.send({ type: 'playback_done', timestamp: Date.now() / 1000 });
+                }
+            }
+
+            // ───────────────────────────────────────────────────────────────────
+            // Utility
+            // ───────────────────────────────────────────────────────────────────
+
+            updateStatus(status, text) {
+                this.statusIndicator.className = 'status-indicator ' + status;
+                this.statusText.textContent = text;
+            }
+
+            addLog(message, type = 'info') {
+                const logItem = document.createElement('div');
+                logItem.className = `log-item ${type}`;
+                logItem.innerHTML = `<span class="log-time">${new Date().toLocaleTimeString()}</span>${message}`;
+
+                this.logsContainer.insertBefore(logItem, this.logsContainer.firstChild);
+
+                // Keep only last 50 logs
+                while (this.logsContainer.children.length > 50) {
+                    this.logsContainer.removeChild(this.logsContainer.lastChild);
+                }
+            }
+        }
+
+        // Initialize client
+        const client = new TARAClient();
+
+        // Pod Logs Streaming
+        let podLogsEventSource = null;
+        const podLogsContainer = document.getElementById('podLogsContainer');
+        const viewOrchLogsBtn = document.getElementById('viewOrchLogs');
+        const viewRagLogsBtn = document.getElementById('viewRagLogs');
+        const closePodLogsBtn = document.getElementById('closePodLogs');
+
+        function streamPodLogs(podName) {
+            // Close existing stream
+            if (podLogsEventSource) {
+                podLogsEventSource.close();
+            }
+
+            // Clear container
+            podLogsContainer.innerHTML = '';
+            podLogsContainer.style.display = 'block';
+            closePodLogsBtn.style.display = 'block';
+
+            // Create EventSource for SSE
+            const url = `/api/logs/stream?pod=${podName}`;
+            podLogsEventSource = new EventSource(url);
+
+            podLogsEventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.error) {
+                        const errorItem = document.createElement('div');
+                        errorItem.className = 'log-item error';
+                        errorItem.textContent = `Error: ${data.error}`;
+                        podLogsContainer.appendChild(errorItem);
+                        return;
+                    }
+
+                    if (data.log) {
+                        const logItem = document.createElement('div');
+                        logItem.className = 'log-item';
+                        logItem.textContent = data.log;
+
+                        // Auto-scroll to bottom
+                        podLogsContainer.appendChild(logItem);
+                        podLogsContainer.scrollTop = podLogsContainer.scrollHeight;
+
+                        // Keep only last 200 lines
+                        while (podLogsContainer.children.length > 200) {
+                            podLogsContainer.removeChild(podLogsContainer.firstChild);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error parsing log event:', e);
+                }
+            };
+
+            podLogsEventSource.onerror = (error) => {
+                console.error('EventSource error:', error);
+                const errorItem = document.createElement('div');
+                errorItem.className = 'log-item error';
+                errorItem.textContent = 'Connection lost. Click button to reconnect.';
+                podLogsContainer.appendChild(errorItem);
+                podLogsEventSource.close();
+                podLogsEventSource = null;
+            };
+        }
+
+        function closePodLogs() {
+            if (podLogsEventSource) {
+                podLogsEventSource.close();
+                podLogsEventSource = null;
+            }
+            podLogsContainer.style.display = 'none';
+            closePodLogsBtn.style.display = 'none';
+            podLogsContainer.innerHTML = '';
+        }
+
+        viewOrchLogsBtn.addEventListener('click', () => streamPodLogs('orchestrator'));
+        viewRagLogsBtn.addEventListener('click', () => streamPodLogs('rag'));
+        closePodLogsBtn.addEventListener('click', closePodLogs);
+
+    </script>
+</body>
+
+</html>
