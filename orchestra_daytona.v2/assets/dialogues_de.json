@@ -1,0 +1,137 @@
+{
+  "language": "de",
+  "dialogues": {
+    "intro": [
+      {
+        "text": "Hallo! Willkommen an der Daytona. Ich bin hier, um Ihnen bei Fragen zu helfen. Wie kann ich Ihnen heute behilflich sein?",
+        "translation_en": "Hello! Welcome to Daytona. I am here to help you with any questions. How can I assist you today?",
+        "emotion": "warm",
+        "audio_file": "intro_de.wav"
+      },
+      {
+        "text": "Guten Tag! Ich bin Ihr virtueller Assistent an der Daytona. Womit kann ich Ihnen helfen?",
+        "translation_en": "Good day! I am your virtual assistant at Daytona. How can I help you?",
+        "emotion": "friendly",
+        "audio_file": "intro_alt_de.wav"
+      }
+    ],
+    "exit": [
+      {
+        "text": "Vielen Dank, dass Sie die Daytona kontaktiert haben. Falls Sie weitere Hilfe benötigen, zögern Sie bitte nicht, uns zu kontaktieren. Einen schönen Tag noch!",
+        "translation_en": "Thank you for contacting Daytona. If you need further assistance, please do not hesitate to contact us. Have a nice day!",
+        "emotion": "grateful",
+        "audio_file": "exit_de.wav",
+        "keywords": ["tschüss", "auf wiedersehen", "bis bald", "danke", "vielen dank", "das war's", "nichts weiter", "nichts mehr"]
+      },
+      {
+        "text": "Es war mir eine Freude, Ihnen heute zu helfen. Kontaktieren Sie uns gerne wieder, wenn Sie Fragen haben. Auf Wiedersehen!",
+        "translation_en": "It was my pleasure to help you today. Feel free to contact us again if you have questions. Goodbye!",
+        "emotion": "friendly",
+        "audio_file": "exit_alt_de.wav"
+      }
+    ],
+    "filler_immediate": [
+      {
+        "text": "Okay.",
+        "translation_en": "Okay.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_1_de.wav"
+      },
+      {
+        "text": "Verstanden.",
+        "translation_en": "Understood.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_2_de.wav"
+      },
+      {
+        "text": "Ich verstehe.",
+        "translation_en": "I understand.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_3_de.wav"
+      },
+      {
+        "text": "Alles klar.",
+        "translation_en": "All right.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_4_de.wav"
+      }
+    ],
+    "filler_latency": [
+      {
+        "text": "Lassen Sie mich das für Sie überprüfen...",
+        "translation_en": "Let me check that for you...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:1500",
+        "audio_file": "filler_latency_1_de.wav"
+      },
+      {
+        "text": "Geben Sie mir einen Moment, ich ueberpuefe es fuer Sie",
+        "translation_en": "Give me a moment while I find this information...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:2000",
+        "audio_file": "filler_latency_2_de.wav"
+      },
+      {
+        "text": "Ich schaue das gerade für Sie nach...",
+        "translation_en": "I'm looking that up for you right now...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:1800",
+        "audio_file": "filler_latency_3_de.wav"
+      },
+      {
+        "text": "Einen Moment bitte...",
+        "translation_en": "One moment please...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:1500",
+        "audio_file": "filler_latency_4_de.wav"
+      }
+    ],
+    "timeout": [
+      {
+        "text": "Sind Sie noch da? Ich bin hier, um Ihnen zu helfen.",
+        "translation_en": "Are you still there? I'm here to help you.",
+        "emotion": "concerned",
+        "trigger": "timeout_ms:10000",
+        "audio_file": "timeout_1_de.wav"
+      },
+      {
+        "text": "Können Sie mich hören? Wenn Sie etwas sagen möchten, sprechen Sie bitte.",
+        "translation_en": "Can you hear me? If you'd like to say something, please speak.",
+        "emotion": "helpful",
+        "trigger": "timeout_ms:10000",
+        "audio_file": "timeout_2_de.wav"
+      },
+      {
+        "text": "Hallo? Ich bin noch hier, falls Sie Hilfe benötigen.",
+        "translation_en": "Hello? I'm still here if you need help.",
+        "emotion": "friendly",
+        "trigger": "timeout_ms:10000",
+        "audio_file": "timeout_3_de.wav"
+      }
+    ],
+    "unclear": [
+      {
+        "text": "Entschuldigung, das habe ich nicht klar verstanden. Könnten Sie Ihre Frage bitte wiederholen?",
+        "translation_en": "Sorry, I did not understand that clearly. Could you please repeat your question?",
+        "emotion": "neutral",
+        "audio_file": "unclear_1_de.wav"
+      },
+      {
+        "text": "Das habe ich möglicherweise verpasst. Könnten Sie das bitte noch einmal sagen?",
+        "translation_en": "I may have missed that. Could you please say it again?",
+        "emotion": "neutral",
+        "audio_file": "unclear_2_de.wav"
+      },
+      {
+        "text": "Das habe ich nicht ganz verstanden. Können Sie das umformulieren?",
+        "translation_en": "I didn't quite understand that. Can you rephrase it?",
+        "emotion": "helpful",
+        "audio_file": "unclear_3_de.wav"
+      }
+    ]
+  }
+}

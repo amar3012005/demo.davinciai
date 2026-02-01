@@ -1,0 +1,28 @@
+# Groq Whisper STT Microservice Dependencies
+
+# FastAPI and server
+fastapi>=0.115.0
+uvicorn[standard]>=0.24.0
+websockets>=13.0.0
+python-multipart>=0.0.6
+
+# Groq SDK and HTTP client
+groq>=0.11.0
+httpx>=0.24.0
+
+# Audio processing
+numpy>=1.24.0
+webrtcvad>=2.0.10
+pydub>=0.25.1
+
+# WebSocket client for orchestrator
+aiohttp>=3.9.0
+
+# Redis client (optional, deprecated)
+redis[asyncio]>=5.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Logging
+python-json-logger>=2.0.7

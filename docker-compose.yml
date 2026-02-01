@@ -1,0 +1,342 @@
+services:
+  redis:
+    image: 'redis:7-alpine'
+    container_name: redis-ekgcgssw8css400gs8wwggwo
+    volumes:
+      - 'ekgcgssw8css400gs8wwggwo_redis-data:/data'
+    command: 'redis-server --appendonly yes --bind 0.0.0.0'
+    networks:
+      ekgcgssw8css400gs8wwggwo: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=redis-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=redis
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=7
+      - coolify.service.subType=database
+      - coolify.service.subName=redis
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=redis-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=redis
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=7
+      - coolify.service.subType=database
+      - coolify.service.subName=redis
+    environment:
+      COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
+      COOLIFY_CONTAINER_NAME: redis-ekgcgssw8css400gs8wwggwo
+      SERVICE_NAME_REDIS: redis
+      SERVICE_NAME_QDRANT: qdrant
+      SERVICE_NAME_RAG: rag
+      SERVICE_NAME_STT: stt
+      SERVICE_NAME_TTS: tts
+      SERVICE_NAME_ORCHESTRATOR: orchestrator
+    env_file:
+      - .env
+  qdrant:
+    image: 'qdrant/qdrant:latest'
+    container_name: qdrant-ekgcgssw8css400gs8wwggwo
+    volumes:
+      - 'ekgcgssw8css400gs8wwggwo_qdrant-data:/qdrant/storage'
+    networks:
+      ekgcgssw8css400gs8wwggwo: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=qdrant-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=qdrant
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=24
+      - coolify.service.subType=application
+      - coolify.service.subName=qdrant
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=qdrant-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=qdrant
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=24
+      - coolify.service.subType=application
+      - coolify.service.subName=qdrant
+    environment:
+      COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
+      COOLIFY_CONTAINER_NAME: qdrant-ekgcgssw8css400gs8wwggwo
+      SERVICE_NAME_REDIS: redis
+      SERVICE_NAME_QDRANT: qdrant
+      SERVICE_NAME_RAG: rag
+      SERVICE_NAME_STT: stt
+      SERVICE_NAME_TTS: tts
+      SERVICE_NAME_ORCHESTRATOR: orchestrator
+    env_file:
+      - .env
+  rag:
+    build:
+      context: ./rag-daytona.v2
+      dockerfile: Dockerfile
+    container_name: rag-ekgcgssw8css400gs8wwggwo
+    environment:
+      LLM_PROVIDER: groq
+      LLM_API_KEY: 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
+      REDIS_URL: 'redis://redis:6379/0'
+      QDRANT_URL: 'http://qdrant:6333'
+      QDRANT_API_KEY: ''
+      ENABLE_HIVE_MIND: 'true'
+      COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
+      COOLIFY_CONTAINER_NAME: rag-ekgcgssw8css400gs8wwggwo
+      SERVICE_NAME_REDIS: redis
+      SERVICE_NAME_QDRANT: qdrant
+      SERVICE_NAME_RAG: rag
+      SERVICE_NAME_STT: stt
+      SERVICE_NAME_TTS: tts
+      SERVICE_NAME_ORCHESTRATOR: orchestrator
+    ports:
+      - '8444:8003'
+    volumes:
+      - 'ekgcgssw8css400gs8wwggwo_rag-index:/app/index'
+      - '/etc/letsencrypt/live/rag.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem'
+      - '/etc/letsencrypt/live/rag.demo.davinciai.eu/privkey.pem:/certs/privkey.pem'
+    command: "uvicorn app:app --host 0.0.0.0 --port 8003 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem\n"
+    networks:
+      ekgcgssw8css400gs8wwggwo: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=rag-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=rag
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=25
+      - coolify.service.subType=application
+      - coolify.service.subName=rag
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=rag-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=rag
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=25
+      - coolify.service.subType=application
+      - coolify.service.subName=rag
+    env_file:
+      - .env
+  stt:
+    build:
+      context: ./stt_groq_whisper
+      dockerfile: Dockerfile
+    container_name: stt-ekgcgssw8css400gs8wwggwo
+    restart: unless-stopped
+    ports:
+      - '8002:8002'
+    volumes:
+      - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/stt_groq_whisper:/app'
+      - '/etc/letsencrypt/live/stt.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem'
+      - '/etc/letsencrypt/live/stt.demo.davinciai.eu/privkey.pem:/certs/privkey.pem'
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: DEBUG
+      GROQ_API_KEY: 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
+      GROQ_WHISPER_MODEL: whisper-large-v3
+      ENABLE_MICRO_CHUNKING: 'false'
+      VAD_ENERGY_THRESHOLD: 500
+      MIN_SILENCE_DURATION_MS: 300
+      GROQ_LANGUAGE: de
+      STT_HOST: 0.0.0.0
+      STT_PORT: 8002
+      ORCHESTRATOR_WS_URL: 'wss://orchestrator:8004/ws'
+      ORCHESTRATOR_SKIP_SSL_VERIFY: 'true'
+      COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
+      COOLIFY_CONTAINER_NAME: stt-ekgcgssw8css400gs8wwggwo
+      SERVICE_NAME_REDIS: redis
+      SERVICE_NAME_QDRANT: qdrant
+      SERVICE_NAME_RAG: rag
+      SERVICE_NAME_STT: stt
+      SERVICE_NAME_TTS: tts
+      SERVICE_NAME_ORCHESTRATOR: orchestrator
+    command: 'uvicorn app:app --host 0.0.0.0 --port 8002 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem'
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - '-c'
+        - "import urllib.request, ssl; ctx = ssl._create_unverified_context(); urllib.request.urlopen('https://localhost:8002/health', timeout=5, context=ctx)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      ekgcgssw8css400gs8wwggwo: null
+    labels:
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=stt-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=stt
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=26
+      - coolify.service.subType=application
+      - coolify.service.subName=stt
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=stt-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=stt
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=26
+      - coolify.service.subType=application
+      - coolify.service.subName=stt
+    env_file:
+      - .env
+  tts:
+    build:
+      context: ./tts_cartesia
+      dockerfile: Dockerfile
+    container_name: tts-ekgcgssw8css400gs8wwggwo
+    environment:
+      CARTESIA_API_KEY: sk_car_k6RiuJVp2gEzAP6ozyCrdp
+      CARTESIA_VOICE_ID: a0e99841-438c-4a64-b679-ae501e7d6091
+      CARTESIA_OUTPUT_FORMAT: pcm_s16le
+      CARTESIA_SAMPLE_RATE: 44100
+      COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
+      COOLIFY_CONTAINER_NAME: tts-ekgcgssw8css400gs8wwggwo
+      SERVICE_NAME_REDIS: redis
+      SERVICE_NAME_QDRANT: qdrant
+      SERVICE_NAME_RAG: rag
+      SERVICE_NAME_STT: stt
+      SERVICE_NAME_TTS: tts
+      SERVICE_NAME_ORCHESTRATOR: orchestrator
+    volumes:
+      - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/tts_cartesia:/app'
+    networks:
+      ekgcgssw8css400gs8wwggwo: null
+    restart: unless-stopped
+    labels:
+      - coolify.pullRequestId=0
+      - coolify.service.subId=27
+      - coolify.service.subType=application
+      - coolify.service.subName=tts
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=tts-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=tts
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=27
+      - coolify.service.subType=application
+      - coolify.service.subName=tts
+    env_file:
+      - .env
+  orchestrator:
+    build:
+      context: ./orchestra_daytona.v2
+      dockerfile: Dockerfile
+    container_name: orchestrator-ekgcgssw8css400gs8wwggwo
+    ports:
+      - '8443:8004'
+    volumes:
+      - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/orchestra_daytona.v2:/app'
+      - '/etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem'
+      - '/etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem'
+    environment:
+      REDIS_URL: 'redis://redis:6379/0'
+      RAG_SERVICE_URL: 'http://rag:8003'
+      STT_SERVICE_URL: 'http://stt:8002'
+      TTS_SERVICE_URL: 'http://tts:8000'
+      PUBLIC_URL: 'https://demo.davinciai.eu:8443'
+      COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
+      COOLIFY_CONTAINER_NAME: orchestrator-ekgcgssw8css400gs8wwggwo
+      SERVICE_NAME_REDIS: redis
+      SERVICE_NAME_QDRANT: qdrant
+      SERVICE_NAME_RAG: rag
+      SERVICE_NAME_STT: stt
+      SERVICE_NAME_TTS: tts
+      SERVICE_NAME_ORCHESTRATOR: orchestrator
+      ENABLE_FILLERS: 'false'
+    command: "uvicorn app:app  --host 0.0.0.0  --port 8004  --ssl-keyfile /certs/privkey.pem  --ssl-certfile /certs/fullchain.pem\n"
+    networks:
+      ekgcgssw8css400gs8wwggwo: null
+    restart: unless-stopped
+    labels:
+      - coolify.service.subName=orchestrator
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=orchestrator-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=orchestrator
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=28
+      - coolify.service.subType=application
+      - coolify.managed=true
+      - coolify.version=4.0.0-beta.462
+      - coolify.serviceId=5
+      - coolify.type=service
+      - coolify.name=orchestrator-ekgcgssw8css400gs8wwggwo
+      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
+      - coolify.projectName=blaiq-amar
+      - coolify.serviceName=orchestrator
+      - coolify.environmentName=production
+      - coolify.pullRequestId=0
+      - coolify.service.subId=28
+      - coolify.service.subType=application
+      - coolify.service.subName=orchestrator
+    env_file:
+      - .env
+volumes:
+  ekgcgssw8css400gs8wwggwo_redis-data:
+    name: ekgcgssw8css400gs8wwggwo_redis-data
+  ekgcgssw8css400gs8wwggwo_qdrant-data:
+    name: ekgcgssw8css400gs8wwggwo_qdrant-data
+  ekgcgssw8css400gs8wwggwo_rag-index:
+    name: ekgcgssw8css400gs8wwggwo_rag-index
+networks:
+  coolify:
+    external: true
+  ekgcgssw8css400gs8wwggwo:
+    name: ekgcgssw8css400gs8wwggwo
+    external: true
