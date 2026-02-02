@@ -60,6 +60,7 @@ class RAGConfig:
     llm_provider: str = "groq"  # "gemini", "openai", "openrouter", "claude", "ollama", "groq"
     llm_api_key: str = ""  # API key for the provider
     llm_model: str = "openai/gpt-oss-20b"  # Model name
+    analytics_model: str = "qwen/qwen3-32b"  # Reasoning model for analytics
     
     # Provider-specific options (optional)
     llm_options: dict = field(default_factory=dict)  # Additional provider config
@@ -284,9 +285,11 @@ class RAGConfig:
             elif llm_provider == "ollama":
                 llm_model = "llama3.1:8b"
             elif llm_provider == "groq":
-                llm_model = "llama-3.1-8b-instant"
+                llm_model = "openai/gpt-oss-20b"
             else:  # gemini
                 llm_model = gemini_model or "gemini-2.0-flash-lite"
+        
+        analytics_model = (os.getenv("DAYTONA_RAG_ANALYTICS_MODEL") or os.getenv("ANALYTICS_MODEL", "qwen/qwen3-32b")).strip()
         
         def get_env_int(name, default):
             val = os.getenv(name, "").strip()
@@ -313,6 +316,7 @@ class RAGConfig:
             llm_provider=llm_provider,
             llm_api_key=llm_api_key,
             llm_model=llm_model,
+            analytics_model=analytics_model,
             
             # Backwards compatibility (DEPRECATED)
             gemini_api_key=gemini_api_key if gemini_api_key else None,

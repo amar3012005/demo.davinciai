@@ -4,7 +4,7 @@ Groq LLM Provider - Using high-speed Groq Cloud API with AsyncGroq.
 
 import logging
 import asyncio
-from typing import Generator, AsyncGenerator, Optional, Any, Union
+from typing import Generator, AsyncGenerator, Optional, Any, Union, List, Dict
 from groq import AsyncGroq
 from .base import LLMProvider
 
@@ -56,14 +56,55 @@ class GroqProvider(LLMProvider):
             # but usually the engine handles the await.
             return self._generate_sync(prompt, max_tokens, temperature, **kwargs)
 
+    async def generate_messages(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.5,
+        response_format: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> str:
+        """
+        Generate response from a list of messages (chat completion style).
+        """
+        if not self.is_available():
+            raise RuntimeError("Groq provider not initialized")
+        
+        try:
+            extra_args = {}
+            if response_format:
+                extra_args["response_format"] = response_format
+                
+            model = kwargs.pop("model", self.model_name)
+            chat_completion = await self._client.chat.completions.create(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **extra_args,
+                **kwargs
+            )
+            return chat_completion.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Groq message generation error: {e}")
+            raise
+
     async def _generate_sync(self, prompt: str, max_tokens: int, temperature: float, **kwargs) -> str:
         """Internal async method for single completions."""
         try:
+            # Check for response_format in kwargs
+            response_format = kwargs.pop("response_format", None)
+            extra_args = {}
+            if response_format:
+                extra_args["response_format"] = response_format
+
+            model = kwargs.pop("model", self.model_name)
             chat_completion = await self._client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                model=self.model_name,
+                model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **extra_args,
                 **kwargs
             )
             return chat_completion.choices[0].message.content
@@ -74,9 +115,10 @@ class GroqProvider(LLMProvider):
     async def _generate_stream(self, prompt: str, max_tokens: int, temperature: float, **kwargs) -> AsyncGenerator[str, None]:
         """Internal async generator for streaming."""
         try:
+            model = kwargs.pop("model", self.model_name)
             stream = await self._client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                model=self.model_name,
+                model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
