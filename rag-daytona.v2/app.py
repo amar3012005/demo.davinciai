@@ -16,7 +16,7 @@ import json
 import hashlib
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
 
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request
@@ -97,9 +97,23 @@ class SaveCaseResponse(BaseModel):
     case_id: Optional[str] = None
 
 
+class AnalyzeSessionRequest(BaseModel):
+    session_id: str = Field(..., description="Session identifier")
+    history_context: List[Dict[str, Any]] = Field(..., description="Raw conversation logs")
+    user_id: Optional[str] = Field(None, description="User identifier")
+    tenant_id: str = Field("demo", description="Tenant identifier")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
+
+
+class AnalyzeSessionResponse(BaseModel):
+    status: str
+    report: Dict[str, Any]
+
+
 # Global state (initialized in lifespan)
 rag_engine: Optional[RAGEngine] = None
 redis_client: Optional[redis.Redis] = None
+session_analytics: Optional[Any] = None
 cache_hits = 0
 cache_misses = 0
 app_start_time = 0.0
@@ -144,6 +158,15 @@ async def lifespan(app: FastAPI):
             logger.info(f"🧠    Collection: {rag_engine.qdrant.collection_name}")
         else:
             logger.warning(f"🧠 ⚠️ Qdrant Hive Mind NOT AVAILABLE - check QDRANT_URL and QDRANT_API_KEY env vars")
+        
+        # Initialize Session Analytics
+        from daytona_agent.services.rag.session_analytics import SessionAnalytics
+        app.state.session_analytics = SessionAnalytics(
+            llm_provider=rag_engine.llm,
+            model_name=config.analytics_model
+        )
+        logger.info(f" ✅ Session Analytics initialized using model: {config.analytics_model}")
+        logger.info(f" 🤖 RAG Engine using LLM model: {config.llm_model}")
         
         # If index not loaded, try to build it (only if local retrieval is enabled)
         if config.enable_local_retrieval:
@@ -807,6 +830,86 @@ async def rebuild_index(request: RebuildIndexRequest):
     except Exception as e:
         logger.error(f"Rebuild error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Rebuild failed: {str(e)}")
+
+
+@app.post("/api/v1/analyze_session", response_model=AnalyzeSessionResponse)
+async def analyze_session(request: AnalyzeSessionRequest):
+    """
+    DavinciAI Sentiment & Reasoning Pipeline.
+    Analyzes post-session logs for business intelligence and Hivemind storage.
+    """
+    try:
+        analytics_engine = app.state.session_analytics
+        if not analytics_engine:
+            raise HTTPException(status_code=503, detail="Session Analytics engine not initialized")
+            
+        # 1. Run full analysis (Reasoning + Sentiment + Distillation)
+        report = await analytics_engine.analyze_session(
+            raw_logs=request.history_context, 
+            session_id=request.session_id
+        )
+        
+        # 2. Extract & Save Collective Knowledge to Hive Mind
+        saved_hivemind_chunks = []
+        if "distilled_knowledge" in report:
+            kb_units = report["distilled_knowledge"]
+            if kb_units and app.state.rag_engine and app.state.rag_engine.qdrant and app.state.rag_engine.qdrant.enabled:
+                logger.info(f"🧠 Unified Pipeline: Distilling {len(kb_units)} knowledge units into Hivemind...")
+                
+                for unit in kb_units:
+                    issue = unit.get("issue")
+                    solution = unit.get("solution")
+                    reliability = unit.get("reliability_score", 0.0)
+                    
+                    # Only save high-reliability knowledge
+                    if issue and solution and reliability > 0.6:
+                        try:
+                            # Generate embedding for the issue
+                            vector = app.state.rag_engine.embeddings.embed_query(issue)
+                            
+                            # Upsert to Qdrant
+                            await app.state.rag_engine.qdrant.upsert_case(
+                                user_id=request.user_id or "anonymous",
+                                issue=issue,
+                                solution=solution,
+                                vector=vector,
+                                tenant_id=request.tenant_id,
+                                metadata={
+                                    "session_id": request.session_id,
+                                    "category": unit.get("category", "general"),
+                                    "reliability": reliability,
+                                    "extracted_via": "unified_reasoning_pipeline"
+                                }
+                            )
+                            saved_hivemind_chunks.append({
+                                "issue": issue,
+                                "category": unit.get("category", "general")
+                            })
+                        except Exception as e:
+                            logger.error(f"Failed to save unified knowledge node: {e}")
+        
+        # 3. Enrich report with metadata about saved knowledge
+        report["hivemind_updates"] = {
+            "chunks_saved": len(saved_hivemind_chunks),
+            "summary": saved_hivemind_chunks
+        }
+        
+        # 4. Clear Final Report in Logs
+        logger.info(f"📊 FINAL SESSION REPORT: {request.session_id}")
+        logger.info(f"   ├─ Sentiment: {report['analysis'].get('overall_sentiment', 'N/A')} ({report['analysis'].get('resolution_status', 'Unknown')})")
+        logger.info(f"   ├─ Churn Risk: {report['business_signals'].get('is_churn_risk', 'N/A')} | Priority: {report['business_signals'].get('priority_level', 'NORMAL')}")
+        logger.info(f"   ├─ Agent IQ: {report['metrics'].get('agent_iq', 'N/A')} | Velocity: {report['metrics'].get('frustration_velocity', 'STABLE')}")
+        logger.info(f"   └─ Hivemind: {len(saved_hivemind_chunks)} knowledge units learned and archived.")
+        
+        if saved_hivemind_chunks:
+            for i, chunk in enumerate(saved_hivemind_chunks):
+                logger.info(f"      • Learning [{i+1}]: {chunk['issue'][:60]}...")
+        
+        return AnalyzeSessionResponse(status="success", report=report)
+        
+    except Exception as e:
+        logger.error(f"Session analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 @app.post("/api/v1/save_case", response_model=SaveCaseResponse)

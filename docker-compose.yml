@@ -41,6 +41,9 @@ services:
     environment:
       LLM_PROVIDER: groq
       LLM_API_KEY: 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
+      LLM_MODEL: openai/gpt-oss-20b
+      ANALYTICS_MODEL: qwen/qwen3-32b
+      LOG_LEVEL: DEBUG
       REDIS_URL: 'redis://redis:6379/0'
       QDRANT_URL: 'http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333'
       QDRANT_API_KEY: 'WAkhOeXiD3DShev81qxn5PYKpQ9t6ufb'

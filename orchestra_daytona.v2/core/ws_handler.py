@@ -3169,63 +3169,60 @@ class OrchestratorWSHandler:
             
         logger.info(f"[{session.session_id}] 📑 SESSION REPORT: {json.dumps(report)}")
         
-        # 2. 🧠 HIVE MIND SYNC
+        # 2. 🧠 DEVINCIAI SENTIMENT & REASONING PIPELINE
         if session.history_manager:
             try:
-                # Format full conversation history for distillation
-                full_history = session.history_manager.get_context_window()
+                # Construct history list (time-aware)
+                history_list = session.history_manager.to_dict()
                 
-                # Check if we have enough content to warrant distillation
-                if full_history and len(full_history.strip()) > 30:
-                    logger.info(f"[{session.session_id}] 🧠 Sending full session history to Hive Mind for distillation")
-                    
-                    # Use fallback ID for anonymous users
-                    user_id = session.user_id or f"anonymous_{session.session_id}"
-                    
-                    # Call RAG service to save with history_context
-                    # Use session override if available, otherwise global default
+                if history_list and len(history_list) > 0:
+                    logger.info(f"[{session.session_id}] 🧠 Triggering DavinciAI Sentiment & Reasoning Pipeline...")
                     base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
-                    save_url = f"{base_rag_url}/api/v1/save_case"
+                    analysis_url = f"{base_rag_url}/api/v1/analyze_session"
                     
                     try:
                         async with aiohttp.ClientSession() as http_session:
                             payload = {
-                                "user_id": user_id,
-                                "tenant_id": session.tenant_id or session.agent_name,
-                                "history_context": full_history,
+                                "session_id": session.session_id,
+                                "history_context": history_list,
+                                "user_id": session.user_id or "anonymous",
+                                "tenant_id": session.tenant_id or "demo",
                                 "metadata": {
-                                    "session_id": session.session_id,
-                                    "timestamp": time.time(),
+                                    "agent_name": session.agent_name,
+                                    "agent_id": session.agent_id,
                                     "source": "orchestrator_cleanup"
-                                },
-                                "issue": "", # Let RAG distill these
-                                "solution": "" 
+                                }
                             }
                             
                             async with http_session.post(
-                                save_url,
+                                analysis_url,
                                 json=payload,
-                                timeout=aiohttp.ClientTimeout(total=30.0) # Distillation takes time
+                                timeout=aiohttp.ClientTimeout(total=20.0) # Analysis can take 10-15s
                             ) as resp:
                                 if resp.status == 200:
-                                    logger.info(f"[{session.session_id}] ✅ Case distilled and saved to Hive Mind")
+                                    resp_data = await resp.json()
+                                    analysis_report = resp_data.get("report", {})
+                                    logger.info(f"[{session.session_id}] ✅ Analytics Pipeline success in {analysis_report.get('processing_time')}s")
+                                    
+                                    # Attach rich analysis to the final report
+                                    report["analysis"] = analysis_report
+                                    
+                                    # Forward key signals to backend metrics
+                                    if "business_signals" in analysis_report:
+                                        report.update(analysis_report["business_signals"])
                                 else:
-                                    try:
-                                        resp_text = await resp.text()
-                                        logger.warning(f"[{session.session_id}] ⚠️ Failed to save case: {resp.status} - {resp_text}")
-                                    except:
-                                        logger.warning(f"[{session.session_id}] ⚠️ Failed to save case: {resp.status}")
+                                    logger.warning(f"[{session.session_id}] ⚠️ Analytics Pipeline failed: {resp.status}")
                     except asyncio.TimeoutError:
-                        logger.warning(f"[{session.session_id}] ⚠️ Save case timeout (summarization too long)")
-                    except Exception as save_error:
-                        logger.debug(f"[{session.session_id}] Save case error: {save_error}")
+                        logger.warning(f"[{session.session_id}] ⚠️ Analytics Pipeline timeout")
+                    except Exception as e:
+                        logger.error(f"[{session.session_id}] ❌ Analytics Pipeline error: {e}")
             except Exception as e:
-                logger.debug(f"[{session.session_id}] Session summary preparation error: {e}")
-        
+                logger.error(f"[{session.session_id}] ❌ Sentiment Pipeline setup error: {e}")
+
         # 3. 📡 EXTERNAL METRICS WEBHOOK (BACKEND)
         webhook_url = self.config.services.davinciai_backend_url
         try:
-            logger.info(f"[{session.session_id}] 📡 Sending session report to backend...")
+            logger.info(f"[{session.session_id}] 📡 Sending enriched session report to backend...")
             async with aiohttp.ClientSession() as http_session:
                 async with http_session.post(
                     webhook_url,
@@ -3233,7 +3230,7 @@ class OrchestratorWSHandler:
                     timeout=aiohttp.ClientTimeout(total=10.0)
                 ) as resp:
                     if resp.status in [200, 201]:
-                        logger.info(f"[{session.session_id}] ✅ Session report delivered to backend")
+                        logger.info(f"[{session.session_id}] ✅ Enriched report delivered to backend")
                     else:
                         resp_text = await resp.text()
                         logger.warning(f"[{session.session_id}] ⚠️ Backend rejected report: {resp.status} - {resp_text}")

@@ -153,9 +153,9 @@ class ContextArchitect:
     </doc>\n"""
             
         return f"""<current_execution>
-  <episodic_history>
-{history_xml}  </episodic_history>
   <retrieved_context>
 {context_xml}  </retrieved_context>
+  <episodic_history>
+{history_xml}  </episodic_history>
   <user_input>{cls._escape(query)}</user_input>
 </current_execution>"""
