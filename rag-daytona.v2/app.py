@@ -125,6 +125,7 @@ class PlanStepRequest(BaseModel):
     warning_message: Optional[str] = Field("", description="Warning about stagnant DOM or previous failures")
     current_url: Optional[str] = Field("", description="Current page URL for GPS hints")
     last_action: Optional[str] = Field("", description="Summary of last action taken")
+    action_history: Optional[List[str]] = Field(default_factory=list, description="List of recent actions for loop detection")
     map_hints: Optional[str] = Field("", description="Pre-fetched GPS navigation hints")
     client_id: Optional[str] = Field("demo", description="Client/Tenant ID for map lookup")
     session_id: str = Field(..., description="Session identifier")
@@ -138,6 +139,10 @@ class EmbedRequest(BaseModel):
 
 class EmbedResponse(BaseModel):
     embedding: List[float]
+
+class DynamicExitRequest(BaseModel):
+    history_context: str = Field(..., description="Conversation history for context")
+    language: Optional[str] = Field("english", description="Response language")
 
 
 # Global state (initialized in lifespan)
@@ -478,7 +483,8 @@ async def plan_next_step(request: PlanStepRequest):
             current_url=request.current_url,
             last_action=request.last_action,
             map_hints=request.map_hints,  # Pre-fetched, no Qdrant query here
-            client_id=request.client_id
+            client_id=request.client_id,
+            action_history=request.action_history or []
         )
         return result
     except Exception as e:
@@ -505,6 +511,22 @@ async def get_map_hints(request: MapHintsRequest):
     except Exception as e:
         logger.warning(f"Map hints fetch failed: {e}")
         return {"hints": ""}
+
+@app.post("/api/v1/generate_exit")
+async def generate_exit(request_data: DynamicExitRequest):
+    """Generate a dynamic closing statement for the session."""
+    if app.state.rag_engine is None:
+        raise HTTPException(status_code=503, detail="RAG engine not initialized")
+    
+    try:
+        exit_speech = await app.state.rag_engine.generate_dynamic_exit(
+            request_data.history_context,
+            request_data.language
+        )
+        return {"exit_speech": exit_speech}
+    except Exception as e:
+        logger.error(f"Exit generation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/embed", response_model=EmbedResponse)
 async def embed_text(request_data: EmbedRequest):

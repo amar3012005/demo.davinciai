@@ -80,6 +80,18 @@ if current_hash == session.last_dom_hash:
         await end_mission(session, "The screen isn't responding.")
 ```
 
+### 5. **Dynamic Session-End Dialogue** ⚡ NEW
+TARA no longer uses static goodbye phrases. When a session ends, she:
+1. **Analyzes** the conversation history via RAG.
+2. **Summarizes** key accomplishments or the last few actions briefly.
+3. **Closes** with a proactive follow-up question (e.g., "Is there anything else I can assist you with before I go?").
+
+This makes the transition out of the session feel human and naturally helpful.
+
+**Backend Implementation:**
+- `RAG Service`: New `/api/v1/generate_exit` endpoint generates context-aware speech.
+- `Orchestrator`: Detects exit keywords (`ws_handler.py`), calls the dynamic exit generator, and streams the result via TTS.
+
 ## LLM Prompt Structure
 
 ### Input Context

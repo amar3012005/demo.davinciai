@@ -692,6 +692,33 @@ class RAGClient:
         except Exception as e:
             logger.error(f"RAG visual_orchestrate error: {e}")
 
+    async def generate_exit(self, history_context: str, language: str = "en", base_url: Optional[str] = None) -> str:
+        """Call RAG service to generate a dynamic exit message."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                ssl_context = False if self.skip_ssl else None
+                payload = {
+                    "history_context": history_context,
+                    "language": language
+                }
+                
+                url = base_url if base_url else self.config.url
+                async with session.post(
+                    f"{url}/api/v1/generate_exit",
+                    json=payload,
+                    ssl=ssl_context,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("exit_speech", "")
+                    else:
+                        logger.error(f"RAG generate_exit error: HTTP {resp.status}")
+                        return ""
+        except Exception as e:
+            logger.error(f"RAG generate_exit client error: {e}")
+            return ""
+
 
 class IntentClient:
     """Client for Intent classification service"""

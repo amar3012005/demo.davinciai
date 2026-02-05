@@ -90,7 +90,9 @@ class OrchestratorSession:
     max_stagnation: int = 3
     current_url: str = ""  # Current page URL for GPS hints
     last_action: str = ""  # Summary of last action taken
+    action_history: List[str] = field(default_factory=list)  # Last N actions for loop detection
     map_hints: str = ""  # Cached Qdrant GPS hints (fetched once at Step 0)
+
 
     # Language override (for dynamic language switching)
     stream_out_override: Optional[str] = None
@@ -3199,9 +3201,28 @@ class OrchestratorWSHandler:
             except asyncio.CancelledError:
                 pass
         
-        # Get exit message (use output language)
-        exit_asset = self.dialogue_manager.get_exit(output_language)
-        if exit_asset:
+        # 1. Try to generate a dynamic exit via RAG
+        history_context = session.history_manager.get_history_as_string()
+        dynamic_exit_text = await self.pipeline.rag_client.generate_exit(
+            history_context=history_context,
+            language=output_language
+        )
+        
+        exit_asset = None
+        exit_text = None
+        use_pregenerated = False
+        
+        if dynamic_exit_text:
+            logger.info(f"[{session.session_id}] 🎤 Generated dynamic exit: {dynamic_exit_text[:50]}...")
+            exit_text = dynamic_exit_text
+        else:
+            # Fallback to static dialogue assets
+            exit_asset = self.dialogue_manager.get_exit(output_language)
+            if exit_asset:
+                exit_text = exit_asset.text
+                use_pregenerated = exit_asset.has_audio()
+        
+        if exit_text:
             # Cancel any ongoing TTS/tasks before playing exit
             if session.tts_task and not session.tts_task.done():
                 session.tts_task.cancel()
@@ -3218,13 +3239,13 @@ class OrchestratorWSHandler:
             else:
                 logger.info(f"[{session.session_id}] 🔄 Already in SPEAKING state, playing exit audio without state transition")
             
-            # Prefer audio file if available
-            if exit_asset.has_audio():
+            # Play audio
+            if use_pregenerated and exit_asset:
                 logger.info(f"[{session.session_id}] 💿 Using pre-generated exit: {exit_asset.audio_path}")
                 await self._stream_audio_file(session, exit_asset.audio_path)
             else:
-                logger.info(f"[{session.session_id}] 🔊 Generating exit via TTS: {exit_asset.text[:50]}...")
-                await self._stream_tts_to_browser(session, exit_asset.text, output_language)
+                logger.info(f"[{session.session_id}] 🔊 Playing exit via TTS: {exit_text[:50]}...")
+                await self._stream_tts_to_browser(session, exit_text, output_language)
             
             # Wait for exit audio to finish playing before closing
             if session.tts_task and not session.tts_task.done():
@@ -3681,13 +3702,24 @@ class OrchestratorWSHandler:
         return ""
 
     async def _end_mission(self, session: OrchestratorSession, summary: str):
-        """Complete or abort a mission."""
+        """Complete or abort a mission. Waits for TTS to finish before transitioning."""
         session.current_goal = None
         session.is_mission_active = False
         session.goal_step_count = 0
+        session.action_history = []  # Clear history for new missions
         logger.info(f"[{session.session_id}] ✅ Mission Ended: '{summary}'")
+
         
+        # Speak the summary and WAIT for it to complete
         await self._stream_tts_to_browser(session, summary, session.current_language)
+        
+        # Wait for TTS task to finish before transitioning state
+        if session.tts_task and not session.tts_task.done():
+            try:
+                await session.tts_task
+            except asyncio.CancelledError:
+                pass
+        
         await session.state_manager.transition(State.LISTENING, trigger="mission_complete")
         await self._broadcast_state(session, State.LISTENING)
 
@@ -3741,7 +3773,8 @@ class OrchestratorWSHandler:
         
         if confidence == "low":
             logger.warning(f"[{session.session_id}] ⚠️ LOW CONFIDENCE detected. Asking user for guidance.")
-            clarification_msg = "I'm not sure where to find that. Could you give me a hint or guide me manually?"
+            # Use speech from planner if available, otherwise fallback
+            clarification_msg = plan.get("speech", "I'm not sure where to find that. Could you give me a hint or guide me manually?")
             await self._stream_tts_to_browser(session, clarification_msg, session.current_language)
             await self._end_mission(session, clarification_msg)
             return
@@ -3771,8 +3804,17 @@ class OrchestratorWSHandler:
             # Narrate the wait
             wait_speech = plan.get("speech", "Just a moment while this loads...")
             await self._stream_tts_to_browser(session, wait_speech, session.current_language)
+            
+            # Wait for TTS to finish before proceeding
+            if session.tts_task and not session.tts_task.done():
+                try:
+                    await session.tts_task
+                except asyncio.CancelledError:
+                    pass
+            
             await asyncio.sleep(1.0)
             await self._execute_next_step(session)
+
         else:
             # Execute the action
             session.goal_step_count += 1
@@ -3780,15 +3822,31 @@ class OrchestratorWSHandler:
             
             # Map target_id for consistency
             actual_target = action_payload.get('target_id') or action_payload.get('id') or action_payload.get('url', 'unknown')
-            session.last_action = f"{action_type}: {actual_target}"
+            current_action_sig = f"{action_type}: {actual_target}"
+            
+            # Track action history (keep last 5)
+            session.action_history.append(current_action_sig)
+            if len(session.action_history) > 5:
+                session.action_history = session.action_history[-5:]
+            
+            # IMPROVED LOOP DETECTION: Check if this action was already done recently
+            if session.action_history.count(current_action_sig) > 1:
+                logger.warning(f"[{session.session_id}] 🔄 LOOP DETECTED: '{current_action_sig}' already in history: {session.action_history}")
+                await self._end_mission(session, "I seem to be going in circles. Let me stop here so you can guide me.")
+                return
+            
+            session.last_action = current_action_sig
             logger.info(f"[{session.session_id}] 🎬 Step {session.goal_step_count}: {action_type} on {actual_target}")
+
             
             # NARRATE BEFORE ACTING (Co-Pilot Mode)
+            # Start TTS simultaneously with action for true co-browsing feel
             step_speech = plan.get("speech")
+            tts_task = None
             if step_speech:
                 logger.info(f"[{session.session_id}] 🗣️ Narrating: {step_speech}")
-                # Start TTS  in background so action executes simultaneously
-                asyncio.create_task(self._stream_tts_to_browser(session, step_speech, session.current_language))
+                # Launch TTS but save the task so we can wait for it
+                tts_task = asyncio.create_task(self._stream_tts_to_browser(session, step_speech, session.current_language))
             
             # Handle navigate specially (tells frontend to change URL)
             if action_type == "navigate":
@@ -3801,6 +3859,13 @@ class OrchestratorWSHandler:
                     "type": "command",
                     "payload": action_payload
                 }, session)
+            
+            # SYNC: Wait for voice to finish before proceeding to next step
+            if tts_task and not tts_task.done():
+                try:
+                    await tts_task
+                except asyncio.CancelledError:
+                    pass
 
     async def _call_visual_planner(self, session: OrchestratorSession, dom: list, warning: str) -> dict:
         """Call RAG service for next step planning."""
@@ -3815,11 +3880,13 @@ class OrchestratorWSHandler:
                     "warning_message": warning,
                     "current_url": session.current_url,
                     "last_action": session.last_action,
+                    "action_history": session.action_history,  # For loop detection
                     "map_hints": session.map_hints,  # Pre-fetched at mission start
                     "client_id": session.tenant_id or "demo",
                     "session_id": session.session_id
                 }
             )
+
             response.raise_for_status()
             return response.json()
 
