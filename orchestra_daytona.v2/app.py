@@ -360,6 +360,14 @@ app = FastAPI(
 # Add metrics middleware
 app.add_middleware(MetricsMiddleware)
 
+# Mount static files to serve tara-widget.js
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    logger.info(f"✅ Static files mounted from {static_dir}")
+else:
+    logger.warning(f"⚠️ Static directory NOT found at {static_dir}")
+
 
 @app.get("/")
 async def root():

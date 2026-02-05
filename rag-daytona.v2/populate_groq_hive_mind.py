@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Populate Qdrant Hive Mind with 'Website Sitemap' hints for Engel & Völkers.
+Populate Qdrant Hive Mind with 'Website Sitemap' hints for Groq.
 Parses the 'Mega MD' file and ingests Navigation Hints into Qdrant.
 """
 
@@ -15,10 +15,10 @@ from datetime import datetime
 QDRANT_URL = "http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333"
 QDRANT_API_KEY = "WAkhOeXiD3DShev81qxn5PYKpQ9t6ufb"
 COLLECTION_NAME = "tara_case_memory"
-# RAG Service for Embeddings (Local Access)
-RAG_SERVICE_URL = "http://0.0.0.0:8003" 
+# RAG Service for Embeddings (Host Access)
+RAG_SERVICE_URL = "https://127.0.0.1:8444" 
 
-SOURCE_FILE = "/root/hetzner-cloud/Engel & Völkers.md"
+SOURCE_FILE = "/root/hetzner-cloud/groq.md"
 
 headers = {
     "api-key": QDRANT_API_KEY,
@@ -57,7 +57,7 @@ def upsert_point(client_id, url, concept, key_selectors=[]):
         "url": url,
         "concept": concept,
         "key_selectors": key_selectors,
-        "domain": "engelvoelkers.com",
+        "domain": "groq.com",
         "timestamp": int(time.time())
     }
     
@@ -109,7 +109,7 @@ def parse_and_ingest(file_path):
                 current_pillar_url = url
                 current_context = "Main Section"
                 # Index the Pillar itself
-                upsert_point("demo", url, "Engel & Völkers - Main Section")
+                upsert_point("demo", url, "Groq - Main Section")
                 count += 1
                 continue
         
@@ -122,30 +122,31 @@ def parse_and_ingest(file_path):
         matches = link_pattern.findall(line)
         for anchor_text, url in matches:
             # Filter non-relevant links
-            if "cookie" in anchor_text.lower() or "impressum" in anchor_text.lower() or "datenschutz" in anchor_text.lower():
+            if "cookie" in anchor_text.lower() or "impressum" in anchor_text.lower() or "datenschutz" in anchor_text.lower() or "privacy" in anchor_text.lower():
                 continue
             
             # Construct a rich concept string
             # Format: "Anchor Text. Context. Main Section."
             concept = f"{anchor_text}. {current_context}."
-            if "immobilien" in url:
-                 concept += " Real Estate Property Search."
+            if "docs" in url:
+                  concept += " Technical Documentation."
+            elif "console" in url:
+                  concept += " Developer Console & API Management."
             
             success = upsert_point("demo", url, concept)
             if success:
                 count += 1
                 
-    print(f"\n🎉 Total Pages Indexed: {count}")
+    print(f"\n🎉 Total Groq Pages Indexed: {count}")
 
 def main():
-    print("� Starting Sitemap Ingestion for Engel & Völkers...")
+    print("🚀 Starting Sitemap Ingestion for Groq...")
     
     # Simple Health Check
     try:
-        requests.get(f"{RAG_SERVICE_URL}/health", timeout=2)
+        requests.get(f"{RAG_SERVICE_URL}/health", timeout=2, verify=False)
     except:
         print(f"❌ RAG Service likely down at {RAG_SERVICE_URL}. Ensure it is running.")
-        # Proceed anyway? No, vectors are required.
         # return 
     
     parse_and_ingest(SOURCE_FILE)

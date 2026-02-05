@@ -110,8 +110,39 @@ class AnalyzeSessionResponse(BaseModel):
     report: Dict[str, Any]
 
 
+class VisualOrchestrateRequest(BaseModel):
+    query: str = Field(..., description="User query text")
+    session_id: str = Field(..., description="Session identifier")
+    dom_context: List[Dict[str, Any]] = Field(..., description="List of visible DOM elements")
+    history_context: Optional[str] = Field(None, description="Conversation history")
+    language: Optional[str] = Field("english", description="Response language")
+    tenant_id: Optional[str] = Field("demo", description="Tenant identifier")
+    
+class PlanStepRequest(BaseModel):
+    goal: str = Field(..., description="The user's overall mission goal")
+    dom_context: List[Dict[str, Any]] = Field(..., description="Current visible DOM elements")
+    step_number: int = Field(0, description="Current step count in the mission")
+    warning_message: Optional[str] = Field("", description="Warning about stagnant DOM or previous failures")
+    current_url: Optional[str] = Field("", description="Current page URL for GPS hints")
+    last_action: Optional[str] = Field("", description="Summary of last action taken")
+    map_hints: Optional[str] = Field("", description="Pre-fetched GPS navigation hints")
+    client_id: Optional[str] = Field("demo", description="Client/Tenant ID for map lookup")
+    session_id: str = Field(..., description="Session identifier")
+
+class MapHintsRequest(BaseModel):
+    goal: str = Field(..., description="The user's mission goal")
+    client_id: Optional[str] = Field("demo", description="Client/Tenant ID")
+
+class EmbedRequest(BaseModel):
+    text: str = Field(..., description="Text to embed")
+
+class EmbedResponse(BaseModel):
+    embedding: List[float]
+
+
 # Global state (initialized in lifespan)
 rag_engine: Optional[RAGEngine] = None
+visual_orchestrator: Optional[Any] = None
 redis_client: Optional[redis.Redis] = None
 session_analytics: Optional[Any] = None
 cache_hits = 0
@@ -167,6 +198,15 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f" ✅ Session Analytics initialized using model: {config.analytics_model}")
         logger.info(f" 🤖 RAG Engine using LLM model: {config.llm_model}")
+        
+        # Initialize Visual Orchestrator (requires Groq)
+        if config.llm_provider == "groq":
+            from visual_orchestrator import VisualOrchestrator
+            global visual_orchestrator
+            visual_orchestrator = VisualOrchestrator(rag_engine.llm, qdrant_client=rag_engine.qdrant, embeddings=rag_engine.embeddings)
+            logger.info(" ✅ Visual Orchestrator initialized with Qdrant GPS support")
+        else:
+            logger.warning(f" ℹ️ Visual Orchestrator requires 'groq' provider (current: {config.llm_provider})")
         
         # If index not loaded, try to build it (only if local retrieval is enabled)
         if config.enable_local_retrieval:
@@ -389,7 +429,97 @@ async def retrieve_only(request: QueryRequest):
         raise HTTPException(status_code=500, detail=f"Retrieval failed: {str(e)}")
 
 
-@app.post("/api/v1/query")
+@app.post("/api/v1/visual_orchestrate")
+async def visual_orchestrate(request: VisualOrchestrateRequest):
+    """
+    Dual-stream orchestration for Visual Co-Pilot.
+    Parallelizes voice filler and visual action reasoning.
+    """
+    if visual_orchestrator is None:
+        raise HTTPException(status_code=501, detail="Visual Orchestrator not initialized or requires Groq")
+
+    logger.info(f"🎨 Visual Orchestration Request | Session: {request.session_id} | Query: '{request.query}'")
+    logger.debug(f"🔍 DOM Context: {len(request.dom_context)} elements")
+
+    async def stream_generator():
+        try:
+            async for chunk in visual_orchestrator.orchestrate(
+                query=request.query,
+                dom_context=request.dom_context,
+                history=request.history_context or "",
+                language=request.language
+            ):
+                logger.debug(f"📤 Streaming chunk to Orchestrator: {chunk}")
+                yield json.dumps(chunk) + "\n"
+        except Exception as e:
+            logger.error(f"Visual orchestration error: {e}", exc_info=True)
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+
+    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
+@app.post("/api/v1/plan_next_step")
+async def plan_next_step(request: PlanStepRequest):
+    """
+    Core planning endpoint for multi-step missions.
+    Decides the single next action to take based on goal and current DOM.
+    """
+    if visual_orchestrator is None:
+        raise HTTPException(status_code=501, detail="Visual Orchestrator not initialized")
+
+    logger.info(f"🎯 Planner Request | Session: {request.session_id} | Goal: '{request.goal}' | Step: {request.step_number} | URL: {request.current_url}")
+    
+    try:
+        result = await visual_orchestrator.plan_next_step(
+            goal=request.goal,
+            dom_context=request.dom_context,
+            step_number=request.step_number,
+            warning_message=request.warning_message,
+            current_url=request.current_url,
+            last_action=request.last_action,
+            map_hints=request.map_hints,  # Pre-fetched, no Qdrant query here
+            client_id=request.client_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Planning error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/get_map_hints")
+async def get_map_hints(request: MapHintsRequest):
+    """
+    Fetch GPS navigation hints from Qdrant for a given goal.
+    Called ONCE at mission start, then cached by orchestrator.
+    """
+    if visual_orchestrator is None:
+        return {"hints": ""}
+    
+    logger.info(f"🗺️ Map Hints Request | Goal: '{request.goal}' | Client: {request.client_id}")
+    
+    try:
+        hints = await visual_orchestrator.get_navigation_hints(
+            goal=request.goal,
+            client_id=request.client_id
+        )
+        return {"hints": hints}
+    except Exception as e:
+        logger.warning(f"Map hints fetch failed: {e}")
+        return {"hints": ""}
+
+@app.post("/api/v1/embed", response_model=EmbedResponse)
+async def embed_text(request_data: EmbedRequest):
+    """Generate embedding for the given text."""
+    if app.state.rag_engine is None or app.state.rag_engine.embeddings is None:
+        raise HTTPException(status_code=501, detail="Embeddings not initialized")
+    
+    try:
+        # Use embed_query from the configured embeddings provider
+        embedding = app.state.rag_engine.embeddings.embed_query(request_data.text)
+        return EmbedResponse(embedding=embedding)
+    except Exception as e:
+        logger.error(f"Embedding error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 async def query_knowledge_base(request_data: QueryRequest, request: Request):
     """
     Process knowledge base query with context-aware retrieval.
@@ -628,13 +758,43 @@ async def stream_query_knowledge_base(request: QueryRequest):
         # Start query task
         asyncio.create_task(run_query())
 
+        # JITTER BUFFER: Aggregate tokens into sentences for smoother TTS
+        buffer = ""
+        import re
+        
         while True:
             item = await q.get()
             if item is None:
+                # Flush remaining buffer at end of stream
+                if buffer.strip():
+                     accumulated_response += buffer  # Accumulate for logging
+                     yield json.dumps({"text": buffer, "is_final": False}) + "\n"
                 break
+            
             text, is_final = item
-            accumulated_response += text  # Accumulate for logging
-            yield json.dumps({"text": text, "is_final": is_final}) + "\n"
+            buffer += text
+            
+            # Flush on sentence boundaries or significant length
+            # Check for: . ! ? followed by space or end of string, OR newline
+            if re.search(r'[.!?](\s+|$)', buffer) or '\n' in buffer or len(buffer) > 50:
+                 # Check if we are splitting a word (simple heuristic: ends with space)
+                 # If it doesn't end with space/punctuation and is just long, maybe wait? 
+                 # But to be safe for latency, we let >50 chars go if needed, but prefer sentence breaks.
+                 
+                 # Optimization: If length > 80 force flush, otherwise only flush on punctuation
+                 if len(buffer) > 80 or re.search(r'[.!?](\s+|$)', buffer):
+                    accumulated_response += buffer
+                    yield json.dumps({"text": buffer, "is_final": False}) + "\n"
+                    buffer = ""
+            
+            if is_final:
+                # If the final flag is set from the engine, flush everything
+                if buffer:
+                    accumulated_response += buffer
+                    yield json.dumps({"text": buffer, "is_final": True}) + "\n"
+                    buffer = ""
+                else:
+                    yield json.dumps({"text": "", "is_final": True}) + "\n"
             
         # Log complete response after streaming finishes
         if accumulated_response:

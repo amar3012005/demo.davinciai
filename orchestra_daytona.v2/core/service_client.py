@@ -646,6 +646,52 @@ class RAGClient:
         except Exception as e:
             logger.error(f"RAG streaming error: {e}")
 
+    async def visual_orchestrate(self,
+                               query: str,
+                               session_id: str,
+                               dom_context: List[Dict[str, Any]],
+                               history_context: Optional[str] = None,
+                               language: str = "en",
+                               base_url: Optional[str] = None,
+                               tenant_id: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Query RAG service for Visual Co-Pilot (Dual-Stream).
+        Returns NDJSON objects: {"type": "voice"|"action", "content": "..."|"payload": {...}}
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                ssl_context = False if self.skip_ssl else None
+                payload = {
+                    "query": query,
+                    "session_id": session_id,
+                    "dom_context": dom_context,
+                    "history_context": history_context,
+                    "language": language,
+                    "tenant_id": tenant_id
+                }
+
+                url = base_url if base_url else self.config.url
+                orchestrate_url = f"{url}/api/v1/visual_orchestrate"
+                
+                async with session.post(
+                    orchestrate_url,
+                    json=payload,
+                    ssl=ssl_context,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        async for line in resp.content:
+                            line_str = line.decode('utf-8').strip()
+                            if line_str:
+                                try:
+                                    yield json.loads(line_str)
+                                except json.JSONDecodeError:
+                                    continue
+                    else:
+                        logger.error(f"RAG visual_orchestrate error: HTTP {resp.status}")
+        except Exception as e:
+            logger.error(f"RAG visual_orchestrate error: {e}")
+
 
 class IntentClient:
     """Client for Intent classification service"""

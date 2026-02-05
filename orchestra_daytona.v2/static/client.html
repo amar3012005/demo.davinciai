@@ -1058,11 +1058,19 @@
                 };
 
                 this.ws.onmessage = async (event) => {
+                    if (event.data instanceof Blob) {
+                        // Ignore audio data for now or process it if needed
+                        // In client.html we mainly care about JSON control messages
+                        return;
+                    }
+                    if (event.data instanceof ArrayBuffer) {
+                        return;
+                    }
                     try {
                         const data = JSON.parse(event.data);
                         await this.handleMessage(data);
                     } catch (e) {
-                        console.error('Message handling error:', e);
+                        console.error('Message handling error:', e, event.data);
                     }
                 };
 
