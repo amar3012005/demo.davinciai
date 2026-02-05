@@ -99,14 +99,45 @@ class GroqProvider(LLMProvider):
                 extra_args["response_format"] = response_format
 
             model = kwargs.pop("model", self.model_name)
+            
+            # Intelligent splitting for Zoned XML Architecture
+            messages = []
+            if "<system_configuration>" in prompt:
+                try:
+                    parts = prompt.split("</system_configuration>")
+                    system_content = parts[0].replace("<system_configuration>", "").strip()
+                    user_content = parts[1].strip()
+                    
+                    # Safety net for Groq's JSON mode requirement
+                    if response_format and response_format.get("type") == "json_object":
+                        if "json" not in system_content.lower():
+                            system_content += "\nRespond in json format."
+                        if "json" not in user_content.lower():
+                            user_content += "\nRespond in json format."
+
+                    messages = [
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": user_content}
+                    ]
+                except Exception:
+                    messages = [{"role": "user", "content": prompt}]
+            else:
+                messages = [{"role": "user", "content": prompt}]
+
             chat_completion = await self._client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 **extra_args,
                 **kwargs
             )
+            
+            # Log Usage for Caching Verification
+            if hasattr(chat_completion, 'usage'):
+                u = chat_completion.usage
+                logger.info(f"🧬 Groq Usage: {u.prompt_tokens} prompt / {u.completion_tokens} completion. Total: {u.total_tokens}")
+
             return chat_completion.choices[0].message.content
         except Exception as e:
             logger.error(f"Groq generation error: {e}")
@@ -116,15 +147,45 @@ class GroqProvider(LLMProvider):
         """Internal async generator for streaming."""
         try:
             model = kwargs.pop("model", self.model_name)
+            
+            # Intelligent splitting for Zoned XML Architecture
+            messages = []
+            if "<system_configuration>" in prompt:
+                try:
+                    parts = prompt.split("</system_configuration>")
+                    system_content = parts[0].replace("<system_configuration>", "").strip()
+                    user_content = parts[1].strip()
+                    
+                    # Safety net for Groq's JSON mode requirement
+                    if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
+                        if "json" not in system_content.lower():
+                            system_content += "\nRespond in json format."
+                        if "json" not in user_content.lower():
+                            user_content += "\nRespond in json format."
+
+                    messages = [
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": user_content}
+                    ]
+                except Exception:
+                    messages = [{"role": "user", "content": prompt}]
+            else:
+                messages = [{"role": "user", "content": prompt}]
+
             stream = await self._client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
                 **kwargs
             )
+            
+            # Streaming usage is trickier, usually comes in the final chunk's validation
             async for chunk in stream:
+                if hasattr(chunk, 'usage') and chunk.usage:
+                     logger.info(f"🧬 Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.")
+
                 content = chunk.choices[0].delta.content
                 if content:
                     yield content

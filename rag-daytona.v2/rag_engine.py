@@ -404,11 +404,12 @@ class RAGEngine:
         
         # Identity Fast-Path logic handled in process_query, but we return metadata here
         fast_path_type = None
-        if any(x in query_clean for x in ["who are you", "your name", "what are you"]):
+        identity_keywords = ["who are you", "your name", "what are you", "who built you", "who created you", "built by", "created by", "work for", "your employer", "who is your boss"]
+        if any(x in query_clean for x in identity_keywords):
             fast_path_type = "identity"
         elif "pricing" in query_clean or "cost" in query_clean:
             fast_path_type = "pricing"
-        elif re.match(r'^(hi|hello|hey|thanks|thank you|bye|goodbye|ok|yes|no)', query_clean):
+        elif re.match(r'^(hi|hello|hey|thanks|thank you|bye|goodbye|ok|yes|no|morning|evening|greetings)', query_clean):
             fast_path_type = "conversational"
 
         # 2.5 Context-dependent query detection
@@ -441,6 +442,38 @@ class RAGEngine:
             logger.info(f"✂️ History context trimmed to {len(history_context)} chars")
 
         is_context_dependent = any(re.search(pattern, query_clean) for pattern in CONTEXT_DEPENDENT_PATTERNS)
+        
+        # 2.6 Contextual Query Rewriting (The "Follow-up" Fix)
+        # If the user asks "what about that?", we MUST rewrite it using history before retrieval.
+        if is_context_dependent and self.groq_client and history_context:
+            try:
+                rw_start = time.time()
+                # Use a very fast model for rewriting
+                rewrite_prompt = (
+                    f"Conversation History:\n{history_context[-2000:]}\n\n"
+                    f"User's Last Input: {query_english}\n\n"
+                    f"Task: Rewrite the User's Last Input to be a standalone search query that includes necessary context from the history. "
+                    f"Do NOT answer the question. Just output the rewritten query string."
+                )
+                
+                chat = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(None, lambda: self.groq_client.chat.completions.create(
+                        messages=[{"role": "system", "content": "You are a Query Rewriter. Output ONLY the rewritten query. No preamble."}, {"role": "user", "content": rewrite_prompt}],
+                        model="llama-3.1-8b-instant",
+                        temperature=0.1,
+                        max_tokens=60
+                    )),
+                    timeout=0.6
+                )
+                
+                rewritten = chat.choices[0].message.content.strip()
+                # Sanity check: don't use if it's too long or empty
+                if rewritten and len(rewritten) < 200:
+                    logger.info(f"🔄 Rewrote Query: '{query_english}' -> '{rewritten}' ({int((time.time()-rw_start)*1000)}ms)")
+                    query_english = rewritten
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Query rewriting failed: {e}")
         
         # 3. Parallel Retrieval
         retrieval_start = time.time()
@@ -548,7 +581,11 @@ class RAGEngine:
         query_clean = query_english.lower().strip()
         
         if fast_path_type == "identity":
-            response = "I am TARA, the official AI assistant for Daytona (daytona.io). I help developers manage their development environments efficiently."
+            response = (
+                "I am TARA, an advanced AI Assistant built by Davinci AI for Daytona (daytona.io). "
+                "I'm here to help you manage your development environments, optimize your workflows, "
+                "and ensure your team is as productive as possible!"
+            )
             if streaming_callback: streaming_callback(response, True)
             duration = (time.time() - start_time) * 1000
             return {
@@ -560,7 +597,12 @@ class RAGEngine:
             }
 
         if fast_path_type == "pricing":
-            response = "Daytona is open source and free for local use! For cloud/enterprise features, we offer pay-as-you-go pricing: CPU at $0.0504/hr, Memory at $0.0162/GB/hr, and Storage at $0.0001/GB/hr. Solo devs get $200 free compute credits!"
+            response = (
+                "Daytona is open source and completely free for local use! "
+                "For cloud and enterprise environments, we offer a flexible pay-as-you-go model: "
+                "CPU starts at $0.0504/hr, Memory at $0.0162/GB/hr, and Storage at $0.0001/GB/hr. "
+                "By the way, solo developers get $200 in free compute credits to start!"
+            )
             if streaming_callback: streaming_callback(response, True)
             duration = (time.time() - start_time) * 1000
             return {
@@ -710,10 +752,16 @@ class RAGEngine:
     async def _handle_conversational_fast_path(self, query: str, timing: Dict, callback: Optional[Callable], language: str) -> Dict:
         """Handle greetings and thanks without RAG."""
         start = time.time()
-        prompt = f"You are TARA, an AI for Daytona. Respond to the user's greeting/thanks politely in {language}. Be very brief."
+        
+        system_prompt = (
+            f"You are TARA, an advanced AI Assistant built by Davinci AI for Daytona. "
+            f"You are speaking in {language}. Be humanized, warm, and professional. "
+            f"Acknowledge the user's greeting or thanks naturally, but don't ask 'How can I help you?' "
+            f"unless it feels very natural. Keep it to 1-2 sentences."
+        )
         
         # Handle async/sync LLM
-        result = self.llm.generate(prompt=prompt, stream=False)
+        result = self.llm.generate(prompt=system_prompt + "\n\nUser: " + query, stream=False)
         if asyncio.iscoroutine(result):
             answer = await result
         else:
