@@ -89,9 +89,15 @@ CONFIDENCE ASSESSMENT:
 - "medium": Might help but uncertain
 - "low": Unsure which element to click, or confused by page structure
 
-NARRATION (CRITICAL):
-- Generate a short, casual sentence explaining THIS STEP to the user
-- Be conversational and human-like
+NARRATION (CRITICAL - SPEAK LIKE A HUMAN):
+- Generate a short, casual sentence explaining THIS STEP to the user.
+- NEVER spell out raw element IDs, CSS classes, or technical button names.
+- Instead, describe what the element DOES or MEANS contextually.
+  BAD:  "Clicking on btn-cta-pricing-monthly"
+  GOOD: "Let me click on the monthly pricing option for you."
+  BAD:  "Clicking tara-nav-item-docs"
+  GOOD: "Opening the documentation section."
+- Be warm and conversational, like you're sitting next to them.
 
 OUTPUT SCHEMA (json):
 {{
@@ -103,10 +109,12 @@ OUTPUT SCHEMA (json):
 
 RULES:
 - **Output ONLY valid json** (this is required).
-- ALWAYS include "speech" field.
-- Prefer element IDs over text. If no ID, use text exactly as shown.
+- ALWAYS include "speech" field with CONTEXTUAL narration (no raw IDs).
+- Prefer element IDs over text for action targeting. But narrate MEANINGFULLY.
 - NEVER invent elements. Only use what you SEE in the DOM.
-- AVOID LOOPS: Don't repeat the same action twice.
+- AVOID LOOPS: Check ACTION_HISTORY - if you already did an action, DO NOT repeat it.
+- GOAL COMPLETION: If screen shows success message, confirmation, or goal is achieved → output type "none" immediately.
+
 </system_configuration>
 
 Respond in json format.
@@ -114,6 +122,7 @@ Respond in json format.
 GOAL: "{goal}"
 STEP: {step_number} / 10
 LAST ACTION: {last_action}
+ACTION_HISTORY (do NOT repeat these): {action_history}
 WARNINGS: {warning_message}
 
 KNOWN MAP HINTS: {map_hints}
@@ -123,6 +132,7 @@ CURRENT URL: {current_url}
 CURRENT SCREEN STATE (Visible Elements):
 {dom_context}
 """
+
 
 class VisualOrchestrator:
     """Manages dual-stream generation for Visual Co-Pilot"""
@@ -222,10 +232,13 @@ class VisualOrchestrator:
         except Exception as e:
             logger.error(f"Action stream failed: {e}")
 
-    async def plan_next_step(self, goal: str, dom_context: list, step_number: int, warning_message: str = "", current_url: str = "", last_action: str = "", map_hints: str = "", client_id: str = "demo") -> dict:
+    async def plan_next_step(self, goal: str, dom_context: list, step_number: int, warning_message: str = "", current_url: str = "", last_action: str = "", map_hints: str = "", client_id: str = "demo", action_history: list = None) -> dict:
         """Determines the next action in a mission loop with optional map hints."""
         # Truncate DOM context
         dom_str = json.dumps(dom_context[:300], indent=2)
+        
+        # Format action history for prompt
+        action_history_str = ", ".join(action_history) if action_history else "(None yet)"
         
         # STATIC: map_hints are PRE-FETCHED at mission start (Step 0)
         # DYNAMIC: step_context is queried EVERY step based on current DOM
@@ -239,8 +252,10 @@ class VisualOrchestrator:
             step_context=step_context or "No element-specific context available.",
             current_url=current_url or "Unknown",
             last_action=last_action or "(First step)",
+            action_history=action_history_str,
             dom_context=dom_str
         )
+
         
         logger.info(f"📝 PLANNING PROMPT SNIPPET: {prompt[:1000]}...")
         

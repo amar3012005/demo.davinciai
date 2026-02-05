@@ -827,6 +827,44 @@ class RAGEngine:
             logger.error(f"Distillation failed: {e}")
             return []
 
+    async def generate_dynamic_exit(self, history: str, language: str = "english") -> str:
+        """Generate a dynamic summary and closing query for the session."""
+        try:
+            # Map shorthand language codes
+            lang_full = language
+            if language.lower() in ("en", "eng"): lang_full = "english"
+            elif language.lower() in ("de", "deu", "ger"): lang_full = "german"
+
+            prompt = (
+                f"<system_configuration>\n"
+                f"You are TARA, an expressive Visual Co-Pilot for Daytona. "
+                f"The user is ending the session. Your task is to briefly summarize what happened in this session (if possible) "
+                f"and then ask if there's anything else the user needs help with.\n"
+                f"RULES:\n"
+                f"1. Be warm, human-like, and professional.\n"
+                f"2. Summarize the LAST few actions or accomplishments briefly if detectable, otherwise just be warm.\n"
+                f"3. End with a polite closing question (e.g., 'Is there anything else I can assist you with before I go?').\n"
+                f"4. TOTAL LENGTH: MAX 2-3 SENTENCES.\n"
+                f"5. Language: {lang_full}.\n"
+                f"</system_configuration>\n\n"
+                f"Conversation History:\n{history[-3000:]}\n\n"
+                f"Generate the closing statement (speech only, no tags):"
+            )
+            
+            import inspect
+            result = self.llm.generate(prompt=prompt, stream=False)
+            if inspect.iscoroutine(result):
+                response = await result
+            else:
+                response = result
+            
+            return str(response).strip()
+        except Exception as e:
+            logger.error(f"Dynamic exit generation failed: {e}")
+            if language.lower().startswith("ger") or language.lower().startswith("de"):
+                return "Vielen Dank für die Nutzung von Daytona. Kann ich sonst noch etwas für Sie tun?"
+            return "Thank you for using Daytona. Is there anything else I can help you with today?"
+
     def validate_response_quality(self, response: str) -> Dict[str, Any]:
 
         """Human-readable evaluation of response."""
