@@ -213,7 +213,11 @@ class GroqWhisperSession:
                 language=self.config.language
             )
             
-            if result and not result.is_empty and not result.is_low_quality:
+            if result and not result.is_empty:
+                if result.is_hallucination or result.is_low_quality:
+                    logger.info(f"🚫 [{self.session_id}] Filtered micro-chunk hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob:.3f})")
+                    return
+                
                 text = result.text
                 
                 # Update context window
@@ -315,23 +319,25 @@ class GroqWhisperSession:
             )
             
             if result and not result.is_empty:
-                final_text = result.text.strip()
-                
-                if final_text:
-                    await self._emit_transcript(
-                        text=final_text,
-                        is_final=True,
-                        words=result.words,
-                        latency_ms=self.groq_client.last_latency_ms,
-                        avg_logprob=result.avg_logprob,
-                        no_speech_prob=result.no_speech_prob,
-                        compression_ratio=result.compression_ratio,
-                        start_time=result.start,
-                        end_time=result.end,
-                        temperature=result.temperature
-                    )
-                    self.transcripts_emitted += 1
-                    logger.info(f"✅ [{self.session_id}] Full transcript ({self.groq_client.last_latency_ms:.0f}ms): '{final_text[:80]}...'")
+                if result.is_hallucination or result.is_low_quality:
+                    logger.info(f"🚫 [{self.session_id}] Filtered full hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob:.3f})")
+                else:
+                    final_text = result.text.strip()
+                    if final_text:
+                        await self._emit_transcript(
+                            text=final_text,
+                            is_final=True,
+                            words=result.words,
+                            latency_ms=self.groq_client.last_latency_ms,
+                            avg_logprob=result.avg_logprob,
+                            no_speech_prob=result.no_speech_prob,
+                            compression_ratio=result.compression_ratio,
+                            start_time=result.start,
+                            end_time=result.end,
+                            temperature=result.temperature
+                        )
+                        self.transcripts_emitted += 1
+                        logger.info(f"✅ [{self.session_id}] Full transcript ({self.groq_client.last_latency_ms:.0f}ms): '{final_text[:80]}...'")
             
             # Clear full audio buffer
             self.full_audio_buffer.clear()

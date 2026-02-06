@@ -8,6 +8,7 @@ import asyncio
 import io
 import logging
 import time
+import re
 import wave
 from typing import Optional, Dict, Any, List
 import httpx
@@ -66,6 +67,60 @@ class GroqTranscriptionResult:
             return True
         if self.avg_logprob and self.avg_logprob < -1.0:
             return True
+        return False
+    
+    @property
+    def is_hallucination(self) -> bool:
+        """Check if transcription is a known Whisper hallucination"""
+        if not self.text:
+            return False
+        
+        # Lowercase and strip punctuation for robust comparison
+        text_raw = self.text.lower().strip()
+        # Remove everything except letters and numbers
+        text_clean = re.sub(r'[^a-zA-Z0-9]', '', text_raw)
+        
+        hallucinations_clean = [
+            "thankyou",
+            "you",
+            "thanksforwatching",
+            "bye",
+            "goodbye",
+            "subscribetomychannel",
+            "pleasesubscribe",
+            "theend",
+            "hallo", # Whisper sometimes hallucinates "Hallo" for silence
+            "und",   # "And" in German
+        ]
+        
+        # Exact clean match
+        if text_clean in hallucinations_clean:
+            return True
+        
+        # Also check for empty strings after punctuation removal (just "....")
+        if not text_clean:
+            return True
+        
+        # Common Whisper hallucinations (literal list as fallback)
+        hallucinations_literal = [
+            "thank you", "thank you.", "thank you...", "thank you....", 
+            "you", "you.", "you...", "you....",
+            "thanks for watching", "bye", "bye.", "goodbye",
+            ".", "..", "...", "....",
+        ]
+        
+        if text_raw in hallucinations_literal:
+            return True
+            
+        # Check for very short transcripts with high no_speech_prob
+        if len(text_clean) < 5 and self.no_speech_prob and self.no_speech_prob > 0.5:
+            return True
+        
+        # Check for repetitive patterns (e.g., "you you you")
+        words = text_raw.split()
+        if len(words) > 1 and len(set(words)) == 1:  # All words are the same
+            return True
+        
         return False
     
     def to_dict(self) -> Dict[str, Any]:
@@ -213,7 +268,8 @@ class GroqWhisperClient:
                     result = GroqTranscriptionResult(response.json())
                     
                     if result.text:
-                        logger.info(f"✅ Groq transcription ({elapsed_ms:.0f}ms): '{result.text[:50]}...'")
+                        status = "🚫 HALLUCINATION" if result.is_hallucination else "✅"
+                        logger.info(f"{status} Groq transcription ({elapsed_ms:.0f}ms): '{result.text[:50]}...'")
                     else:
                         logger.debug(f"📭 Groq returned empty transcription ({elapsed_ms:.0f}ms)")
                     

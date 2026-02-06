@@ -1048,6 +1048,7 @@
 
                 this.setupCanvas();
                 this.setupEvents();
+                this.connectWebSocket();
             }
 
             setupCanvas() {
@@ -1079,6 +1080,55 @@
                 this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
                 this.canvas.addEventListener('mouseleave', () => this.hideTooltip());
                 this.canvas.addEventListener('wheel', (e) => this.handleZoom(e));
+            }
+
+            connectWebSocket() {
+                try {
+                    const baseUrl = window.API_BASE || '';
+                    let wsUrl;
+
+                    if (baseUrl.startsWith('http')) {
+                        wsUrl = baseUrl.replace('http', 'ws') + '/ws/hive-mind';
+                    } else {
+                        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        wsUrl = `${protocol}//${window.location.host}${baseUrl}/ws/hive-mind`;
+                    }
+
+                    console.log('🔌 Connecting to Hive Mind WebSocket:', wsUrl);
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        console.log('✅ Hive Mind WebSocket connected');
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'new_knowledge') {
+                                console.log('✨ New knowledge received via WebSocket:', data.node);
+                                // Refresh to get the new projection
+                                this.loadData();
+                                // Also refresh insights
+                                if (typeof loadHiveMindInsights === 'function') {
+                                    loadHiveMindInsights();
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing WebSocket message:', e);
+                        }
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('🔌 Hive Mind WebSocket disconnected. Reconnecting in 5s...');
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+
+                    this.ws.onerror = (err) => {
+                        console.error('❌ Hive Mind WebSocket error:', err);
+                    };
+                } catch (e) {
+                    console.error('Failed to initialize Hive Mind WebSocket:', e);
+                }
             }
 
             async loadData() {

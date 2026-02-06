@@ -91,8 +91,15 @@ class OrchestratorSession:
     current_url: str = ""  # Current page URL for GPS hints
     last_action: str = ""  # Summary of last action taken
     action_history: List[str] = field(default_factory=list)  # Last N actions for loop detection
+    dom_history: List[List[Dict[str, Any]]] = field(default_factory=list)  # Last 3 DOM snapshots for context diffing
     map_hints: str = ""  # Cached Qdrant GPS hints (fetched once at Step 0)
+    speaker_muted: bool = False  # Track if user has muted the speaker (for turbo mode)
+    interaction_mode: str = "interactive"  # "interactive" or "turbo" - set per session
 
+    # Dedicated audio WebSocket (for /stream endpoint)
+    audio_websocket: Optional[WebSocket] = None
+    audio_ws_connected: bool = False
+    audio_send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # Language override (for dynamic language switching)
     stream_out_override: Optional[str] = None
@@ -578,7 +585,81 @@ class OrchestratorWSHandler:
                         pass
             
             await self._cleanup_session(session)
-    
+
+    async def handle_audio_stream(self, websocket: WebSocket, session_id: Optional[str] = None):
+        """
+        Dedicated audio streaming WebSocket handler.
+        Binary-only channel for TTS audio to eliminate contention with control messages.
+        """
+        # Resolve session_id from query params if not provided
+        query_params = dict(websocket.query_params)
+        if not session_id:
+            session_id = query_params.get("session_id")
+
+        if not session_id or session_id not in self.sessions:
+            await websocket.close(code=4004, reason="Invalid or missing session_id")
+            return
+
+        session = self.sessions[session_id]
+
+        # Only allow audio WS for interactive mode sessions
+        if session.interaction_mode == "turbo":
+            await websocket.close(code=4003, reason="Audio stream not available in turbo mode")
+            return
+
+        await websocket.accept()
+        logger.info(f"[{session_id}] 🔊 Audio stream WebSocket connected")
+
+        # Register on session
+        session.audio_websocket = websocket
+        session.audio_ws_connected = True
+
+        # Send handshake
+        try:
+            await websocket.send_json({
+                "type": "audio_stream_ready",
+                "session_id": session_id
+            })
+        except Exception as e:
+            logger.error(f"[{session_id}] Audio stream handshake failed: {e}")
+            session.audio_ws_connected = False
+            session.audio_websocket = None
+            return
+
+        # Keep-alive loop: listen for client messages (e.g. audio_interrupt)
+        try:
+            while not session.is_closed:
+                try:
+                    message = await websocket.receive()
+
+                    if message["type"] == "websocket.disconnect":
+                        break
+
+                    if message["type"] == "websocket.receive":
+                        # Handle text messages (JSON commands like audio_interrupt)
+                        if "text" in message:
+                            try:
+                                data = json.loads(message["text"])
+                                msg_type = data.get("type")
+                                if msg_type == "audio_interrupt":
+                                    logger.info(f"[{session_id}] 🔊 Audio interrupt via audio stream")
+                                    await self._handle_interrupt(session, data)
+                                elif msg_type == "ping":
+                                    await websocket.send_json({"type": "pong"})
+                            except json.JSONDecodeError:
+                                pass
+                        # Binary messages from client on audio WS are ignored
+                except WebSocketDisconnect:
+                    break
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Audio stream receive error: {e}")
+                    break
+        finally:
+            # Cleanup
+            session.audio_ws_connected = False
+            session.audio_websocket = None
+            logger.info(f"[{session_id}] 🔊 Audio stream WebSocket disconnected")
+
     async def _create_session(self, websocket: WebSocket, session_id: Optional[str] = None, user_id: Optional[str] = None) -> OrchestratorSession:
         """Create new session"""
         if session_id is None:
@@ -631,6 +712,10 @@ class OrchestratorWSHandler:
             await self._handle_execution_complete(session, msg)
         elif msg_type == "change_language":
             await self._handle_change_language(session, msg)
+        elif msg_type == "speaker_mute":
+            await self._handle_speaker_mute(session, msg)
+        elif msg_type == "request_asset":
+            await self._handle_request_asset(session, msg)
         elif msg_type == "pong":
             # Heartbeat response - can be safely ignored
             pass
@@ -2189,6 +2274,17 @@ class OrchestratorWSHandler:
     async def _handle_session_config(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle session configuration changes (e.g., switching to visual-copilot)"""
         mode = msg.get("mode")
+
+        # Read interaction_mode (interactive/turbo) from client
+        interaction_mode = msg.get("interaction_mode", "interactive")
+        if interaction_mode in ("interactive", "turbo"):
+            session.interaction_mode = interaction_mode
+            # In turbo mode, skip TTS audio generation entirely
+            if interaction_mode == "turbo":
+                session.tts_mode = "text"
+                session.speaker_muted = True
+            logger.info(f"[{session.session_id}] 🎛️ Interaction mode: {interaction_mode}")
+
         if mode in ["voice", "visual-copilot"]:
             prev_mode = session.mode
             session.mode = mode
@@ -2212,12 +2308,13 @@ class OrchestratorWSHandler:
                     logger.info(f"[{session.session_id}] 👁️ DOM elements found in session_config: {len(elements)} items")
 
                 # Ensure we move through valid states for the intro
+                # Go directly to SPEAKING (skip THINKING/Processing) so user can't interrupt
                 if session.state_manager.state == State.IDLE:
                     await session.state_manager.transition(State.LISTENING, trigger="auto_start")
-                
+
                 if session.state_manager.state == State.LISTENING:
-                    await session.state_manager.transition(State.THINKING, trigger="intro_trigger")
-                    await self._broadcast_state(session, State.THINKING)
+                    await session.state_manager.transition(State.SPEAKING, trigger="intro_trigger")
+                    await self._broadcast_state(session, State.SPEAKING)
                 
                 # Trigger a generic visual greeting AFTER a short delay to allow DOM sync
                 # Trigger a generic visual greeting AFTER a short delay to allow DOM sync
@@ -2237,29 +2334,105 @@ class OrchestratorWSHandler:
 
                         if session.is_closed: return
 
-                        # We force State.THINKING in case it changed
-                        if session.state_manager.state != State.THINKING:
-                            await session.state_manager.transition(State.THINKING, trigger="intro_trigger_delayed")
-                            await self._broadcast_state(session, State.THINKING)
+                        # Ensure we are in SPEAKING state for intro (skip THINKING/Processing)
+                        if session.state_manager.state != State.SPEAKING:
+                            if session.state_manager.state == State.LISTENING:
+                                await session.state_manager.transition(State.SPEAKING, trigger="intro_trigger_delayed")
+                            await self._broadcast_state(session, State.SPEAKING)
+                        
+                        # DYNAMIC INTRO: Quickly identify website from DOM
+                        website_name = "this website"
+                        if session.dom_context and len(session.dom_context) > 0:
+                            # Fast scan for website identifiers (title, logo text, h1, meta)
+                            for el in session.dom_context[:30]:  # Check first 30 elements only
+                                el_type = el.get('type', '').lower()
+                                el_text = el.get('text', '').strip()
+                                
+                                # Priority 1: Page title or h1
+                                if el_type in ['title', 'h1'] and el_text and len(el_text) < 50:
+                                    # Clean up common patterns
+                                    website_name = el_text.split('|')[0].split('-')[0].strip()
+                                    break
+                                
+                                # Priority 2: Logo or brand text
+                                if 'logo' in el.get('id', '').lower() or 'brand' in el.get('id', '').lower():
+                                    if el_text and len(el_text) < 30:
+                                        website_name = el_text
+                                        break
                             
-                        # Use a friendly voice-only intro without generating RAG/Actions
-                        intro_text = "Hello! I am your Visual Co-Pilot. I can see your dashboard and help you navigate or analyze your data. Just tell me what you need!"
+                            # Fallback: Try to extract from URL
+                            if website_name == "this website" and session.current_url:
+                                try:
+                                    from urllib.parse import urlparse
+                                    domain = urlparse(session.current_url).netloc
+                                    # Remove www. and common TLDs
+                                    domain = domain.replace('www.', '').split('.')[0]
+                                    if domain and len(domain) > 2:
+                                        website_name = domain.capitalize()
+                                except:
+                                    pass
+                        
+                        # Generate dynamic intro
                         if session.current_language == "de":
-                            intro_text = "Hallo! Ich bin Ihr Visual Co-Pilot. Ich sehe Ihr Dashboard und kann Ihnen helfen, Daten zu analysieren oder Aktionen auszuführen. Sagen Sie mir einfach, wie ich Ihnen helfen kann!"
+                            intro_text = f"Hallo! Ich bin TARA, Ihr visueller Co-Browsing-Pilot. Ich sehe, wir sind auf {website_name}. Wie kann ich Ihnen helfen?"
+                        else:
+                            intro_text = f"Hello! I am TARA, your visual co-browsing pilot. I can see we're on {website_name}. How can I assist you?"
                             
-                        logger.info(f"[{session.session_id}] 🔊 Speaking intro greeting (Voice Only)")
+                        logger.info(f"[{session.session_id}] 🔊 Speaking dynamic intro: '{intro_text[:80]}...'")
                         await self._stream_tts_to_browser(session, intro_text, session.current_language)
                         
                         # Return to LISTENING so user can now talk
                         if not session.is_closed:
-                            await session.state_manager.transition(State.LISTENING, trigger="intro_complete")
-                            await self._broadcast_state(session, State.LISTENING)
+                            # Avoid double transition if timer already set it
+                            if session.state_manager.state != State.LISTENING:
+                                await session.state_manager.transition(State.LISTENING, trigger="intro_complete")
+                                await self._broadcast_state(session, State.LISTENING)
+                            
+                            # Reset timeout timer so we don't timeout immediately after long intro
+                            session.last_activity = time.time()
                 
                 asyncio.create_task(delayed_intro())
 
     async def _handle_dom_update(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Update the cached DOM context for visual mode"""
         elements = msg.get("elements") or msg.get("visible_elements") or msg.get("payload")
+        
+        # Update current URL if provided
+        if msg.get("url"):
+            session.current_url = msg.get("url")
+            
+        # IMMEDIATE MAP MODE CHECK (First load only)
+        if not getattr(session, 'map_status_checked', False) and session.current_url:
+            session.map_status_checked = True
+            try:
+                async with httpx.AsyncClient() as client:
+                    # 1. Check Domain Status
+                    resp = await client.post(
+                        f"{self.config.rag_url}/api/v1/check_domain_status",
+                        json={"url": session.current_url, "client_id": "demo"},
+                        timeout=3.0
+                    )
+                    if resp.status_code == 200:
+                        status = resp.json()
+                        mode = status.get("mode", "explorer")
+                        session.metadata["map_mode"] = mode
+                        
+                        if mode == "mapped":
+                            logger.info(f"[{session.session_id}] 🗺️ MAP MODE ACTIVE: {status.get('reason')}")
+                            # 2. Fetch Hints Immediately
+                            hints_resp = await client.post(
+                                f"{self.config.rag_url}/api/v1/get_map_hints",
+                                json={"goal": "sitemap", "client_id": "demo"},
+                                timeout=3.0
+                            )
+                            if hints_resp.status_code == 200 and hints_resp.json().get("hints"):
+                                hint = hints_resp.json().get("hints")
+                                logger.info(f"[{session.session_id}] 🗺️ GPS Acquired: {hint[:100]}...")
+                        else:
+                            logger.info(f"[{session.session_id}] 🧭 EXPLORER MODE: New domain, HiveMind disabled.")
+            except Exception as e:
+                logger.warning(f"[{session.session_id}] Map status check failed: {e}")
+
         if isinstance(elements, list):
             session.dom_context = elements
             # Log detailed summary for proof that scanning/sending is working
@@ -2596,6 +2769,10 @@ class OrchestratorWSHandler:
                 elif not cancellation_task and session.audio_playback_duration:
                     # Fallback: start timer with full duration if start time missing
                     await self._start_server_side_playback_timer(session, session.audio_playback_duration)
+                elif not cancellation_task:
+                    # SAFETY NET: If duration calculation failed, force a short timer to ensure we return to LISTENING
+                    logger.warning(f"[{session.session_id}] ⚠️ TTS duration missing - starting fallback timer (1.0s) to prevent state lock")
+                    await self._start_server_side_playback_timer(session, 1.0)
         
         except asyncio.CancelledError:
             logger.debug(f"[{session.session_id}] TTS streaming cancelled")
@@ -3187,6 +3364,49 @@ class OrchestratorWSHandler:
             "message": f"Filler language changed to {new_language.upper()}"
         })
 
+    async def _handle_speaker_mute(self, session: OrchestratorSession, msg: Dict[str, Any]):
+        """Handle speaker mute/unmute for turbo mode toggle"""
+        is_muted = msg.get("muted", False)
+        session.speaker_muted = is_muted
+        
+        mode_label = "TURBO MODE (actions execute immediately)" if is_muted else "WALKTHROUGH MODE (synchronized with voice)"
+        logger.info(f"[{session.session_id}] 🔊 Speaker {'muted' if is_muted else 'unmuted'} - {mode_label}")
+        
+        # Send confirmation back to client
+        await self._send_ws_message(session, {
+            "type": "speaker_mute_confirmed",
+            "muted": is_muted,
+            "mode": "turbo" if is_muted else "walkthrough"
+        })
+
+    async def _handle_request_asset(self, session: OrchestratorSession, msg: Dict[str, Any]):
+        """Serve a static asset (e.g. orb SVG) over WebSocket to bypass cert issues"""
+        asset_name = msg.get("asset", "")
+        # Whitelist allowed assets to prevent path traversal
+        ALLOWED_ASSETS = {"tara-orb.svg"}
+        if asset_name not in ALLOWED_ASSETS:
+            logger.warning(f"[{session.session_id}] ⚠️ Rejected asset request: {asset_name}")
+            return
+
+        static_dir = Path(__file__).parent.parent / "static"
+        asset_path = static_dir / asset_name
+
+        if not asset_path.exists():
+            logger.warning(f"[{session.session_id}] ⚠️ Asset not found: {asset_path}")
+            return
+
+        try:
+            content = asset_path.read_text(encoding="utf-8")
+            await self._send_json(session.websocket, {
+                "type": "asset_data",
+                "asset": asset_name,
+                "content_type": "image/svg+xml",
+                "data": content
+            }, session)
+            logger.info(f"[{session.session_id}] 📦 Served asset via WS: {asset_name} ({len(content)} bytes)")
+        except Exception as e:
+            logger.error(f"[{session.session_id}] ❌ Failed to serve asset {asset_name}: {e}")
+
     async def _handle_end_session(self, session: OrchestratorSession, language: str = None):
         """Handle session end"""
         detected_language = language or session.current_language or self.config.languages.default
@@ -3202,7 +3422,8 @@ class OrchestratorWSHandler:
                 pass
         
         # 1. Try to generate a dynamic exit via RAG
-        history_context = session.history_manager.get_history_as_string()
+        # 1. Try to generate a dynamic exit via RAG
+        history_context = session.history_manager.get_context_window()
         dynamic_exit_text = await self.pipeline.rag_client.generate_exit(
             history_context=history_context,
             language=output_language
@@ -3372,70 +3593,85 @@ class OrchestratorWSHandler:
     async def _enqueue_foreground_audio(self, session: OrchestratorSession, audio_bytes: bytes, flush: bool = False, sample_rate: int = 44100, encoding: str = "pcm_f32le"):
         """
         Buffer audio into aligned frames (100ms = 4410 samples @ 44.1kHz).
-        
-        Prevents crackling caused by padding small intermediate TTS chunks.
-        Ensures chunks are always exactly frame-aligned.
+
+        Routes audio to dedicated audio WebSocket (/stream) when available,
+        falling back to control WebSocket if not connected.
         """
         bytes_per_sample = 4 if "f32" in encoding else 2
         frame_size_bytes = int(sample_rate * 0.1) * bytes_per_sample
         chunk_counter = 0
-        
+        use_audio_ws = session.audio_ws_connected and session.audio_websocket is not None
+
         # Add new bytes to buffer
         if audio_bytes:
             session.fg_buffer.extend(audio_bytes)
-        
+
         # Process full frames from buffer
         while len(session.fg_buffer) >= frame_size_bytes:
             # Extract full frame
             chunk = bytes(session.fg_buffer[:frame_size_bytes])
             del session.fg_buffer[:frame_size_bytes]
-            
-            # 1. Send binary frame (ArrayBuffer in JS) - This is what the frontend team requested
-            try:
-                if session.websocket.client_state.name == "CONNECTED":
-                    async with session.send_lock:
-                        await session.websocket.send_bytes(chunk)
-            except Exception as e:
-                logger.warning(f"[{session.session_id}] Failed to send binary audio: {e}")
-                return False
 
-            # 2. Send metadata frame (JSON) - Keep this for tracking and final signals
-            if not await self._send_json(session.websocket, {
-                "type": "audio_chunk",
-                "sample_rate": sample_rate,
-                "format": encoding,
-                "chunk_id": f"{session.session_id}_chunk_{chunk_counter}",
-                "is_final": False,
-                "timestamp": time.time(),
-                "binary_sent": True # Hint to frontend that audio was in the previous binary frame
-            }, session):
-                return False
+            if use_audio_ws:
+                # DEDICATED AUDIO WS: Send binary only (no JSON metadata needed)
+                try:
+                    async with session.audio_send_lock:
+                        await session.audio_websocket.send_bytes(chunk)
+                except Exception as e:
+                    logger.warning(f"[{session.session_id}] Audio WS send failed, falling back to control WS: {e}")
+                    session.audio_ws_connected = False
+                    use_audio_ws = False
+                    # Fallback: send via control WS
+                    await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter)
+            else:
+                # CONTROL WS FALLBACK: Original behavior (binary + JSON metadata)
+                await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter)
+
             chunk_counter += 1
-        
+
         # Handle flush (pad remainder)
         if flush and len(session.fg_buffer) > 0:
             remaining = len(session.fg_buffer)
             padding = b'\x00' * (frame_size_bytes - remaining)
             chunk = bytes(session.fg_buffer) + padding
             session.fg_buffer.clear()
-            
-            # Send final binary frame
-            try:
-                if session.websocket.client_state.name == "CONNECTED":
-                    await session.websocket.send_bytes(chunk)
-            except Exception as e:
-                logger.warning(f"[{session.session_id}] Failed to send final binary audio: {e}")
 
-            # Send final metadata
-            await self._send_json(session.websocket, {
-                "type": "audio_chunk",
-                "sample_rate": sample_rate,
-                "format": encoding,
-                "chunk_id": f"{session.session_id}_chunk_{chunk_counter}",
-                "is_final": True,
-                "timestamp": time.time(),
-                "binary_sent": True
-            }, session)
+            if use_audio_ws:
+                try:
+                    async with session.audio_send_lock:
+                        await session.audio_websocket.send_bytes(chunk)
+                        # Send end-of-stream signal
+                        await session.audio_websocket.send_json({
+                            "type": "audio_stream_end",
+                            "sample_rate": sample_rate,
+                            "format": encoding
+                        })
+                except Exception as e:
+                    logger.warning(f"[{session.session_id}] Audio WS flush failed: {e}")
+                    session.audio_ws_connected = False
+                    await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter, is_final=True)
+            else:
+                await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter, is_final=True)
+
+    async def _send_audio_via_control_ws(self, session: OrchestratorSession, chunk: bytes, sample_rate: int, encoding: str, chunk_counter: int, is_final: bool = False):
+        """Send audio via the control WebSocket (original behavior, used as fallback)"""
+        try:
+            if session.websocket.client_state.name == "CONNECTED":
+                async with session.send_lock:
+                    await session.websocket.send_bytes(chunk)
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] Failed to send binary audio: {e}")
+            return False
+
+        await self._send_json(session.websocket, {
+            "type": "audio_chunk",
+            "sample_rate": sample_rate,
+            "format": encoding,
+            "chunk_id": f"{session.session_id}_chunk_{chunk_counter}",
+            "is_final": is_final,
+            "timestamp": time.time(),
+            "binary_sent": True
+        }, session)
     
     async def _send_json(self, websocket: WebSocket, data: Dict[str, Any], session: Optional[OrchestratorSession] = None) -> bool:
         """
@@ -3679,10 +3915,7 @@ class OrchestratorWSHandler:
         except Exception as e:
             logger.warning(f"[{session.session_id}] Map hints fetch failed: {e}")
         
-        # Immediate voice feedback (8B model - fast)
-        await self._stream_tts_to_browser(session, "Okay, I'll handle that.", session.current_language)
-        
-        # Kick off the loop
+        # Kick off the loop - First step will provide context-aware narration
         await self._execute_next_step(session)
 
     async def _fetch_map_hints(self, session: OrchestratorSession, goal: str) -> str:
@@ -3775,7 +4008,7 @@ class OrchestratorWSHandler:
             logger.warning(f"[{session.session_id}] ⚠️ LOW CONFIDENCE detected. Asking user for guidance.")
             # Use speech from planner if available, otherwise fallback
             clarification_msg = plan.get("speech", "I'm not sure where to find that. Could you give me a hint or guide me manually?")
-            await self._stream_tts_to_browser(session, clarification_msg, session.current_language)
+            # _end_mission will speak the msg, so don't call it here to avoid repetition
             await self._end_mission(session, clarification_msg)
             return
 
@@ -3799,6 +4032,35 @@ class OrchestratorWSHandler:
             # Use speech from planner if available
             narration = plan.get("speech", summary)
             await self._end_mission(session, narration)
+        elif action_type == "clarify":
+            logger.info(f"[{session.session_id}] ❓ Clarification needed")
+            clarification_speech = plan.get("speech", "Could you clarify which one you mean?")
+            
+            # Speak the question
+            await self._stream_tts_to_browser(session, clarification_speech, session.current_language)
+            
+            # CRITICAL: Do NOT click. Wait for user to answer.
+            # We treat this effectively as a "turn yield" back to the user.
+            # The frontend is already listening (VAD), so we just stop the loop here.
+            # But we should probably send a signal that we are "done" for now.
+            logger.info(f"[{session.session_id}] 🛑 Yielding turn for clarification.")
+            return
+
+        elif action_type == "user_input_required":
+            logger.info(f"[{session.session_id}] 🛡️ Privacy Guard triggered")
+            privacy_speech = plan.get("speech", "Please enter this information yourself for security.")
+            
+            # Speak the warning
+            await self._stream_tts_to_browser(session, privacy_speech, session.current_language)
+            
+            # Wait for TTS to finish
+            if session.tts_task and not session.tts_task.done():
+                try: await session.tts_task
+                except: pass
+            
+            # Pause and return, waiting for next user command (e.g. "I'm done")
+            return
+
         elif action_type == "wait":
             logger.info(f"[{session.session_id}] ⏳ Waiting for page to load...")
             # Narrate the wait
@@ -3860,16 +4122,54 @@ class OrchestratorWSHandler:
                     "payload": action_payload
                 }, session)
             
-            # SYNC: Wait for voice to finish before proceeding to next step
-            if tts_task and not tts_task.done():
+            # CONDITIONAL SYNC: Wait for voice to finish ONLY if speaker is NOT muted
+            # When muted, go to TURBO MODE (execute immediately)
+            if tts_task and not tts_task.done() and not session.speaker_muted:
+                logger.debug(f"[{session.session_id}] 🔊 Speaker unmuted - waiting for TTS to complete before next action")
                 try:
                     await tts_task
                 except asyncio.CancelledError:
                     pass
+            elif session.speaker_muted:
+                logger.debug(f"[{session.session_id}] 🚀 TURBO MODE: Speaker muted - executing next action immediately")
 
     async def _call_visual_planner(self, session: OrchestratorSession, dom: list, warning: str) -> dict:
         """Call RAG service for next step planning."""
         base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
+        
+        # Compute simplified DOM Diff (Context Awareness)
+        dom_diff = "First interaction."
+        if session.dom_history:
+            prev_dom = session.dom_history[-1]
+            # Simple heuristic: compare length and text content of first few elements
+            prev_sig = "".join([e.get("text", "")[:10] for e in prev_dom[:5]])
+            curr_sig = "".join([e.get("text", "")[:10] for e in dom[:5]])
+            
+            if prev_sig != curr_sig:
+               dom_diff = "Significant layout change detected (Navigation or Modal)."
+            else:
+               dom_diff = "Internal state update (Form fill or Toggle)."
+        
+        # Update DOM history
+        session.dom_history.append(dom[:50]) # Store lightweight snapshot
+        if len(session.dom_history) > 3:
+            session.dom_history.pop(0)
+        
+        # Build conversation history context (last 4 user requests)
+        conversation_history = ""
+        if hasattr(session, 'history_manager') and session.history_manager:
+            try:
+                recent_turns = session.history_manager.get_recent_turns(limit=4)
+                if recent_turns:
+                    history_lines = []
+                    for turn in recent_turns:
+                        user_msg = turn.get('user', '')
+                        if user_msg:
+                            history_lines.append(f"User: {user_msg}")
+                    conversation_history = "\n".join(history_lines)
+            except Exception as e:
+                logger.debug(f"[{session.session_id}] Could not extract conversation history: {e}")
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{base_rag_url}/api/v1/plan_next_step",
@@ -3883,7 +4183,9 @@ class OrchestratorWSHandler:
                     "action_history": session.action_history,  # For loop detection
                     "map_hints": session.map_hints,  # Pre-fetched at mission start
                     "client_id": session.tenant_id or "demo",
-                    "session_id": session.session_id
+                    "session_id": session.session_id,
+                    "dom_diff": dom_diff, # Context awareness
+                    "conversation_history": conversation_history  # Recent user requests
                 }
             )
 

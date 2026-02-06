@@ -784,6 +784,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: Optional[str] = Q
     await ws_handler.handle_connection(websocket, session_id)
 
 
+@app.websocket("/stream")
+async def audio_stream_endpoint(websocket: WebSocket, session_id: Optional[str] = Query(None)):
+    """
+    Dedicated audio streaming WebSocket - binary TTS only.
+
+    Separates TTS audio from control messages to eliminate
+    contention and reduce audio stuttering.
+
+    Args:
+        websocket: WebSocket connection
+        session_id: Required session ID (must match an existing session)
+    """
+    if not ws_handler:
+        await websocket.close(code=1013, reason="WebSocket handler not initialized")
+        return
+
+    await ws_handler.handle_audio_stream(websocket, session_id)
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # PHONE INTEGRATION - Method 2: Twilio Console
 # ════════════════════════════════════════════════════════════════════════════════

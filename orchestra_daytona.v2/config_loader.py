@@ -112,7 +112,7 @@ class OrganizationConfig:
 @dataclass
 class SessionConfig:
     """Session configuration"""
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = 30.0
     max_timeout_prompts: int = 3
     ttl_seconds: int = 3600
     ignore_stt_while_speaking: bool = True

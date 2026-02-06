@@ -96,9 +96,19 @@ class QdrantAddon:
                     solution: str, 
                     vector: List[float],
                     tenant_id: str = "demo",
+                    domain: Optional[str] = None,
                     metadata: Optional[Dict] = None):
         """
         Store a resolved case in memory.
+        
+        Args:
+            user_id: User identifier
+            issue: Problem description
+            solution: Resolution steps
+            vector: Embedding vector
+            tenant_id: Tenant identifier
+            domain: Website domain (e.g., "groq.com") for domain-specific knowledge
+            metadata: Additional metadata
         """
         if not self.enabled: return
         
@@ -111,6 +121,12 @@ class QdrantAddon:
                 "timestamp": int(time.time()),
                 "successful": True
             }
+            
+            # Add domain if provided
+            if domain:
+                payload["domain"] = domain
+                logger.debug(f"💾 Storing case for domain: {domain}")
+            
             if metadata:
                 payload.update(metadata)
                 
@@ -128,23 +144,42 @@ class QdrantAddon:
         except Exception as e:
             logger.error(f"Failed to upsert case: {e}")
 
-    async def search_hive_mind(self, query_vector: List[float], tenant_id: str = "demo", limit: int = 3, score_threshold: float = 0.4) -> List[Dict]:
+    async def search_hive_mind(self, query_vector: List[float], tenant_id: str = "demo", domain: Optional[str] = None, limit: int = 3, score_threshold: float = 0.4) -> List[Dict]:
         """
-        Search GLOBAL memory (Hive Mind) for similar issues within the same tenant.
+        Search GLOBAL memory (Hive Mind) for similar issues within the same tenant and domain.
         Returns list of solutions.
+        
+        Args:
+            query_vector: Embedding vector for semantic search
+            tenant_id: Tenant identifier for multi-tenancy
+            domain: Optional domain filter (e.g., "groq.com", "airbnb.com")
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
         """
         if not self.enabled: return []
         
         try:
-            # Multi-tenant filter
-            query_filter = models.Filter(
-                must=[
+            # Multi-tenant filter with optional domain filtering
+            filter_conditions = [
+                models.FieldCondition(
+                    key="tenant_id",
+                    match=models.MatchValue(value=tenant_id)
+                )
+            ]
+            
+            # Add domain filter if provided (MAPPED MODE)
+            if domain:
+                filter_conditions.append(
                     models.FieldCondition(
-                        key="tenant_id",
-                        match=models.MatchValue(value=tenant_id)
+                        key="domain",
+                        match=models.MatchValue(value=domain)
                     )
-                ]
-            )
+                )
+                logger.debug(f"🗺️ MAPPED MODE: Filtering HiveMind by domain={domain}")
+            else:
+                logger.debug("🧭 EXPLORER MODE: No domain filter (searching all domains)")
+            
+            query_filter = models.Filter(must=filter_conditions)
 
             response = await self.client.query_points(
                 collection_name=self.collection_name,
@@ -156,9 +191,11 @@ class QdrantAddon:
             hits = response.points
             
             if hits:
-                logger.info(f"🧠 Hive Mind: {len(hits)} matches (top score: {hits[0].score:.3f})")
+                domain_info = f" [domain={domain}]" if domain else " [all domains]"
+                logger.info(f"🧠 Hive Mind{domain_info}: {len(hits)} matches (top score: {hits[0].score:.3f})")
             else:
-                logger.info(f"🧠 Hive Mind: No matches above threshold {score_threshold}")
+                domain_info = f" for domain={domain}" if domain else ""
+                logger.info(f"🧠 Hive Mind: No matches{domain_info} above threshold {score_threshold}")
             
             results = []
             for hit in hits:
@@ -173,6 +210,49 @@ class QdrantAddon:
         except Exception as e:
             logger.error(f"Hive Mind search failed: {e}")
             return []
+    
+    async def check_domain_has_knowledge(self, domain: str, tenant_id: str = "demo") -> bool:
+        """
+        Check if HiveMind has any knowledge for a specific domain.
+        Used to determine MAPPED vs EXPLORER mode.
+        
+        Args:
+            domain: Domain to check (e.g., "groq.com")
+            tenant_id: Tenant identifier
+            
+        Returns:
+            True if domain has HiveMind knowledge (MAPPED MODE)
+            False if domain is unknown (EXPLORER MODE)
+        """
+        if not self.enabled:
+            return False
+        
+        try:
+            # Count points for this domain
+            result = await self.client.count(
+                collection_name=self.collection_name,
+                count_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="tenant_id",
+                            match=models.MatchValue(value=tenant_id)
+                        ),
+                        models.FieldCondition(
+                            key="domain",
+                            match=models.MatchValue(value=domain)
+                        )
+                    ]
+                )
+            )
+            
+            has_knowledge = result.count > 0
+            mode = "MAPPED" if has_knowledge else "EXPLORER"
+            logger.info(f"🗺️ Domain '{domain}': {result.count} HiveMind entries → {mode} MODE")
+            return has_knowledge
+            
+        except Exception as e:
+            logger.error(f"Failed to check domain knowledge: {e}")
+            return False
 
     async def search_user_history(self, user_id: str, query_vector: List[float], tenant_id: str = "demo", limit: int = 3) -> List[Dict]:
         """

@@ -495,19 +495,44 @@ class RAGEngine:
         # Task 1: Local RAG (Now uses shared vector)
         tasks.append(self._do_local_rag(query_english, context or {}, boost_cats, max_chars, precomputed_embedding=shared_vector))
         
-        # Task 2: Hive Mind (Now uses shared vector)
+        # Task 2: Hive Mind (Now uses shared vector + domain filtering)
         async def do_hive_mind():
             if self.qdrant and self.qdrant.enabled:
                 if shared_vector is not None:
                     try:
-                        # Extract the raw list for Qdrant
-                        v_raw = shared_vector.flatten().tolist()
-                        results = await asyncio.wait_for(
-                            self.qdrant.search_hive_mind(v_raw, tenant_id=tenant_id, limit=3),
-                            timeout=0.8
-                        )
-                        if results:
-                            return "\n".join([f"Issue: {r['issue']}\nSolution: {r['solution']}" for r in results])
+                        # Extract domain from context (URL)
+                        domain = None
+                        if context and "url" in context:
+                            try:
+                                from urllib.parse import urlparse
+                                parsed = urlparse(context["url"])
+                                domain = parsed.netloc.replace("www.", "")  # e.g., "groq.com"
+                            except:
+                                pass
+                        
+                        # Check if domain has HiveMind knowledge (MAPPED vs EXPLORER)
+                        use_hivemind = False # Default to Explorer Mode (Safety First)
+                        
+                        if domain:
+                            has_knowledge = await self.qdrant.check_domain_has_knowledge(domain, tenant_id=tenant_id)
+                            if has_knowledge:
+                                logger.info(f"🗺️ MAPPED MODE: Domain '{domain}' has HiveMind knowledge - using domain filter")
+                                use_hivemind = True
+                            else:
+                                logger.info(f"🧭 EXPLORER MODE: Domain '{domain}' has no HiveMind knowledge - skipping HiveMind search")
+                        else:
+                             # No domain found in context -> Force Explorer Mode to avoid leaking global vectors
+                             logger.info("🧭 EXPLORER MODE: No domain detected in context - skipping HiveMind search")
+                        
+                        if use_hivemind:
+                            # Extract the raw list for Qdrant
+                            v_raw = shared_vector.flatten().tolist()
+                            results = await asyncio.wait_for(
+                                self.qdrant.search_hive_mind(v_raw, tenant_id=tenant_id, domain=domain, limit=3),
+                                timeout=0.8
+                            )
+                            if results:
+                                return "\n".join([f"Issue: {r['issue']}\nSolution: {r['solution']}" for r in results])
                     except asyncio.TimeoutError:
                         logger.warning("⏱️ Hive Mind search TIMEOUT (>800ms) - skipping")
                     except Exception as e:
