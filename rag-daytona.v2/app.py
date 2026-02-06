@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
 
 import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -97,6 +97,10 @@ class SaveCaseResponse(BaseModel):
     case_id: Optional[str] = None
 
 
+class CheckDomainRequest(BaseModel):
+    url: str = Field(..., description="Current page URL")
+    client_id: str = Field("demo", description="Client/Tenant ID")
+
 class AnalyzeSessionRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     history_context: List[Dict[str, Any]] = Field(..., description="Raw conversation logs")
@@ -129,6 +133,8 @@ class PlanStepRequest(BaseModel):
     map_hints: Optional[str] = Field("", description="Pre-fetched GPS navigation hints")
     client_id: Optional[str] = Field("demo", description="Client/Tenant ID for map lookup")
     session_id: str = Field(..., description="Session identifier")
+    dom_diff: Optional[str] = Field("First Step", description="Diff summary of DOM changes")
+    conversation_history: Optional[str] = Field("", description="Recent conversation context (last 4 user requests)")
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
@@ -153,6 +159,7 @@ session_analytics: Optional[Any] = None
 cache_hits = 0
 cache_misses = 0
 app_start_time = 0.0
+hive_mind_connections: List[WebSocket] = []
 
 
 # Redis client utilities
@@ -484,7 +491,9 @@ async def plan_next_step(request: PlanStepRequest):
             last_action=request.last_action,
             map_hints=request.map_hints,  # Pre-fetched, no Qdrant query here
             client_id=request.client_id,
-            action_history=request.action_history or []
+            action_history=request.action_history or [],
+            dom_diff=request.dom_diff or "",
+            conversation_history=request.conversation_history or ""
         )
         return result
     except Exception as e:
@@ -527,6 +536,22 @@ async def generate_exit(request_data: DynamicExitRequest):
     except Exception as e:
         logger.error(f"Exit generation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/check_domain_status")
+async def check_domain_status(request: CheckDomainRequest):
+    """Check if domain is Mapped or Explorer mode."""
+    if visual_orchestrator is None:
+        return {"mode": "explorer", "reason": "Visual Orchestrator not ready"}
+    
+    try:
+        status = await visual_orchestrator.check_hivemind_status(
+            current_url=request.url,
+            client_id=request.client_id
+        )
+        return status
+    except Exception as e:
+        logger.error(f"Domain status check failed: {e}")
+        return {"mode": "explorer", "reason": str(e)}
 
 @app.post("/api/v1/embed", response_model=EmbedResponse)
 async def embed_text(request_data: EmbedRequest):
@@ -1063,6 +1088,23 @@ async def analyze_session(request: AnalyzeSessionRequest):
                                     "extracted_via": "unified_reasoning_pipeline"
                                 }
                             )
+                            
+                            # Real-time Broadcast to Hive Mind Visualizer
+                            if hive_mind_connections:
+                                # We would ideally project this new vector to 2D here, 
+                                # but for simplicity we'll just notify clients to refresh or send the raw node
+                                # projecting is expensive, so we just send the notification
+                                broadcast_msg = {
+                                    "type": "new_knowledge",
+                                    "node": {
+                                        "issue": issue,
+                                        "solution": solution,
+                                        "issue_type": unit.get("category", "general"),
+                                        "customer_segment": "unknown"
+                                    }
+                                }
+                                asyncio.create_task(broadcast_hive_mind_update(broadcast_msg))
+
                             saved_hivemind_chunks.append({
                                 "issue": issue,
                                 "category": unit.get("category", "general")
@@ -1148,6 +1190,20 @@ async def save_case(request: SaveCaseRequest):
                 tenant_id=request.tenant_id,
                 metadata=request.metadata
             )
+            
+            # Real-time Broadcast to Hive Mind Visualizer
+            if hive_mind_connections:
+                broadcast_msg = {
+                    "type": "new_knowledge",
+                    "node": {
+                        "issue": issue_text,
+                        "solution": solution_text,
+                        "issue_type": "manual_entry",
+                        "customer_segment": "unknown"
+                    }
+                }
+                asyncio.create_task(broadcast_hive_mind_update(broadcast_msg))
+
             saved_count += 1
             logger.info(f"🧠 Saved case to Hive Mind: {issue_text[:50]}...")
         
@@ -1451,6 +1507,48 @@ async def get_hive_mind_insights(limit: int = 10):
     except Exception as e:
         logger.error(f"Hive Mind insights error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Insights failed: {str(e)}")
+
+
+async def broadcast_hive_mind_update(message: Dict[str, Any]):
+    """Broadcast a Hive Mind update to all connected WebSocket clients."""
+    if not hive_mind_connections:
+        return
+    
+    logger.info(f"📢 Broadcasting Hive Mind update to {len(hive_mind_connections)} clients")
+    dead_connections = []
+    
+    for ws in hive_mind_connections:
+        try:
+            await ws.send_json(message)
+        except Exception:
+            dead_connections.append(ws)
+    
+    for dead in dead_connections:
+        if dead in hive_mind_connections:
+            hive_mind_connections.remove(dead)
+
+
+@app.websocket("/ws/hive-mind")
+async def hive_mind_websocket(websocket: WebSocket):
+    """WebSocket for real-time Hive Mind visualization updates."""
+    await websocket.accept()
+    hive_mind_connections.append(websocket)
+    logger.info(f"🔌 Hive Mind Visualizer connected. Total: {len(hive_mind_connections)}")
+    
+    try:
+        while True:
+            # Keep connection alive, wait for client messages (if any)
+            data = await websocket.receive_text()
+            # We don't expect messages from visualizer for now, but we handle them
+            logger.debug(f"📩 Received from visualizer: {data}")
+    except WebSocketDisconnect:
+        if websocket in hive_mind_connections:
+            hive_mind_connections.remove(websocket)
+        logger.info(f"🔌 Hive Mind Visualizer disconnected. Remaining: {len(hive_mind_connections)}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        if websocket in hive_mind_connections:
+            hive_mind_connections.remove(websocket)
 
 
 # Static file serving (for index.html demo page)
