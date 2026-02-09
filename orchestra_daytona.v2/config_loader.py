@@ -88,7 +88,7 @@ class ServicesConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
     intent: IntentConfig = field(default_factory=IntentConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
-    davinciai_backend_url: str = "https://api.davinciai.eu/api/metrics/session-report"
+    davinciai_backend_url: str = "https://api.enterprise.davinciai.eu:8450/api/metrics/session-report"
 
 
 @dataclass
