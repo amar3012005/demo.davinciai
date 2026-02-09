@@ -2440,10 +2440,14 @@ class OrchestratorWSHandler:
             logger.info(f"[{session.session_id}] 👁️ DOM Update Received ({len(elements)} items): {preview}")
         else:
             logger.warning(f"[{session.session_id}] ⚠️ Received invalid DOM update format: {type(elements)}")
+        
+        # Reset timeout timer on DOM update (keep session alive during navigation)
+        session.last_activity = time.time()
 
     async def _handle_execution_complete(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle completion signal for visual actions"""
         session.is_executing_action = False
+        session.last_activity = time.time() # Reset timeout
         logger.info(f"[{session.session_id}] 🤖 Execution complete.")
 
         # Update DOM context if provided in the completion message
@@ -4022,7 +4026,7 @@ class OrchestratorWSHandler:
         
         if current_action_signature == session.last_action and action_type == 'click':
             logger.warning(f"[{session.session_id}] 🛑 RECURSION GUARD: Prevented duplicate {current_action_signature}. Forcing WAIT.")
-            loop_warning = f"RECURSION GUARD: You tried to click '{current_target}' but it had no effect or resulted in the same state. TRY A DIFFERENT ELEMENT or check if you are on the right page."
+            loop_warning = f"CRITICAL SYSTEM ALERT: RECURSION DETECTED. The previous action 'click {current_target}' FAILED to change the state. DO NOT REPEAT THIS ACTION. You MUST select a different element or action (e.g. scroll, wait)."
             await asyncio.sleep(2.0)
             await self._execute_next_step(session, extra_warning=loop_warning)
             return

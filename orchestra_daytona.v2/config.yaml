@@ -62,7 +62,7 @@ services:
     db: 0
     enabled: true  # For state persistence only
   
-  davinciai_backend_url: "https://api.davinciai.eu/api/metrics/session-report"
+  davinciai_backend_url: "https://api.enterprise.davinciai.eu:8450/api/metrics/session-report"
 
 dialogue:
   en:
@@ -109,11 +109,11 @@ dialogue:
     timeout:
       - text: "Are you still there? I'm here to help you with any questions about Daytona."
         emotion: "concerned"
-        trigger: "timeout_ms:10000"
+        trigger: "timeout_ms:30000"
         audio_file: "timeout_en.wav"
       - text: "Can you hear me? If you'd like to ask something, please speak."
         emotion: "helpful"
-        trigger: "timeout_ms:10000"
+        trigger: "timeout_ms:30000"
         audio_file: "timeout_alt_en.wav"
     
     unclear:
@@ -166,11 +166,11 @@ dialogue:
     timeout:
       - text: "Sind Sie noch da? Ich bin hier, um Ihnen bei Fragen zur Daytona zu helfen."
         emotion: "concerned"
-        trigger: "timeout_ms:10000"
+        trigger: "timeout_ms:30000"
         audio_file: "timeout_de.wav"
       - text: "Können Sie mich hören? Wenn Sie etwas fragen möchten, sprechen Sie bitte."
         emotion: "helpful"
-        trigger: "timeout_ms:10000"
+        trigger: "timeout_ms:30000"
         audio_file: "timeout_alt_de.wav"
     
     unclear:
@@ -180,7 +180,7 @@ dialogue:
         emotion: "neutral"
 
 session:
-  timeout_seconds: 10.0
+  timeout_seconds: 30.0
   max_timeout_prompts: 2  # After 2 timeouts, play exit dialogue and end session
   ttl_seconds: 3600
   ignore_stt_while_speaking: false
