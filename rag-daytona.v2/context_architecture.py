@@ -6,6 +6,7 @@ Structure:
 - Zone A (System Configuration): Static cacheable identity and constraints.
 - Zone B (Memory Bank): Semi-static Hive Mind insights and User Profile.
 - Zone C (Current Execution): Dynamic query, history, and retrieval.
+- Zone D (Dynamic Behavior): Per-turn agent skills and contextual rules from Qdrant.
 """
 
 import datetime
@@ -23,34 +24,43 @@ class ContextArchitect:
         return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
     @classmethod
-    def assemble_prompt(cls, 
-                        query: str, 
-                        retrieved_docs: List[Dict], 
-                        history: List[Dict], 
-                        hive_mind: Dict, 
+    def assemble_prompt(cls,
+                        query: str,
+                        retrieved_docs: List[Dict],
+                        history: List[Dict],
+                        hive_mind: Dict,
                         user_profile: Dict,
-                        language: str = "german") -> str:
+                        language: str = "german",
+                        agent_skills: Optional[List[str]] = None,
+                        agent_rules: Optional[List[str]] = None) -> str:
         """
         Assembles the full keyed prompt.
+        Zone A: System Configuration (static)
+        Zone B: Memory Bank (semi-static)
+        Zone C: Current Execution (dynamic)
+        Zone D: Dynamic Behavior (skills & rules from Qdrant, injected per turn)
         """
         # Determine Persona and Language constraints based on detected language
         # Default to German unless English is explicitly detected
         use_english_prompt = language.lower() in ["en", "english"]
-        
+
         # ZONE A: SYSTEM CONFIGURATION (Static/Cacheable)
         zone_a = cls._render_zone_a(use_english_prompt, language)
-        
+
         # ZONE B: MEMORY BANK (Semi-Static)
         zone_b = cls._render_zone_b(hive_mind, user_profile)
-        
+
         # ZONE C: CURRENT EXECUTION (Dynamic)
         # Passing !use_english_prompt as 'is_german' for backward compatibility with Zone C renderer
         zone_c = cls._render_zone_c(query, retrieved_docs, history, not use_english_prompt)
-        
+
+        # ZONE D: DYNAMIC BEHAVIOR (Skills & Rules from Qdrant)
+        zone_d = cls._render_zone_d(agent_skills or [], agent_rules or [])
+
         # FINAL DIRECTIVE: Ensure the model starts speaking directly as TARA without any preamble
         direct_trigger = "Response as TARA (Natural, 2-3 sentences):" if use_english_prompt else "Antwort von TARA (Natürlich, 2-3 Sätze):"
-        
-        return f"{zone_a}\n{zone_b}\n{zone_c}\n\n{direct_trigger}"
+
+        return f"{zone_a}\n{zone_b}\n{zone_c}\n{zone_d}\n\n{direct_trigger}"
 
     @classmethod
     def _render_zone_a(cls, use_english_prompt: bool, detected_language: str) -> str:
@@ -178,3 +188,32 @@ class ContextArchitect:
 {history_xml}  </episodic_history>
   <user_input>{cls._escape(query)}</user_input>
 </current_execution>"""
+
+    @classmethod
+    def _render_zone_d(cls, skills: List[str], rules: List[str]) -> str:
+        """
+        Zone D: Dynamic Behavior
+        Contains per-turn agent skills and contextual rules retrieved from Qdrant.
+        Only rendered when skills or rules are present (zero-cost when empty).
+        """
+        if not skills and not rules:
+            return ""
+
+        skills_xml = ""
+        if skills:
+            for i, skill in enumerate(skills):
+                skills_xml += f"    <skill id='{i}'>{cls._escape(skill)}</skill>\n"
+
+        rules_xml = ""
+        if rules:
+            for i, rule in enumerate(rules):
+                rules_xml += f"    <rule id='{i}' priority='high'>{cls._escape(rule)}</rule>\n"
+
+        return f"""
+<dynamic_behavior>
+  <active_skills>
+{skills_xml}  </active_skills>
+  <contextual_rules>
+{rules_xml}  </contextual_rules>
+  <instruction>You MUST follow all contextual_rules strictly. Use active_skills to enhance your response quality and domain expertise. Rules override default behavior when applicable.</instruction>
+</dynamic_behavior>"""

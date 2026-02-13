@@ -36,7 +36,7 @@ services:
     streaming_mode: "continuous"  # "buffered" or "continuous"
     voices:
       en:
-        voice_id: "a0e99841-438c-4a64-b679-ae501e7d6091"
+        voice_id: "f786b574-daa5-4673-aa0c-cbe3e8534c02"
         language: "en-US"
       de:
         voice_id: "a0e99841-438c-4a64-b679-ae501e7d6091"
@@ -62,7 +62,7 @@ services:
     db: 0
     enabled: true  # For state persistence only
   
-  davinciai_backend_url: "https://api.enterprise.davinciai.eu:8450/api/metrics/session-report"
+  davinciai_backend_url: "https://api.enterprise.davinciai.eu:8450/api/webhooks/session"
 
 dialogue:
   en:

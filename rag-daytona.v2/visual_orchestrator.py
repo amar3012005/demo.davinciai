@@ -79,7 +79,6 @@ History: {history}
 """
 
 NEXT_STEP_PROMPT = """
-<system_configuration>
 You are TARA, a Strategic Visual Co-Pilot (Partner Level).
 Your job: Navigate collaboratively with the user, clarifying ambiguities and protecting privacy.
 
@@ -96,43 +95,44 @@ DECISION PROTOCOL (HITL - Human In The Loop):
    - Say: "I'll wait here while you enter your details securely."
 
 3. **MAP VALIDATION (HiveMind)**:
-   - "MAP HINTS" are from a pre-indexed HiveMind database. They are high-confidence navigation paths.
-   - If a Map Hint matches your goal, USE IT as your primary navigation strategy.
+   - "MAP HINTS" are from a pre-indexed HiveMind database. They provide the *target destination*.
+   - **CRITICAL**: Do NOT use the map hint's URL to "navigate" directly.
+   - Instead, use the hint to identify *which* visible element (button/link) will take you closer to that destination.
+   - Example: Hint says "Go to /settings". Action: Click the "Settings" icon.
 
-4. **NAVIGATION PREFERENCE (CRITICAL)**:
-   - **ALWAYS prefer clicking visible links/buttons over using "navigate" action type**.
-   - Direct navigation causes page reload and disconnects the session.
-   - ONLY use "navigate" if there is absolutely NO clickable element that leads to the target URL.
-   - Example: If Map Hint says "navigate to /docs/reasoning", FIRST look for a link with text like "Reasoning", "Docs", or href="/docs/reasoning" and CLICK it instead.
+4. **NAVIGATION RESTRICTION (STRICT)**:
+   - **DIRECT NAVIGATION (changing URL) IS FORBIDDEN** unless you have failed to find a path for 3 consecutive turns.
+   - The user wants you to *use the UI*, not teleport.
+   - **ALWAYS** find a clickable element (button, link, tab) that moves towards the goal.
+   - If a specific link isn't visible, scroll or look for a parent menu (e.g., "Menu", "More").
 
-5. **INTUITION & SCROLLING (Advanced)**:
-   - If you cannot find the EXACT element (e.g. "Reasoning"), use INTUITION.
-   - **SCROLL**: If the content is likely below the fold (e.g. in footer), output {{"type": "scroll", "target_id": "", "text": "looking further down"}}.
-   - BE AGGRESSIVE. Do not give up easily. Navigate to "Docs" or "Learn" if the specific item isn't visible.
+5. **PERSISTENCE & SCROLLING (CRITICAL)**:
+   - **DO NOT GIVE UP**. If you cannot find the EXACT element (e.g. "Reasoning"):
+     1. **SCROLL**: Content is often below the fold. Output {{"type": "scroll", "target_id": "", "text": "scrolling to find target"}}.
+     2. **SEARCH**: Look for a "Search" icon or input.
+     3. **MENU**: Look for a "Menu" or "Hamburger" icon.
+   - Only use "none" if you have tried scrolling/searching at least 3 times.
 
 6. **ACTION EXECUTION**:
+   - **TARGETING**: Prefer elements with `interactive='true'`. If you see a label "Sign In" and a button "Sign In", click the **BUTTON**.
    - If clear path exists -> "click", "type_text".
    - If loading -> "wait".
-   - If goal done -> "none".
-   - Use "navigate" ONLY as last resort.
+   - "navigate" -> **LAST RESORT ONLY**.
 
 NARRATION (SPEAK LIKE A HUMAN):
 - **CONVERSATION AWARENESS**: Check CONVERSATION_HISTORY. If this is NOT the first interaction, DO NOT say "Hello" again.
 - **CONTEXTUAL DESCRIPTIONS**: Never read exact button IDs or technical text. Use natural descriptions.
-  - BAD: "I'll click '02/FOOD_points' or 'tara-vimn4wtvc'"
-  - GOOD: "I'll navigate to the food points section"
-  - BAD: "Clicking the 'PRE-RESERVE TABLE (HIMALAYAN_CAFE)' button"
-  - GOOD: "I'll reserve a table at the Himalayan Cafe"
 - **FIRST STEP ONLY**: If Step 1 AND no conversation history, give a brief greeting.
 - Otherwise, just describe the action naturally without re-introducing yourself.
 
 OUTPUT SCHEMA (STRICT JSON):
 {{
-  "reasoning": "Think Step-by-Step. 1. Identify targets. 2. Check ambiguity. 3. Check privacy. 4. Use Intuition.",
+  "reasoning": "1. AGGRESSIVELY analyze DOM for the User's Goal. 2. If vague, pick the MOST PROMINENT logical step (e.g. 'Get Started'). 3. If exact text missing, find SYNONYMS (e.g., 'Log In' -> 'Sign In'). 4. Persist.",
   "confidence": "high|medium|low",
   "speech": "What to say to the user (conversational)",
   "action": {{
     "type": "click|type_text|wait|none|clarify|user_input_required|navigate|scroll|scroll_to",
+    "speech": "What to say to the user (conversational)",
     "target_id": "element_id_or_text (use empty string if not applicable)",
     "text": "text_to_type (use empty string if not applicable)",
     "url": "optional_url (use empty string if not applicable)"
@@ -143,10 +143,10 @@ RULES:
 - **Output ONLY valid json**.
 - ALWAYS include "speech".
 - AVOID LOOPS: Check ACTION_HISTORY.
-- **TARGETING RULE (CRITICAL)**: Prefer INTERACTIVE elements (button, a, input, select) over text (div, span). If you want to click "Pricing", look for the BUTTON, not the text.
-- **MISSION PERSISTENCE**: Do NOT use action type "none" unless the goal is visually and logically 100% complete. If waiting for a page load or state change, use "wait".
+- **TARGETING RULE**: Prefer INTERACTIVE elements (interactive='true') over text labels.
+- **MISSION PERSISTENCE**: Do NOT use action type "none" unless validly done. SCROLL if blocked.
+- **CONFIDENCE**: If you have a solid hypothesis (e.g. "it's probably down there"), use "medium". Use "low" ONLY if you are totally confused and asking a question. For "scroll" actions, use "medium".
 
-</system_configuration>
 
 Respond in json format.
 
@@ -171,6 +171,50 @@ CURRENT SCREEN STATE (Visible Elements):
 """
 
 
+FAST_FILTER_PROMPT = """You are a DOM filter for a Visual Co-Pilot. Given a user's GOAL and a list of DOM elements, select ONLY the elements relevant to achieving the goal.
+
+GOAL: "{goal}"
+
+RULES:
+1. Output ONLY valid JSON.
+2. **PRIORITY**: Select elements marked `interactive='true'`.
+3. Include headings/labels ONLY if they are essential for context (e.g. "Sign In" header).
+4. **FILTER AGGRESSIVELY**: Do NOT select plain text divs/spans unless they are the ONLY way to interact.
+5. If a button and its label are separate, select the BUTTON (interactive='true').
+6. "speech" must be under 15 words.
+
+Respond in json format.
+
+DOM ELEMENTS:
+{dom_context}
+"""
+
+FAST_VALIDATOR_PROMPT = """You are an action validator for a Visual Co-Pilot. Compare the DOM state BEFORE and AFTER an action to determine if it succeeded.
+
+LAST ACTION: {last_action}
+EXPECTED OUTCOME: The page should have changed in response to the action.
+
+PRE-ACTION DOM (key elements):
+{pre_dom}
+
+POST-ACTION DOM (key elements):
+{post_dom}
+
+RULES:
+1. Output ONLY valid JSON: {{"success": true/false, "reason": "brief explanation", "changes_detected": "what actually changed"}}
+2. Success = the DOM changed meaningfully (new content, navigation, form state change).
+3. Failure = DOM is identical or only trivially changed (timestamps, animations).
+4. If action was "click" on a link but URL didn't change and no modal appeared, that's a FAILURE.
+5. Be strict: minor text changes without structural change = failure.
+
+Respond in json format.
+"""
+
+# Interactive element types for smart DOM filtering
+_INTERACTIVE_TYPES = frozenset({"button", "a", "input", "select", "textarea", "label", "option"})
+_LANDMARK_TYPES = frozenset({"h1", "h2", "h3", "title", "header", "nav", "main", "form"})
+
+
 class VisualOrchestrator:
     """Manages dual-stream generation for Visual Co-Pilot"""
     
@@ -181,7 +225,8 @@ class VisualOrchestrator:
         # Load model IDs from environment variables (specified in docker-compose.yml)
         self.llm_model = os.getenv("LLM_MODEL", "openai/gpt-oss-20b")
         self.analytics_model = os.getenv("ANALYTICS_MODEL", "qwen/qwen3-32b")
-        logger.info(f"🚀 VisualOrchestrator initialized with models: LLM={self.llm_model}, ANALYTICS={self.analytics_model}")
+        self.use_hivemind = str(os.getenv("HIVEMIND_IN_VISUAL_COPILOT", "true")).lower() == "true"
+        logger.info(f"🚀 VisualOrchestrator initialized with models: LLM={self.llm_model}, ANALYTICS={self.analytics_model}, HiveMind={self.use_hivemind}")
 
     def _get_compact_dom(self, dom_context: List[Dict[str, Any]], limit: int = 200) -> str:
         """Produces a minimal string representation of the DOM to save tokens."""
@@ -190,6 +235,7 @@ class VisualOrchestrator:
             el_type = el.get("type", "div")
             el_id = el.get("id")
             text = el.get("text", "").strip()
+            is_interactive = el.get("interactive", False)
             
             if not el_id and not text:
                 continue
@@ -197,6 +243,8 @@ class VisualOrchestrator:
             entry = f"<{el_type}"
             if el_id:
                 entry += f" id='{el_id}'"
+            if is_interactive:
+                entry += " interactive='true'"
             if text:
                 # Truncate text to avoid bloat
                 entry += f"> {text[:60]}"
@@ -204,6 +252,107 @@ class VisualOrchestrator:
                 entry += " />"
             compact.append(entry)
         return "\n".join(compact)
+
+    def _smart_dom_filter(self, dom_context: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Pre-filter DOM to keep only interactive + landmark elements.
+        Reduces token count by ~60% before sending to LLM.
+        """
+        filtered = []
+        for el in dom_context:
+            el_type = el.get("type", "div").lower()
+            text = el.get("text", "").strip()
+            el_id = el.get("id")
+
+            # Always keep interactive elements
+            if el_type in _INTERACTIVE_TYPES:
+                filtered.append(el)
+            # Keep landmarks (headings, nav, forms) for orientation
+            elif el_type in _LANDMARK_TYPES:
+                filtered.append(el)
+            # Keep elements with IDs (likely meaningful targets)
+            elif el_id and text:
+                filtered.append(el)
+
+        logger.info(f"🔍 Smart DOM Filter: {len(dom_context)} -> {len(filtered)} elements ({len(dom_context) - len(filtered)} decorative removed)")
+        return filtered
+
+    def _dom_fingerprint(self, dom_context: List[Dict[str, Any]], limit: int = 30) -> str:
+        """
+        Lightweight DOM fingerprint for fast comparison.
+        Captures key element IDs + text for validator prompt.
+        """
+        parts = []
+        for el in dom_context[:limit]:
+            el_type = el.get("type", "div")
+            el_id = el.get("id", "")
+            text = el.get("text", "").strip()[:40]
+            if el_id or text:
+                parts.append(f"{el_type}:{el_id or '-'}:{text}")
+        return "\n".join(parts)
+
+    async def _run_fast_validate(self, last_action: str, pre_dom: List[Dict[str, Any]], post_dom: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Fast Validator: Compare pre/post DOM to check if the last action worked.
+        Uses the fast LLM model for <500ms response.
+        Returns: {"success": bool, "reason": str, "changes_detected": str}
+        """
+        pre_fingerprint = self._dom_fingerprint(pre_dom)
+        post_fingerprint = self._dom_fingerprint(post_dom)
+
+        # Quick hash check: if fingerprints are identical, skip LLM call
+        if pre_fingerprint == post_fingerprint:
+            logger.info("⚡ Fast Validate: DOM identical (hash match) -> FAILED")
+            return {"success": False, "reason": "DOM unchanged after action", "changes_detected": "none"}
+
+        prompt = FAST_VALIDATOR_PROMPT.format(
+            last_action=last_action,
+            pre_dom=pre_fingerprint,
+            post_dom=post_fingerprint
+        )
+
+        try:
+            response = await self.groq.generate(
+                prompt,
+                stream=False,
+                model=self.llm_model,
+                temperature=0,
+                max_tokens=256,
+                response_format={"type": "json_object"}
+            )
+            result = json.loads(response)
+            status = "PASSED" if result.get("success") else "FAILED"
+            logger.info(f"✅ Fast Validate: {status} - {result.get('reason', 'N/A')}")
+            return result
+        except Exception as e:
+            logger.warning(f"Fast validation failed: {e} - assuming success")
+            return {"success": True, "reason": "Validation error (assumed pass)", "changes_detected": "unknown"}
+
+    async def _run_fast_sense(self, goal: str, dom_context: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Fast Sense: Quick DOM scan + speech generation.
+        Returns: {"speech": str, "relevant_ids": [str]}
+        """
+        dom_str = self._get_compact_dom(dom_context, limit=100)
+
+        prompt = FAST_FILTER_PROMPT.format(goal=goal, dom_context=dom_str)
+
+        try:
+            response = await self.groq.generate(
+                prompt,
+                stream=False,
+                model=self.llm_model,
+                temperature=0,
+                max_tokens=512,
+                response_format={"type": "json_object"}
+            )
+            result = json.loads(response)
+            ids = result.get("relevant_ids", [])
+            logger.info(f"⚡ Fast Sense: {len(ids)} relevant IDs identified, speech: \"{result.get('speech', '')}\"")
+            return result
+        except Exception as e:
+            logger.warning(f"Fast sense failed: {e}")
+            return {"speech": "", "relevant_ids": []}
 
     async def orchestrate(self, 
                           query: str, 
@@ -340,31 +489,60 @@ class VisualOrchestrator:
         except Exception as e:
             logger.error(f"Action stream failed: {e}")
 
-    async def plan_next_step(self, goal: str, dom_context: list, step_number: int, warning_message: str = "", current_url: str = "", last_action: str = "", map_hints: str = "", client_id: str = "demo", action_history: list = None, dom_diff: str = "", conversation_history: str = "") -> dict:
-        """Determines the next action in a mission loop with optional map hints."""
-        # Optimized DOM representation for token savings
-        dom_str = self._get_compact_dom(dom_context, limit=300)
-        
+    async def plan_next_step(self, goal: str, dom_context: list, step_number: int, warning_message: str = "", current_url: str = "", last_action: str = "", map_hints: str = "", client_id: str = "demo", action_history: list = None, dom_diff: str = "", conversation_history: str = "", last_dom_context: list = None) -> dict:
+        """
+        Determines the next action in a mission loop.
+        Pipeline: Validate -> Smart Filter -> Fast Sense -> Plan
+        """
+        plan_start = time.time()
+
+        # ── PHASE 0: Fast Validation (compare pre/post DOM) ──────────────
+        validation_warning = ""
+        if last_dom_context and last_action and step_number > 0:
+            try:
+                validation = await self._run_fast_validate(last_action, last_dom_context, dom_context)
+                if not validation.get("success", True):
+                    validation_warning = (
+                        f"VALIDATION FAILED: Last action '{last_action}' did NOT work. "
+                        f"Reason: {validation.get('reason', 'unknown')}. "
+                        f"Changes: {validation.get('changes_detected', 'none')}. "
+                        f"You MUST try a different approach."
+                    )
+                    logger.warning(f"⚠️ {validation_warning}")
+            except Exception as e:
+                logger.warning(f"Validation phase error: {e}")
+
+        # Merge validation warning with any existing warning
+        combined_warning = warning_message or ""
+        if validation_warning:
+            combined_warning = f"{validation_warning} | {combined_warning}" if combined_warning else validation_warning
+
+        # ── PHASE 1: Smart DOM Filter (reduce tokens) ────────────────────
+        filtered_dom = self._smart_dom_filter(dom_context)
+        dom_str = self._get_compact_dom(filtered_dom, limit=200)
+
         # Format action history for prompt
         action_history_str = ", ".join(action_history) if action_history else "(None yet)"
-        
+
         # STATIC: map_hints are PRE-FETCHED at mission start (Step 0)
         # DYNAMIC: step_context is queried EVERY step based on current DOM
-        step_context = await self.get_step_context(dom_context, current_url, client_id)
-        
+        step_context = ""
+        if self.use_hivemind:
+            step_context = await self.get_step_context(dom_context, current_url, client_id)
+
         # Determine Mission Mode based on HiveMind match
         mission_mode = "EXPLORER (Mapping new territory)"
-        if self.qdrant:
+        if self.qdrant and self.use_hivemind:
             status = await self.check_hivemind_status(current_url, client_id)
             if status.get("mode") == "mapped":
                 mission_mode = "MIND (Using pre-indexed site map)"
-        
+
         prompt = NEXT_STEP_PROMPT.format(
             goal=goal,
             mission_mode=mission_mode,
             step_number=step_number,
             conversation_history=conversation_history or "(First interaction - no prior context)",
-            warning_message=warning_message or "None",
+            warning_message=combined_warning or "None",
             map_hints=map_hints or "No pre-indexed hints available.",
             step_context=step_context or "No element-specific context available.",
             current_url=current_url or "Unknown",
@@ -374,38 +552,49 @@ class VisualOrchestrator:
             dom_context=dom_str
         )
 
-        
-        # logger.debug(f"📝 PLANNING PROMPT SNIPPET: {prompt[:1000]}...")
-        
-        logger.info(f"🧠 Planning next step (Goal: {goal}, Step: {step_number}, URL: {current_url})...")
+        logger.info(f"🧠 Planning next step (Goal: {goal}, Step: {step_number}, URL: {current_url}, DOM: {len(dom_context)}->{len(filtered_dom)} elements)...")
         if map_hints:
             logger.info(f"🗺️ Static Map Hints: {map_hints[:80]}...")
         if step_context:
             logger.info(f"🔍 Dynamic Step Context: {step_context[:80]}...")
-        
+
         try:
             # Use ANALYTICS_MODEL for strategic reasoning with higher token limit
+            # Optimized for Reasoning Models (DeepSeek-R1 / GPT-OSS)
             response = await self.groq.generate(
-                prompt, 
-                stream=False, 
-                model=self.analytics_model, 
-                temperature=0, 
+                prompt,
+                stream=False,
+                model=self.analytics_model,
+                temperature=0.6,
                 max_tokens=2048,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                include_reasoning=True,
+                reasoning_effort="high"
             )
-            
+
             logger.debug(f"🤖 RAW PLANNER RESPONSE: {response}")
-            
+
             plan = json.loads(response)
-            
+
             # NORMALIZE: Ensure action fields are never null (use empty strings instead)
             action = plan.get("action", {})
             if isinstance(action, dict):
-                for key in ["target_id", "text", "url"]:
+                # Ensure speech is in action for frontend streaming
+                if "speech" in plan and "speech" not in action:
+                    action["speech"] = plan["speech"]
+
+                for key in ["target_id", "text", "url", "speech"]:
                     if action.get(key) is None:
                         action[key] = ""
-            
-            logger.info(f"✅ PARSED PLAN: {json.dumps(plan, indent=2)}")
+
+            # Inject validation metadata
+            plan["_validation"] = {
+                "ran": bool(last_dom_context and last_action and step_number > 0),
+                "passed": not bool(validation_warning),
+            }
+            plan["_timing_ms"] = int((time.time() - plan_start) * 1000)
+
+            logger.info(f"✅ PARSED PLAN ({plan['_timing_ms']}ms): {json.dumps(plan, indent=2)}")
             return plan
         except Exception as e:
             logger.error(f"Planning failed: {e}")
@@ -414,35 +603,68 @@ class VisualOrchestrator:
     async def check_hivemind_status(self, current_url: str, client_id: str) -> dict:
         """
         Check if the current domain is known to HiveMind (pre-indexed).
-        Returns a status dict with mode='mapped'|'explorer' and initial map hints.
+        Uses doc_type=Website_Map for precise domain matching.
+        Returns a status dict with mode='mapped'|'explorer'.
         """
         if not self.qdrant or not hasattr(self.qdrant, 'enabled') or not self.qdrant.enabled:
             return {"mode": "explorer", "reason": "HiveMind disabled"}
 
+        if not current_url:
+            return {"mode": "explorer", "reason": "No URL provided"}
+
         try:
             from urllib.parse import urlparse
-            domain = urlparse(current_url).netloc
+            parsed = urlparse(current_url)
+            domain = parsed.netloc.replace("www.", "")
             
-            # Simple check: Does this domain output any map hints for a generic "sitemap" query?
-            # We use a dummy goal "sitemap" to see if any high-level structure exists.
+            if not domain:
+                 # Handle cases like "about:blank" or valid URLs without netloc (e.g. file://)
+                 return {"mode": "explorer", "reason": "No valid domain extracted"}
+
+            # Query with BOTH new schema and legacy fields via should
             hits_response = await self.qdrant.client.query_points(
+                collection_name=self.qdrant.collection_name,
+                query=self.embeddings.embed_query(f"website map {domain}"),
+                query_filter=Filter(
+                    must=[
+                        FieldCondition(key="domain", match=MatchValue(value=domain)),
+                    ],
+                    should=[
+                        # New schema
+                        FieldCondition(key="doc_type", match=MatchValue(value="Website_Map")),
+                        # Legacy
+                        FieldCondition(key="label", match=MatchValue(value="website_sitemap")),
+                    ]
+                ),
+                limit=1
+            )
+
+            if hits_response.points:
+                logger.info(f"🧠 HiveMind MAPPED: Domain '{domain}' has Website_Map (score: {hits_response.points[0].score:.3f})")
+                return {"mode": "mapped", "reason": f"Website_Map found for {domain}"}
+
+            # Fallback: Check by URL text match
+            fallback_response = await self.qdrant.client.query_points(
                 collection_name=self.qdrant.collection_name,
                 query=self.embeddings.embed_query("sitemap home page structure"),
                 query_filter=Filter(
                     must=[
                         FieldCondition(key="url", match=MatchText(text=domain)),
-                        FieldCondition(key="client_id", match=MatchValue(value=client_id))
+                    ],
+                    should=[
+                        FieldCondition(key="client_id", match=MatchValue(value=client_id)),
+                        FieldCondition(key="tenant_id", match=MatchValue(value=client_id)),
                     ]
                 ),
                 limit=1
             )
-            
-            if hits_response.points:
-                logger.info(f"🧠 HiveMind Match: Domain '{domain}' is KNOWN.")
-                return {"mode": "mapped", "reason": f"Indexed domain: {domain}"}
-            else:
-                logger.info(f"🌑 HiveMind: Domain '{domain}' is UNKNOWN (Explorer Mode).")
-                return {"mode": "explorer", "reason": "New territory"}
+
+            if fallback_response.points:
+                logger.info(f"🧠 HiveMind Match (legacy): Domain '{domain}' is KNOWN.")
+                return {"mode": "mapped", "reason": f"Indexed domain (legacy): {domain}"}
+
+            logger.info(f"🌑 HiveMind: Domain '{domain}' is UNKNOWN (Explorer Mode).")
+            return {"mode": "explorer", "reason": "New territory"}
 
         except Exception as e:
             logger.warning(f"HiveMind check failed: {e}")
@@ -459,17 +681,17 @@ class VisualOrchestrator:
         try:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
             
-            # Search for navigation hints in the client's sitemap collection
             if not self.embeddings:
                 return ""
                 
+            # Match both new schema AND legacy format
             hits_response = await self.qdrant.client.query_points(
                 collection_name=self.qdrant.collection_name,
                 query=self.embeddings.embed_query(goal),
                 query_filter=Filter(
-                    must=[
+                    should=[
+                        FieldCondition(key="doc_type", match=MatchValue(value="Website_Map")),
                         FieldCondition(key="label", match=MatchValue(value="website_sitemap")),
-                        FieldCondition(key="client_id", match=MatchValue(value=client_id))
                     ]
                 ),
                 limit=1
@@ -480,7 +702,7 @@ class VisualOrchestrator:
                 payload = hits[0].payload
                 url = payload.get("url", "")
                 selectors = payload.get("key_selectors", [])
-                concept = payload.get("concept", "")
+                concept = payload.get("text") or payload.get("concept", "")
                 
                 hint = f"HINT: To '{concept}', navigate to {url}."
                 if selectors:
@@ -496,28 +718,23 @@ class VisualOrchestrator:
         """
         Query Qdrant for DYNAMIC per-step context based on current DOM elements.
         Called EVERY step to provide element-specific guidance.
-        
-        Examples:
-        - "Button #submit-form submits the booking request"
-        - "The filter dropdown allows filtering by price range"
         """
         if not self.qdrant or not hasattr(self.qdrant, 'enabled') or not self.qdrant.enabled:
             return ""
         
         try:
-            # Build a query from visible elements (focus on headings, buttons, labels)
+            # Build a query from visible elements
             key_elements = []
-            for el in dom_context[:15]:  # Limit to first 15 elements
+            for el in dom_context[:15]:
                 text = el.get("text", "").strip()
                 el_type = el.get("type", "")
-                if text and len(text) < 50:  # Skip long text
+                if text and len(text) < 50:
                     if el_type in ["button", "a", "h1", "h2", "h3", "label", "input"]:
                         key_elements.append(text)
             
             if not key_elements:
                 return ""
             
-            # Create a query from visible elements
             query_text = f"Page: {current_url}. Elements: {', '.join(key_elements[:5])}"
             
             if not self.embeddings:
@@ -525,24 +742,25 @@ class VisualOrchestrator:
 
             from qdrant_client.models import Filter, FieldCondition, MatchValue
             
+            # Match both new schema AND legacy
             hits_response = await self.qdrant.client.query_points(
                 collection_name=self.qdrant.collection_name,
                 query=self.embeddings.embed_query(query_text),
                 query_filter=Filter(
-                    must=[
+                    should=[
+                        FieldCondition(key="doc_type", match=MatchValue(value="Element_Context")),
                         FieldCondition(key="label", match=MatchValue(value="element_context")),
-                        FieldCondition(key="client_id", match=MatchValue(value=client_id))
                     ]
                 ),
                 limit=2,
-                score_threshold=0.5  # Only high-confidence matches
+                score_threshold=0.5
             )
             hits = hits_response.points
             
             if hits:
                 contexts = []
                 for hit in hits:
-                    ctx = hit.payload.get("context", "")
+                    ctx = hit.payload.get("text") or hit.payload.get("context", "")
                     if ctx:
                         contexts.append(ctx)
                 if contexts:

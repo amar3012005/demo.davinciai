@@ -78,6 +78,7 @@ class OrchestratorSession:
     # Visual Co-Pilot states
     mode: str = "voice" # "voice" or "visual-copilot"
     dom_context: List[Dict[str, Any]] = field(default_factory=list)
+    last_dom_context: List[Dict[str, Any]] = field(default_factory=list)  # Pre-action snapshot for validation
     is_executing_action: bool = False
     
     # Mission Agent State (Visual Co-Pilot Only)
@@ -2434,13 +2435,16 @@ class OrchestratorWSHandler:
                 logger.warning(f"[{session.session_id}] Map status check failed: {e}")
 
         if isinstance(elements, list):
+            # Snapshot current DOM before overwriting (for fast validation)
+            if session.dom_context:
+                session.last_dom_context = session.dom_context
             session.dom_context = elements
             # Log detailed summary for proof that scanning/sending is working
             preview = [f"{e.get('type')}:{e.get('id', 'no-id')}:{e.get('text', '')[:20]}" for e in elements]
             logger.info(f"[{session.session_id}] 👁️ DOM Update Received ({len(elements)} items): {preview}")
         else:
             logger.warning(f"[{session.session_id}] ⚠️ Received invalid DOM update format: {type(elements)}")
-        
+
         # Reset timeout timer on DOM update (keep session alive during navigation)
         session.last_activity = time.time()
 
@@ -2449,6 +2453,10 @@ class OrchestratorWSHandler:
         session.is_executing_action = False
         session.last_activity = time.time() # Reset timeout
         logger.info(f"[{session.session_id}] 🤖 Execution complete.")
+
+        # Snapshot current DOM before overwriting (for fast validation)
+        if session.dom_context:
+            session.last_dom_context = session.dom_context
 
         # Update DOM context if provided in the completion message
         elements = msg.get("dom_context") or msg.get("elements")
@@ -4003,6 +4011,12 @@ class OrchestratorWSHandler:
             await self._end_mission(session, "I encountered an error. Please try again.")
             return
 
+        # Validation Retry Backoff: if fast-validator detected a failed action,
+        # wait 1.5s to let the page settle before executing the corrective action
+        validation_meta = plan.get("_validation")
+        if validation_meta and not validation_meta.get("success", True):
+            logger.warning(f"[{session.session_id}] ⏳ Validation failed — backoff 1.5s for page settle")
+            await asyncio.sleep(1.5)
 
         # CONFIDENCE CHECK: Halt execution if planner is unsure
         confidence = plan.get("confidence", "high")
@@ -4138,7 +4152,12 @@ class OrchestratorWSHandler:
                 logger.debug(f"[{session.session_id}] 🚀 TURBO MODE: Speaker muted - executing next action immediately")
 
     async def _call_visual_planner(self, session: OrchestratorSession, dom: list, warning: str) -> dict:
-        """Call RAG service for next step planning."""
+        """
+        Dual-Stream Visual Planning:
+        1. Fast Sense: Quick scan for immediate TTS (200-400ms)
+        2. Stream TTS to user immediately
+        3. Full Planning: Deep reasoning with filtered DOM (800-1200ms)
+        """
         base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
         
         # Compute simplified DOM Diff (Context Awareness)
@@ -4174,12 +4193,59 @@ class OrchestratorWSHandler:
             except Exception as e:
                 logger.debug(f"[{session.session_id}] Could not extract conversation history: {e}")
 
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 1: FAST SENSE (Immediate TTS)
+        # ═══════════════════════════════════════════════════════════════
+        fast_sense_start = time.time()
+        fast_response = None
+        
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                fast_response_obj = await client.post(
+                    f"{base_rag_url}/api/v1/fast_sense",
+                    json={
+                        "goal": session.current_goal,
+                        "dom_context": dom[:150],  # Lighter snapshot for fast processing
+                        "session_id": session.session_id
+                    }
+                )
+                fast_response_obj.raise_for_status()
+                fast_response = fast_response_obj.json()
+                
+                fast_sense_ms = int((time.time() - fast_sense_start) * 1000)
+                logger.info(f"[{session.session_id}] ⚡ Fast Sense completed in {fast_sense_ms}ms")
+                
+                # Extract speech for immediate TTS
+                fast_speech = fast_response.get("speech", "")
+                if fast_speech:
+                    logger.info(f"[{session.session_id}] 🔊 Streaming Fast TTS: \"{fast_speech[:60]}...\"")
+                    # Stream TTS immediately (non-blocking)
+                    output_language = self._get_output_language(session.current_language, session)
+                    session.tts_task = asyncio.create_task(
+                        self._stream_tts_to_browser(session, fast_speech, output_language)
+                    )
+                
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] Fast Sense failed (fallback to planning): {e}")
+            # Continue to full planning even if Fast Sense fails
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 2: FULL PLANNING (Deep Reasoning)
+        # ═══════════════════════════════════════════════════════════════
+        # Optional: Filter DOM based on relevant_ids from Fast Sense
+        filtered_dom = dom[:300]  # Default: use first 300 elements
+        if fast_response and fast_response.get("relevant_ids"):
+            relevant_ids = set(fast_response["relevant_ids"])
+            # Keep only relevant elements (but cap at 300 for safety)
+            filtered_dom = [el for el in dom if el.get("id") in relevant_ids][:300]
+            logger.info(f"[{session.session_id}] 🔍 Filtered DOM: {len(dom)} → {len(filtered_dom)} elements")
+        
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{base_rag_url}/api/v1/plan_next_step",
                 json={
                     "goal": session.current_goal,
-                    "dom_context": dom[:300],  # Increased to 300 for complex pages
+                    "dom_context": filtered_dom,
                     "step_number": session.goal_step_count,
                     "warning_message": warning,
                     "current_url": session.current_url,
@@ -4189,12 +4255,19 @@ class OrchestratorWSHandler:
                     "client_id": session.tenant_id or "demo",
                     "session_id": session.session_id,
                     "dom_diff": dom_diff, # Context awareness
-                    "conversation_history": conversation_history  # Recent user requests
+                    "conversation_history": conversation_history,  # Recent user requests
+                    "last_dom_context": session.last_dom_context[:50] if session.last_dom_context else None
                 }
             )
 
             response.raise_for_status()
-            return response.json()
+            plan = response.json()
+            
+            # Inject fast_sense speech into plan metadata
+            if fast_response and fast_response.get("speech"):
+                plan["_fast_speech"] = fast_response["speech"]
+            
+            return plan
 
 
 @dataclass

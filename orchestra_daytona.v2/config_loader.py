@@ -88,7 +88,7 @@ class ServicesConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
     intent: IntentConfig = field(default_factory=IntentConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
-    davinciai_backend_url: str = "https://api.enterprise.davinciai.eu:8450/api/metrics/session-report"
+    davinciai_backend_url: str = "https://api.enterprise.davinciai.eu:8450/api/webhooks/session"
 
 
 @dataclass
@@ -107,6 +107,10 @@ class OrganizationConfig:
     name: str = "General Agent"
     full_name: str = "DaVinci AI Assistant"
     knowledge_base_path: str = ""
+    # Identity (Env Var Overrides)
+    agent_id: str = "agent-demo-001"
+    agent_name: str = "demo"
+    tenant_id: str = "5fc3fa72-d15d-48dc-812c-5c845b5172eb"
 
 
 @dataclass
@@ -208,7 +212,11 @@ class ConfigLoader:
             config.organization = OrganizationConfig(
                 name=os.getenv("ORGANIZATION_NAME", org_data.get("name", "General Agent")),
                 full_name=os.getenv("ORGANIZATION_FULL_NAME", org_data.get("full_name", "DaVinci AI Assistant")),
-                knowledge_base_path=os.getenv("KNOWLEDGE_BASE_PATH", org_data.get("knowledge_base_path", ""))
+                knowledge_base_path=os.getenv("KNOWLEDGE_BASE_PATH", org_data.get("knowledge_base_path", "")),
+                # New identity fields with env overrides
+                agent_id=os.getenv("AGENT_ID", org_data.get("agent_id", "davinci-demo-agent-001")),
+                agent_name=os.getenv("AGENT_NAME", org_data.get("agent_name", "demo")),
+                tenant_id=os.getenv("TENANT_ID", org_data.get("tenant_id", "5fc3fa72-d15d-48dc-812c-5c845b5172eb"))
             )
         
         # Language config (with env var overrides)

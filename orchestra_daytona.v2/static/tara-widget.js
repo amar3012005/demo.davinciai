@@ -399,7 +399,7 @@
       this.container.id = 'tara-container';
       this.container.style.cssText = `
         position: fixed;
-        top: 24px;
+        top: 124px;
         right: 24px;
         pointer-events: auto;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1258,6 +1258,22 @@
       }
     }
 
+    async simulateTyping(fullText) {
+      if (!fullText) return;
+
+      // Ensure last message is from AI and streaming, or create new
+      const lastMsg = this.chatMessages.lastElementChild;
+      if (!lastMsg || lastMsg.dataset.sender !== 'ai' || lastMsg.dataset.streaming !== 'true') {
+        this.appendChatMessage('', 'ai', true);
+      }
+
+      const chunks = fullText.split(' ');
+      for (const chunk of chunks) {
+        this.appendChatMessage(chunk + ' ', 'ai', true);
+        await new Promise(r => setTimeout(r, 15 + Math.random() * 25));
+      }
+    }
+
     appendChatMessage(text, sender, isStreaming = false) {
       if (!this.chatMessages) return;
 
@@ -1329,7 +1345,8 @@
         if (blueprint) {
           this.ws.send(JSON.stringify({
             type: 'dom_update',
-            elements: blueprint
+            elements: blueprint,
+            url: window.location.href
           }));
           console.log('✅ dom_update sent successfully');
         }
@@ -1842,7 +1859,8 @@
 
           const payload = JSON.stringify({
             type: 'dom_update',
-            elements: blueprint
+            elements: blueprint,
+            url: window.location.href
           });
 
           this.ws.send(payload);
@@ -1924,13 +1942,17 @@
         if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
 
         // Filter Logic:
-        // 1. Is it a known interactive element?
-        // 2. Is it a Leaf Node (no children) with visible text? (Captures div/span text)
-        // 3. Is it a pointer cursor?
-        const isInteractive = baseSelectorMatches(el) || style.cursor === 'pointer';
-        const isTextLeaf = el.children.length === 0 && el.textContent.trim().length > 0;
+        const isFocusable = el.matches('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
+        const isClickableRole = el.matches('[role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="switch"]');
+        const hasPointer = style.cursor === 'pointer';
 
-        if (!isInteractive && !isTextLeaf) return;
+        const isInteractive = (isFocusable || isClickableRole || hasPointer) && !el.disabled;
+
+        // Context: Headers, Labels, Text Leafs (that are not interactive)
+        const isContext = el.matches('h1, h2, h3, h4, h5, h6, label, th, nav, legend') ||
+          (el.children.length === 0 && el.textContent.trim().length > 0);
+
+        if (!isInteractive && !isContext) return;
 
         const rect = el.getBoundingClientRect();
         const isInViewport = rect.top < window.innerHeight + 100 &&
@@ -1959,12 +1981,17 @@
         let type = el.tagName.toLowerCase();
         if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(type)) type = 'header';
 
+        // Compact text cleaning
+        const rawText = this.extractText(el);
+        const cleanText = rawText.replace(/\s+/g, ' ').trim();
+
         const isNew = this.previousScanIds && !this.previousScanIds.has(finalId);
 
         elements.push({
           id: finalId,
-          text: this.extractText(el) + (isNew ? ' [NEW]' : ''),
+          text: cleanText + (isNew ? ' [NEW]' : ''),
           type: type,
+          interactive: isInteractive, // EXPLICIT FLAG FOR BACKEND
           isNew: isNew, // For sorting
           rect: {
             x: Math.round(rect.left + window.scrollX),
@@ -2000,7 +2027,8 @@
       if (blueprint && this.ws && this.ws.readyState === WebSocket.OPEN) {
         const payload = JSON.stringify({
           type: 'dom_update',
-          elements: blueprint
+          elements: blueprint,
+          url: window.location.href
         });
 
         this.ws.send(payload);
@@ -2113,6 +2141,12 @@
         const type = payload.type;
         const target_id = payload.target_id || payload.id; // Support both naming styles
         const text = payload.text;
+        const speech = payload.speech;
+
+        // TURBO MODE: Stream text response manually since TTS is muted/skipped
+        if (this.sessionMode === 'turbo' && speech) {
+          this.simulateTyping(speech); // Async (non-blocking) visual feedback
+        }
 
         console.log(`🤖 Executing: ${type} on ${target_id}`);
 

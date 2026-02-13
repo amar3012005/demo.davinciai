@@ -67,13 +67,14 @@ services:
     environment:
       LLM_PROVIDER: groq
       LLM_API_KEY: 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
-      LLM_MODEL: openai/gpt-oss-20b
-      ANALYTICS_MODEL: qwen/qwen3-32b
+      LLM_MODEL: llama-3.1-8b-instant
+      ANALYTICS_MODEL: openai/gpt-oss-20b
       LOG_LEVEL: DEBUG
       REDIS_URL: 'redis://redis:6379/0'
       QDRANT_URL: 'http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333'
       QDRANT_API_KEY: WAkhOeXiD3DShev81qxn5PYKpQ9t6ufb
       ENABLE_HIVE_MIND: 'true'
+      HIVEMIND_IN_VISUAL_COPILOT: 'false'
       COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
       COOLIFY_CONTAINER_NAME: rag-ekgcgssw8css400gs8wwggwo
       SERVICE_NAME_REDIS: redis
@@ -88,7 +89,10 @@ services:
       - 'ekgcgssw8css400gs8wwggwo_ekgcgssw8css400gs8wwggwo-ekgcgssw8css400gs8wwggwo-rag-index:/app/index'
       - '/etc/letsencrypt/live/rag.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem'
       - '/etc/letsencrypt/live/rag.demo.davinciai.eu/privkey.pem:/certs/privkey.pem'
+      - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/rag-daytona.v2:/app/daytona_agent/services/rag'
+      - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/rag-daytona.v2/shared:/app/daytona_agent/services/shared'
     command: "uvicorn app:app --host 0.0.0.0 --port 8003 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem\n"
+
     networks:
       ekgcgssw8css400gs8wwggwo: null
     restart: unless-stopped

@@ -475,9 +475,9 @@ class RAGEngine:
             except Exception as e:
                 logger.warning(f"⚠️ Query rewriting failed: {e}")
         
-        # 3. Parallel Retrieval
+        # 3. PRIORITY: Skills & Rules retrieval FIRST (Sequential)
+        # This ensures we know what capabilities TARA has before doing other retrievals
         retrieval_start = time.time()
-        tasks = []
         
         # PRE-COMPUTE EMBEDDING ONCE (Optimization: save CPU and prevent redundant work)
         shared_vector = None
@@ -487,15 +487,49 @@ class RAGEngine:
             shared_vector = np.array(v_list, dtype=np.float32).reshape(1, -1)
             timing['shared_embedding_ms'] = (time.time() - v_start) * 1000
         
+        # STEP 1: Retrieve Skills & Rules FIRST (Sequential - Priority)
+        skills_rules = {"skills": [], "rules": []}
+        if self.qdrant and self.qdrant.enabled and shared_vector is not None:
+            try:
+                v_raw = shared_vector.flatten().tolist()
+                skills_start = time.time()
+                skills_rules = await asyncio.wait_for(
+                    self.qdrant.search_skills_and_rules(
+                        query_vector=v_raw,
+                        tenant_id=tenant_id,
+                        limit=5,
+                        score_threshold=0.35
+                    ),
+                    timeout=0.8
+                )
+                timing['skills_rules_ms'] = (time.time() - skills_start) * 1000
+                
+                # LOG WHICH SKILLS ARE BEING USED
+                if skills_rules.get("skills"):
+                    skill_names = [s.get("text", "")[:60] + "..." for s in skills_rules["skills"]]
+                    logger.info(f"🎯 TARA using Agent Skills: {skill_names}")
+                if skills_rules.get("rules"):
+                    rule_names = [r.get("text", "")[:60] + "..." for r in skills_rules["rules"]]
+                    logger.info(f"⚖️ TARA applying Agent Rules: {rule_names}")
+                    
+            except asyncio.TimeoutError:
+                logger.warning("⏱️ Skills/Rules search TIMEOUT (>800ms) - skipping")
+            except Exception as e:
+                logger.error(f"❌ Skills/Rules search error: {e}")
+        
         # Detected pattern
         pattern = None if is_context_dependent else self._detect_query_pattern(query_english)
         boost_cats = pattern.get("faiss_boost", []) if pattern else []
         max_chars = pattern.get("max_context_chars", 2500) if pattern else 2500
         
+        # STEP 2: Parallel Retrieval (Local RAG, Hive Mind, Web Search)
+        tasks = []
+        
         # Task 1: Local RAG (Now uses shared vector)
         tasks.append(self._do_local_rag(query_english, context or {}, boost_cats, max_chars, precomputed_embedding=shared_vector))
         
         # Task 2: Hive Mind (Now uses shared vector + domain filtering)
+        # IMPORTANT: Excludes agent_skill/agent_rule types to prevent pollution
         async def do_hive_mind():
             if self.qdrant and self.qdrant.enabled:
                 if shared_vector is not None:
@@ -509,10 +543,10 @@ class RAGEngine:
                                 domain = parsed.netloc.replace("www.", "")  # e.g., "groq.com"
                             except:
                                 pass
-                        
+
                         # Check if domain has HiveMind knowledge (MAPPED vs EXPLORER)
                         use_hivemind = False # Default to Explorer Mode (Safety First)
-                        
+
                         if domain:
                             has_knowledge = await self.qdrant.check_domain_has_knowledge(domain, tenant_id=tenant_id)
                             if has_knowledge:
@@ -523,7 +557,7 @@ class RAGEngine:
                         else:
                              # No domain found in context -> Force Explorer Mode to avoid leaking global vectors
                              logger.info("🧭 EXPLORER MODE: No domain detected in context - skipping HiveMind search")
-                        
+
                         if use_hivemind:
                             # Extract the raw list for Qdrant
                             v_raw = shared_vector.flatten().tolist()
@@ -532,7 +566,10 @@ class RAGEngine:
                                 timeout=0.8
                             )
                             if results:
-                                return "\n".join([f"Issue: {r['issue']}\nSolution: {r['solution']}" for r in results])
+                                # Filter out agent_skill/agent_rule entries from solution results
+                                filtered = [r for r in results if r.get("type") not in ("agent_skill", "agent_rule")]
+                                if filtered:
+                                    return "\n".join([f"Issue: {r['issue']}\nSolution: {r['solution']}" for r in filtered])
                     except asyncio.TimeoutError:
                         logger.warning("⏱️ Hive Mind search TIMEOUT (>800ms) - skipping")
                     except Exception as e:
@@ -553,11 +590,11 @@ class RAGEngine:
         retrieval_results = await asyncio.gather(*tasks)
         relevant_docs, doc_timing = retrieval_results[0]
         hive_mind_context = retrieval_results[1]
-        web_results = retrieval_results[2]
-        
+        web_results = retrieval_results[2] if len(retrieval_results) > 2 else ""
+
         timing.update(doc_timing)
         timing['retrieval_ms'] = (time.time() - retrieval_start) * 1000
-        
+
         return {
             "query_original": query,
             "query_english": query_english,
@@ -565,6 +602,8 @@ class RAGEngine:
             "relevant_docs": relevant_docs,
             "hive_mind_context": hive_mind_context,
             "web_results": web_results,
+            "agent_skills": skills_rules.get("skills", []),
+            "agent_rules": skills_rules.get("rules", []),
             "timing": timing,
             "fast_path_type": fast_path_type,
             "history_context": history_context
@@ -589,6 +628,8 @@ class RAGEngine:
         relevant_docs = retrieval_data['relevant_docs']
         hive_mind_context = retrieval_data['hive_mind_context']
         web_results = retrieval_data['web_results']
+        agent_skills = retrieval_data.get('agent_skills', [])
+        agent_rules = retrieval_data.get('agent_rules', [])
         timing = retrieval_data['timing']
         fast_path_type = retrieval_data['fast_path_type']
         
@@ -667,13 +708,19 @@ class RAGEngine:
 
         # 4. Context Architecture (Zoned XML Assembly)
         # Using the new ContextArchitect for <500ms TTFT and robust context boundaries
+        # Zone D: Dynamic skills/rules retrieved from Qdrant HiveMind
+        skill_texts = [s.get("text", "") for s in agent_skills if s.get("text")]
+        rule_texts = [r.get("text", "") for r in agent_rules if r.get("text")]
+
         prompt = ContextArchitect.assemble_prompt(
             query=query_english,
             retrieved_docs=relevant_docs,
             history=history_list,
             hive_mind=hive_mind_state,
             user_profile=user_profile,
-            language=original_language
+            language=original_language,
+            agent_skills=skill_texts,
+            agent_rules=rule_texts
         )
         
         # 5. Generation
@@ -768,9 +815,11 @@ class RAGEngine:
             'metadata': {
                 'method': 'xml-rag',
                 'language': original_language,
-                'zones_used': ['A', 'B', 'C'],
+                'zones_used': ['A', 'B', 'C'] + (['D'] if skill_texts or rule_texts else []),
                 'hive_mind_used': bool(hive_mind_context),
-                'web_search_used': bool(web_results)
+                'web_search_used': bool(web_results),
+                'active_skills': len(skill_texts),
+                'active_rules': len(rule_texts)
             }
         }
 

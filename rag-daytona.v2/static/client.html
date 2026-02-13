@@ -654,29 +654,52 @@
             }
         }
 
-        /* Point categories colors */
+        .cat-general {
+            background: #a8a8a8;
+        }
+
+        .cat-skill {
+            background: #06b6d4;
+        }
+
+        .cat-rule {
+            background: #ef4444;
+        }
+
+        .cat-map {
+            background: #8b5cf6;
+        }
+
+        .cat-element {
+            background: #ec4899;
+        }
+
+        .cat-kb {
+            background: #3b82f6;
+        }
+
         .cat-developer {
-            background: var(--color-teal);
+            background: #06b6d4;
         }
 
         .cat-startup {
-            background: var(--color-purple);
+            background: #8b5cf6;
         }
 
         .cat-enterprise {
-            background: var(--color-orange);
+            background: #F25623;
         }
 
         .cat-devops {
-            background: var(--color-pink);
+            background: #ec4899;
         }
 
         .cat-onboarding {
-            background: var(--color-success);
+            background: #22c55e;
         }
 
         .cat-default {
-            background: var(--color-info);
+            background: #a8a8a8;
         }
 
         /* Insights Panel Styles */
@@ -786,6 +809,310 @@
                 display: none;
             }
         }
+
+        /* Upload Tab Styles */
+        .upload-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            background: var(--color-background);
+        }
+
+        .upload-card {
+            background: var(--color-white);
+            padding: 32px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-md);
+            width: 100%;
+            max-width: 500px;
+        }
+
+        .upload-card h3 {
+            margin-bottom: 24px;
+            color: var(--color-black);
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--color-dark-gray);
+            font-size: 0.875rem;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--color-light-gray);
+            border-radius: 8px;
+            font-family: var(--font-family);
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: var(--color-orange);
+        }
+
+        .upload-status {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            display: none;
+            text-align: center;
+        }
+
+        .upload-status.success {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--color-success);
+            display: block;
+        }
+
+        .upload-status.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--color-error);
+            display: block;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════
+           Skills Manager Tab
+           ═══════════════════════════════════════════════════════════════════════ */
+        .skills-container {
+            flex: 1;
+            display: flex;
+            gap: 0;
+            height: calc(100vh - 70px);
+            background: var(--color-background);
+        }
+
+        .skills-form-panel {
+            width: 400px;
+            background: var(--color-white);
+            border-right: 1px solid var(--color-light-gray);
+            padding: 28px;
+            overflow-y: auto;
+        }
+
+        .skills-form-panel h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--color-black);
+        }
+
+        .skills-form-panel .subtitle {
+            font-size: 0.8125rem;
+            color: var(--color-dark-gray);
+            margin-bottom: 24px;
+        }
+
+        .skills-form-panel .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--color-light-gray);
+            border-radius: 8px;
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            outline: none;
+            resize: vertical;
+            min-height: 80px;
+            transition: border-color 0.2s;
+        }
+
+        .skills-form-panel .form-group textarea:focus {
+            border-color: var(--color-orange);
+        }
+
+        .type-toggle {
+            display: flex;
+            gap: 0;
+            border: 1px solid var(--color-light-gray);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .type-toggle button {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            background: var(--color-background);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--color-dark-gray);
+        }
+
+        .type-toggle button.active {
+            background: var(--color-orange);
+            color: var(--color-white);
+        }
+
+        .type-toggle button:first-child {
+            border-right: 1px solid var(--color-light-gray);
+        }
+
+        .severity-row {
+            display: none;
+        }
+
+        .severity-row.visible {
+            display: block;
+        }
+
+        .skills-list-panel {
+            flex: 1;
+            padding: 28px;
+            overflow-y: auto;
+        }
+
+        .skills-list-panel h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--color-black);
+        }
+
+        .skills-list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .skills-list-header .count-badge {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: var(--color-orange);
+            color: var(--color-white);
+        }
+
+        .skills-section-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--color-dark-gray);
+            margin: 20px 0 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .skill-card {
+            background: var(--color-white);
+            border: 1px solid var(--color-light-gray);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .skill-card:hover {
+            box-shadow: var(--shadow-sm);
+            border-color: var(--color-orange);
+        }
+
+        .skill-card-text {
+            font-size: 0.875rem;
+            color: var(--color-black);
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+
+        .skill-card-meta {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .skill-tag {
+            font-size: 0.6875rem;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: rgba(242, 86, 35, 0.1);
+            color: var(--color-orange);
+        }
+
+        .skill-tag.rule {
+            background: rgba(139, 92, 246, 0.1);
+            color: var(--color-purple);
+        }
+
+        .skill-tag.critical {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--color-error);
+        }
+
+        .skill-card-delete {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            border: none;
+            background: none;
+            color: var(--color-dark-gray);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: var(--transition);
+            line-height: 1;
+        }
+
+        .skill-card-delete:hover {
+            color: var(--color-error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .skills-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--color-dark-gray);
+        }
+
+        .skills-empty .material-icons-round {
+            font-size: 48px;
+            opacity: 0.3;
+            margin-bottom: 12px;
+        }
+
+        .skill-form-status {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 0.8125rem;
+            display: none;
+            text-align: center;
+        }
+
+        .skill-form-status.success {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--color-success);
+            display: block;
+        }
+
+        .skill-form-status.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--color-error);
+            display: block;
+        }
     </style>
 </head>
 
@@ -807,6 +1134,14 @@
                 <button class="header-tab" data-tab="visualizer">
                     <span class="material-icons-round">bubble_chart</span>
                     Hive Mind
+                </button>
+                <button class="header-tab" data-tab="upload">
+                    <span class="material-icons-round">upload_file</span>
+                    Upload
+                </button>
+                <button class="header-tab" data-tab="skills">
+                    <span class="material-icons-round">auto_fix_high</span>
+                    Skills
                 </button>
             </div>
             <div class="header-status">
@@ -865,19 +1200,59 @@
             </main>
         </div>
 
+        <!-- Upload Tab -->
+        <div class="tab-content" id="uploadTab">
+            <div class="upload-container">
+                <div class="upload-card">
+                    <h3>Upload Knowledge</h3>
+                    <form id="uploadForm">
+                        <div class="form-group">
+                            <label>Document File</label>
+                            <input type="file" id="docFile" required accept=".pdf,.docx,.pptx,.txt,.md,.xlsx">
+                        </div>
+                        <div class="form-group">
+                            <label>Tenant ID</label>
+                            <input type="text" id="docTenant" value="demo" placeholder="e.g. demo, engelvoelkers">
+                        </div>
+                        <div class="form-group">
+                            <label>Data Category</label>
+                            <select id="docType">
+                                <option value="General_KB">General Knowledge Base</option>
+                                <option value="Website_Map">Navigation / Sitemap</option>
+                                <option value="Agent_Skill">Agent Skill (Chunked)</option>
+                                <option value="Element_Context">UI Element Context</option>
+                                <option value="Technical_Docs">Technical Documentation</option>
+                                <option value="Product_Catalog">Product Catalog</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Topics (optional, comma separated)</label>
+                            <input type="text" id="docTopics" placeholder="e.g. pricing, api, security">
+                        </div>
+                        <button type="submit" class="viz-btn" style="background: var(--color-orange); color: white;">
+                            <span class="material-icons-round">cloud_upload</span>
+                            Upload to Hive Mind
+                        </button>
+                    </form>
+                    <div id="uploadStatus" class="upload-status"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Hive Mind Visualizer Tab -->
         <div class="tab-content" id="visualizerTab">
             <div class="visualizer-container">
                 <div class="viz-canvas-container">
                     <canvas id="vizCanvas"></canvas>
                     <div class="viz-tooltip" id="vizTooltip">
-                        <div class="viz-tooltip-title">Issue</div>
+                        <div class="viz-tooltip-title" id="tooltipTitleTag">Knowledge Content</div>
                         <div class="viz-tooltip-issue" id="tooltipIssue"></div>
-                        <div class="viz-tooltip-title">Solution</div>
+                        <div class="viz-tooltip-title">Context / Summary</div>
                         <div class="viz-tooltip-solution" id="tooltipSolution"></div>
                         <div class="viz-tooltip-meta">
                             <span class="viz-tooltip-tag" id="tooltipType"></span>
-                            <span class="viz-tooltip-tag" id="tooltipSegment"></span>
+                            <span class="viz-tooltip-tag" id="tooltipDomain"></span>
+                            <span class="viz-tooltip-tag" id="tooltipTenant"></span>
                         </div>
                     </div>
                     <div class="viz-loading hidden" id="vizLoading">
@@ -933,26 +1308,27 @@
                         </div>
                     </div>
                     <div class="viz-legend">
-                        <div class="viz-legend-title">Customer Segments</div>
+                        <div class="viz-legend-title">Knowledge Categories</div>
                         <div class="viz-legend-item">
-                            <div class="viz-legend-dot cat-developer"></div>
-                            <span class="viz-legend-label">Developer</span>
+                            <div class="viz-legend-dot cat-skill"></div>
+                            <span class="viz-legend-label">Agent Skills</span>
                         </div>
                         <div class="viz-legend-item">
-                            <div class="viz-legend-dot cat-startup"></div>
-                            <span class="viz-legend-label">Startup</span>
+                            <div class="viz-legend-dot cat-rule"></div>
+                            <span class="viz-legend-label">Agent Rules</span>
                         </div>
                         <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-map"></div>
+                            <span class="viz-legend-label">Website Maps</span>
+                        </div>
+                        <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-kb"></div>
+                            <span class="viz-legend-label">Documents</span>
+                        </div>
+                        <div class="viz-legend-item"
+                            style="margin-top: 8px; border-top: 1px solid #444; padding-top: 8px;">
                             <div class="viz-legend-dot cat-enterprise"></div>
-                            <span class="viz-legend-label">Enterprise</span>
-                        </div>
-                        <div class="viz-legend-item">
-                            <div class="viz-legend-dot cat-devops"></div>
-                            <span class="viz-legend-label">DevOps</span>
-                        </div>
-                        <div class="viz-legend-item">
-                            <div class="viz-legend-dot cat-onboarding"></div>
-                            <span class="viz-legend-label">Onboarding</span>
+                            <span class="viz-legend-label">DaVinci AI</span>
                         </div>
                     </div>
 
@@ -980,6 +1356,93 @@
                         </div>
                     </div>
                 </aside>
+            </div>
+        </div>
+
+        <!-- Skills Manager Tab -->
+        <div class="tab-content" id="skillsTab">
+            <div class="skills-container">
+                <!-- Left: Add Form -->
+                <div class="skills-form-panel">
+                    <h3>Add Skill or Rule</h3>
+                    <p class="subtitle">Define dynamic behaviors that TARA retrieves per conversation turn.</p>
+                    <form id="skillForm">
+                        <div class="form-group">
+                            <label>Type</label>
+                            <div class="type-toggle" id="typeToggle">
+                                <button type="button" class="active" data-type="agent_skill">Skill</button>
+                                <button type="button" data-type="agent_rule">Rule</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea id="skillText" required
+                                placeholder="e.g. When the user asks about installation, provide step-by-step instructions for their OS..."
+                                rows="4"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Topic</label>
+                            <select id="skillTopic">
+                                <option value="general">General</option>
+                                <option value="installation">Installation</option>
+                                <option value="debugging">Debugging</option>
+                                <option value="education">Education</option>
+                                <option value="providers">Providers</option>
+                                <option value="git">Git</option>
+                                <option value="identity">Identity</option>
+                                <option value="ui">UI / UX</option>
+                                <option value="language">Language</option>
+                                <option value="tone">Tone / Style</option>
+                                <option value="format">Format</option>
+                                <option value="honesty">Honesty</option>
+                                <option value="coding">Coding</option>
+                            </select>
+                        </div>
+                        <div class="form-group severity-row" id="severityRow">
+                            <label>Severity</label>
+                            <select id="skillSeverity">
+                                <option value="standard">Standard</option>
+                                <option value="critical">Critical (always enforced)</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="viz-btn" style="background: var(--color-orange); color: white;">
+                            <span class="material-icons-round">add_circle</span>
+                            Add to HiveMind
+                        </button>
+                    </form>
+                    <div id="skillFormStatus" class="skill-form-status"></div>
+                </div>
+
+                <!-- Right: List -->
+                <div class="skills-list-panel">
+                    <div class="skills-list-header">
+                        <div>
+                            <h3>Active Skills & Rules</h3>
+                        </div>
+                        <div>
+                            <span class="count-badge" id="skillsCount">0</span>
+                            <button class="viz-btn" id="refreshSkillsBtn"
+                                style="margin-top: 8px; background: var(--color-black);">
+                                <span class="material-icons-round">refresh</span>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="skills-section-label">
+                        <span class="material-icons-round"
+                            style="font-size:16px; color: var(--color-orange);">auto_fix_high</span>
+                        Skills
+                    </div>
+                    <div id="skillsList"></div>
+
+                    <div class="skills-section-label">
+                        <span class="material-icons-round"
+                            style="font-size:16px; color: var(--color-purple);">gavel</span>
+                        Rules
+                    </div>
+                    <div id="rulesList"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -1038,12 +1501,20 @@
                 this.offset = { x: 0, y: 0 };
 
                 this.colors = {
+                    'Agent_Skill': '#06b6d4',
+                    'Agent_Rule': '#ef4444',
+                    'Website_Map': '#8b5cf6',
+                    'Element_Context': '#ec4899',
+                    'General_KB': '#3b82f6',
+                    'agent_skill': '#06b6d4',
+                    'agent_rule': '#ef4444',
+                    'website_sitemap': '#8b5cf6',
                     'developer': '#06b6d4',
                     'startup': '#8b5cf6',
                     'enterprise': '#F25623',
                     'devops': '#ec4899',
                     'onboarding': '#22c55e',
-                    'default': '#3b82f6'
+                    'default': '#a8a8a8'
                 };
 
                 this.setupCanvas();
@@ -1206,17 +1677,10 @@
                     return;
                 }
 
-                // Calculate layout
-                const padding = 80;
-                const scaleX = (w - padding * 2) / 2;
-                const scaleY = (h - padding * 2) / 2;
-                const centerX = w / 2;
-                const centerY = h / 2;
-
-                // Group points by issue_type for semantic connections
+                // Group points by doc_type for semantic connections
                 const typeGroups = {};
                 this.points.forEach(p => {
-                    const type = p.issue_type || 'general';
+                    const type = p.doc_type || p.issue_type || 'General_KB';
                     if (!typeGroups[type]) typeGroups[type] = [];
                     typeGroups[type].push(p);
                 });
@@ -1234,7 +1698,7 @@
                                 const x2 = centerX + p2.x * scaleX;
                                 const y2 = centerY + p2.y * scaleY;
 
-                                const color = this.colors[p1.customer_segment] || this.colors.default;
+                                const color = this.colors[p1.doc_type] || this.colors[p1.customer_segment] || this.colors.default;
 
                                 // Gradient line
                                 const gradient = this.ctx.createLinearGradient(x1, y1, x2, y2);
@@ -1315,7 +1779,7 @@
                 this.points.forEach(point => {
                     const x = centerX + point.x * scaleX;
                     const y = centerY + point.y * scaleY;
-                    const color = this.colors[point.customer_segment] || this.colors.default;
+                    const color = this.colors[point.doc_type] || this.colors[point.customer_segment] || this.colors.default;
                     const isHovered = point === this.hoveredPoint;
                     const radius = isHovered ? 14 : 10;
 
@@ -1414,11 +1878,22 @@
             }
 
             showTooltip(point, x, y) {
-                document.getElementById('tooltipIssue').textContent = point.issue;
+                document.getElementById('tooltipIssue').textContent = point.text || point.issue || 'No content';
                 document.getElementById('tooltipSolution').textContent =
-                    point.solution.length > 200 ? point.solution.slice(0, 200) + '...' : point.solution;
-                document.getElementById('tooltipType').textContent = point.issue_type || 'general';
-                document.getElementById('tooltipSegment').textContent = point.customer_segment || 'unknown';
+                    (point.summary || point.solution || '').length > 250
+                        ? (point.summary || point.solution).slice(0, 250) + '...'
+                        : (point.summary || point.solution);
+
+                document.getElementById('tooltipType').textContent = point.doc_type || point.issue_type || 'General';
+                document.getElementById('tooltipDomain').textContent = point.domain || point.customer_segment || 'System';
+                document.getElementById('tooltipTenant').textContent = point.tenant_id || point.client_id || 'demo';
+
+                // Contextual Title
+                const titleTag = document.getElementById('tooltipTitleTag');
+                if (point.doc_type === 'Website_Map') titleTag.textContent = 'Navigation Prompt';
+                else if (point.doc_type === 'Agent_Skill') titleTag.textContent = 'Agent Skill';
+                else if (point.doc_type === 'Agent_Rule') titleTag.textContent = 'Agent Rule';
+                else titleTag.textContent = 'Knowledge Content';
 
                 this.positionTooltip(x, y);
                 this.tooltip.classList.add('visible');
@@ -1479,7 +1954,7 @@
                 if (data.trending_domains && data.trending_domains.length > 0) {
                     trendingEl.innerHTML = data.trending_domains.map(domain => `
                         <div class="trending-item">
-                            <span class="trending-item-name">${domain.domain}</span>
+                            <span class="trending-item-name">${domain.domain || 'General'}</span>
                             <span class="trending-item-count">${domain.count}</span>
                         </div>
                         <div class="trending-item-bar" style="width: ${domain.percentage}%"></div>
@@ -1490,15 +1965,21 @@
 
                 // Render recent knowledge
                 if (data.recent_knowledge && data.recent_knowledge.length > 0) {
-                    recentEl.innerHTML = data.recent_knowledge.slice(0, 5).map(item => `
-                        <div class="recent-item" title="${item.solution}">
-                            <div class="recent-item-issue">${item.issue}</div>
+                    recentEl.innerHTML = data.recent_knowledge.slice(0, 5).map(item => {
+                        const summary = item.summary || item.solution || item.text || '';
+                        const truncated = summary.length > 80 ? summary.slice(0, 80) + '...' : summary;
+                        const type = item.doc_type || item.issue_type || 'KB';
+                        const domain = item.domain || item.customer_segment || 'System';
+
+                        return `
+                        <div class="recent-item" title="${summary}">
+                            <div class="recent-item-issue">${item.text || item.issue || 'No content'}</div>
                             <div class="recent-item-meta">
-                                ${item.issue_type ? `<span class="recent-item-tag">${item.issue_type.replace(/_/g, ' ')}</span>` : ''}
-                                ${item.customer_segment ? `<span class="recent-item-tag">${item.customer_segment}</span>` : ''}
+                                <span class="recent-item-tag">${type.replace(/_/g, ' ')}</span>
+                                <span class="recent-item-tag">${domain}</span>
                             </div>
-                        </div>
-                    `).join('');
+                        </div>`;
+                    }).join('');
                 } else {
                     recentEl.innerHTML = '<div class="loading-placeholder">No knowledge yet</div>';
                 }
@@ -1759,6 +2240,236 @@
         }
 
         window.ragClient = new RAGClient();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Upload Logic
+        // ═══════════════════════════════════════════════════════════════════════
+        const uploadForm = document.getElementById('uploadForm');
+        if (uploadForm) {
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fileInput = document.getElementById('docFile');
+                const docType = document.getElementById('docType').value;
+                const docTopics = document.getElementById('docTopics').value;
+                const tenantId = document.getElementById('docTenant').value || 'demo';
+                const statusEl = document.getElementById('uploadStatus');
+                const btn = uploadForm.querySelector('button');
+
+                if (!fileInput.files[0]) return;
+
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                formData.append('doc_type', docType);
+                formData.append('topics', docTopics);
+                formData.append('tenant_id', tenantId);
+
+                btn.disabled = true;
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '<span class="material-icons-round">sync</span> Uploading...';
+                statusEl.className = 'upload-status';
+                statusEl.textContent = '';
+                statusEl.style.display = 'block';
+
+                try {
+                    // Use API_BASE
+                    const baseUrl = window.API_BASE || '';
+                    const res = await fetch(`${baseUrl}/api/v1/upload`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await res.json();
+
+                    if (res.ok) {
+                        statusEl.textContent = `✅ Success! Document ingested with ${data.chunks_ingested} chunks.`;
+                        statusEl.classList.add('success');
+                        uploadForm.reset();
+                    } else {
+                        statusEl.textContent = `❌ Error: ${data.detail || 'Upload failed'}`;
+                        statusEl.classList.add('error');
+                    }
+                } catch (err) {
+                    statusEl.textContent = `❌ Error: ${err.message}`;
+                    statusEl.classList.add('error');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Skills Manager Logic
+        // ═══════════════════════════════════════════════════════════════════════
+        (function () {
+            const baseUrl = window.API_BASE || '';
+            let selectedType = 'agent_skill';
+
+            // Type toggle
+            const typeToggle = document.getElementById('typeToggle');
+            const severityRow = document.getElementById('severityRow');
+            if (typeToggle) {
+                typeToggle.querySelectorAll('button').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        typeToggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        selectedType = btn.dataset.type;
+                        if (selectedType === 'agent_rule') {
+                            severityRow.classList.add('visible');
+                        } else {
+                            severityRow.classList.remove('visible');
+                        }
+                    });
+                });
+            }
+
+            // Form submit
+            const skillForm = document.getElementById('skillForm');
+            if (skillForm) {
+                skillForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const text = document.getElementById('skillText').value.trim();
+                    const topic = document.getElementById('skillTopic').value;
+                    const severity = document.getElementById('skillSeverity').value;
+                    const statusEl = document.getElementById('skillFormStatus');
+                    const btn = skillForm.querySelector('button[type="submit"]');
+
+                    if (!text) return;
+
+                    btn.disabled = true;
+                    const origHTML = btn.innerHTML;
+                    btn.innerHTML = '<span class="material-icons-round">sync</span> Saving...';
+                    statusEl.className = 'skill-form-status';
+
+                    try {
+                        const payload = {
+                            text: text,
+                            type: selectedType,
+                            topic: topic,
+                        };
+                        if (selectedType === 'agent_rule') {
+                            payload.severity = severity;
+                        }
+
+                        const res = await fetch(`${baseUrl}/api/v1/skills`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+
+                        const data = await res.json();
+                        if (res.ok) {
+                            const label = selectedType === 'agent_skill' ? 'Skill' : 'Rule';
+                            statusEl.textContent = `${label} added to HiveMind!`;
+                            statusEl.classList.add('success');
+                            document.getElementById('skillText').value = '';
+                            loadSkillsList();
+                        } else {
+                            statusEl.textContent = `Error: ${data.detail || 'Failed'}`;
+                            statusEl.classList.add('error');
+                        }
+                    } catch (err) {
+                        statusEl.textContent = `Error: ${err.message}`;
+                        statusEl.classList.add('error');
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = origHTML;
+                        setTimeout(() => { statusEl.className = 'skill-form-status'; }, 3000);
+                    }
+                });
+            }
+
+            // Load skills list
+            async function loadSkillsList() {
+                const skillsEl = document.getElementById('skillsList');
+                const rulesEl = document.getElementById('rulesList');
+                const countEl = document.getElementById('skillsCount');
+
+                try {
+                    const res = await fetch(`${baseUrl}/api/v1/skills`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+
+                    countEl.textContent = data.total;
+
+                    // Render skills
+                    if (data.skills.length > 0) {
+                        skillsEl.innerHTML = data.skills.map(s => renderCard(s)).join('');
+                    } else {
+                        skillsEl.innerHTML = '<div class="skills-empty"><span class="material-icons-round">auto_fix_high</span><p>No skills yet. Add one above.</p></div>';
+                    }
+
+                    // Render rules
+                    if (data.rules.length > 0) {
+                        rulesEl.innerHTML = data.rules.map(r => renderCard(r)).join('');
+                    } else {
+                        rulesEl.innerHTML = '<div class="skills-empty"><span class="material-icons-round">gavel</span><p>No rules yet. Add one above.</p></div>';
+                    }
+
+                    // Wire delete buttons
+                    document.querySelectorAll('.skill-card-delete').forEach(btn => {
+                        btn.addEventListener('click', () => deleteSkill(btn.dataset.id));
+                    });
+
+                } catch (err) {
+                    console.error('Failed to load skills:', err);
+                    skillsEl.innerHTML = '<div class="skills-empty"><p>Failed to load.</p></div>';
+                    rulesEl.innerHTML = '';
+                }
+            }
+
+            function renderCard(item) {
+                const isRule = item.type === 'agent_rule';
+                const typeTag = isRule ? '<span class="skill-tag rule">Rule</span>' : '<span class="skill-tag">Skill</span>';
+                const topicTag = `<span class="skill-tag" style="background:rgba(59,130,246,0.1);color:var(--color-info);">${item.topic}</span>`;
+                const severityTag = (isRule && item.severity === 'critical')
+                    ? '<span class="skill-tag critical">Critical</span>'
+                    : '';
+
+                return `<div class="skill-card">
+                    <button class="skill-card-delete" data-id="${item.id}" title="Delete">
+                        <span class="material-icons-round" style="font-size:18px;">close</span>
+                    </button>
+                    <div class="skill-card-text">${escapeHtml(item.text)}</div>
+                    <div class="skill-card-meta">${typeTag}${topicTag}${severityTag}</div>
+                </div>`;
+            }
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            async function deleteSkill(id) {
+                if (!confirm('Delete this item from HiveMind?')) return;
+                try {
+                    const res = await fetch(`${baseUrl}/api/v1/skills/${id}`, { method: 'DELETE' });
+                    if (res.ok) {
+                        loadSkillsList();
+                    } else {
+                        alert('Failed to delete.');
+                    }
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                }
+            }
+
+            // Refresh button
+            const refreshBtn = document.getElementById('refreshSkillsBtn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', loadSkillsList);
+            }
+
+            // Auto-load when tab is opened
+            document.querySelectorAll('.header-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    if (tab.dataset.tab === 'skills') {
+                        setTimeout(loadSkillsList, 100);
+                    }
+                });
+            });
+        })();
     </script>
 </body>
 

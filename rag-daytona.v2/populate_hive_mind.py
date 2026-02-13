@@ -1,24 +1,33 @@
 #!/usr/bin/env python3
 """
-Populate Qdrant Hive Mind with 'Website Sitemap' hints for Engel & Völkers.
+Populate Qdrant Hive Mind with 'Website Map' hints for Engel & Völkers.
 Parses the 'Mega MD' file and ingests Navigation Hints into Qdrant.
+Uses Universal Payload Schema v1.
 """
 
 import requests
 import json
 import re
+import os
+import sys
 import uuid
 import time
 from datetime import datetime
+
+# Ensure project root on path
+sys.path.insert(0, os.path.dirname(__file__))
+from models.hivemind_schema import website_map_payload
 
 # Configuration
 QDRANT_URL = "http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333"
 QDRANT_API_KEY = "WAkhOeXiD3DShev81qxn5PYKpQ9t6ufb"
 COLLECTION_NAME = "tara_case_memory"
 # RAG Service for Embeddings (Local Access)
-RAG_SERVICE_URL = "http://0.0.0.0:8003" 
+RAG_SERVICE_URL = "https://localhost:8003" 
 
-SOURCE_FILE = "/root/hetzner-cloud/Engel & Völkers.md"
+
+SOURCE_FILE = "/app/daytona_agent/services/rag/Engel & Völkers.md"
+
 
 headers = {
     "api-key": QDRANT_API_KEY,
@@ -42,33 +51,34 @@ def get_embedding(text):
         print(f"⚠️ Embedding error: {e}")
     return None
 
-def upsert_point(client_id, url, concept, key_selectors=[]):
-    """Upsert a 'website_sitemap' point to Qdrant."""
+def upsert_point(tenant_id, url, concept, domain, key_selectors=[]):
+    """Upsert a 'Website_Map' point to Qdrant using Universal Schema."""
     vector = get_embedding(concept)
     if not vector:
         print(f"⏩ Skipping '{concept[:30]}...' (No Vector)")
         return False
     
-    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url)) # Deterministic ID based on URL
+    # Deterministic ID based on URL
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
     
-    payload = {
-        "label": "website_sitemap", # CRITICAL: Identifies this as a Map Hint
-        "client_id": client_id,
-        "url": url,
-        "concept": concept,
-        "key_selectors": key_selectors,
-        "domain": "engelvoelkers.com",
-        "timestamp": int(time.time())
-    }
+    payload = website_map_payload(
+        url=url,
+        concept=concept,
+        domain=domain,
+        tenant_id=tenant_id,
+        key_selectors=key_selectors,
+    )
+    payload.pop("uuid", None)  # Use deterministic ID instead
     
     point = {
         "id": point_id,
         "vector": vector,
         "payload": payload
     }
+
+
     
     try:
-        # Using Qdrant HTTP API
         response = requests.put(
             f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points",
             headers=headers,
@@ -102,14 +112,12 @@ def parse_and_ingest(file_path):
         
         # 1. Detect Pillar Headers (Main Landing Pages)
         if line.startswith("## PILLAR"):
-            # Format: '## PILLAR 1: https://...'
             parts = line.split(":", 1)
             if len(parts) > 1:
                 url = parts[1].strip()
                 current_pillar_url = url
                 current_context = "Main Section"
-                # Index the Pillar itself
-                upsert_point("demo", url, "Engel & Völkers - Main Section")
+                upsert_point("demo", url, "Engel & Völkers - Main Section", "engelvoelkers.com")
                 count += 1
                 continue
         
@@ -121,32 +129,26 @@ def parse_and_ingest(file_path):
         # 3. Detect Links (Deep Navigation)
         matches = link_pattern.findall(line)
         for anchor_text, url in matches:
-            # Filter non-relevant links
             if "cookie" in anchor_text.lower() or "impressum" in anchor_text.lower() or "datenschutz" in anchor_text.lower():
                 continue
             
-            # Construct a rich concept string
-            # Format: "Anchor Text. Context. Main Section."
             concept = f"{anchor_text}. {current_context}."
             if "immobilien" in url:
                  concept += " Real Estate Property Search."
             
-            success = upsert_point("demo", url, concept)
+            success = upsert_point("demo", url, concept, "engelvoelkers.com")
             if success:
                 count += 1
                 
     print(f"\n🎉 Total Pages Indexed: {count}")
 
 def main():
-    print("� Starting Sitemap Ingestion for Engel & Völkers...")
+    print("🚀 Starting Sitemap Ingestion for Engel & Völkers (Universal Schema v1)...")
     
-    # Simple Health Check
     try:
         requests.get(f"{RAG_SERVICE_URL}/health", timeout=2)
     except:
         print(f"❌ RAG Service likely down at {RAG_SERVICE_URL}. Ensure it is running.")
-        # Proceed anyway? No, vectors are required.
-        # return 
     
     parse_and_ingest(SOURCE_FILE)
 

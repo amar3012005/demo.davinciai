@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
 
 import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, File, UploadFile, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +29,11 @@ from pydantic import BaseModel, Field
 from daytona_agent.services.shared.redis_client import get_redis_client, close_redis_client, ping_redis
 from daytona_agent.services.rag.config import RAGConfig
 from daytona_agent.services.rag.rag_engine import RAGEngine
+from models.hivemind_schema import (
+    agent_skill_payload, agent_rule_payload,
+    read_text, read_summary, read_doc_type, read_created_at,
+    SCHEMA_VERSION,
+)
 from daytona_agent.services.rag.index_builder import IndexBuilder
 
 # Configure logging
@@ -135,10 +140,17 @@ class PlanStepRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     dom_diff: Optional[str] = Field("First Step", description="Diff summary of DOM changes")
     conversation_history: Optional[str] = Field("", description="Recent conversation context (last 4 user requests)")
+    last_dom_context: Optional[List[Dict[str, Any]]] = Field(None, description="Pre-action DOM snapshot for validation")
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
     client_id: Optional[str] = Field("demo", description="Client/Tenant ID")
+
+class FastSenseRequest(BaseModel):
+    goal: str = Field(..., description="The user's mission goal")
+    dom_context: List[Dict[str, Any]] = Field(..., description="List of visible DOM elements")
+    session_id: str = Field(..., description="Session identifier")
+
 
 class EmbedRequest(BaseModel):
     text: str = Field(..., description="Text to embed")
@@ -151,6 +163,30 @@ class DynamicExitRequest(BaseModel):
     language: Optional[str] = Field("english", description="Response language")
 
 
+# ── Agent Skills & Rules Models ──────────────────────────────────────────────
+
+class SkillRuleCreateRequest(BaseModel):
+    text: str = Field(..., min_length=5, description="Skill or rule description text")
+    type: str = Field(..., description="'agent_skill' or 'agent_rule'")
+    topic: str = Field("general", description="Topic category (e.g. debugging, identity, format)")
+    severity: Optional[str] = Field(None, description="For rules: 'critical' or 'standard'")
+    tenant_id: str = Field("demo", description="Tenant identifier")
+
+class SkillRuleItem(BaseModel):
+    id: str
+    text: str
+    type: str
+    topic: str
+    severity: Optional[str] = None
+    score: Optional[float] = None
+    timestamp: Optional[int] = None
+
+class SkillRuleListResponse(BaseModel):
+    skills: List[SkillRuleItem]
+    rules: List[SkillRuleItem]
+    total: int
+
+
 # Global state (initialized in lifespan)
 rag_engine: Optional[RAGEngine] = None
 visual_orchestrator: Optional[Any] = None
@@ -160,6 +196,7 @@ cache_hits = 0
 cache_misses = 0
 app_start_time = 0.0
 hive_mind_connections: List[WebSocket] = []
+ingestion_service: Optional[Any] = None
 
 
 # Redis client utilities
@@ -219,6 +256,18 @@ async def lifespan(app: FastAPI):
             logger.info(" ✅ Visual Orchestrator initialized with Qdrant GPS support")
         else:
             logger.warning(f" ℹ️ Visual Orchestrator requires 'groq' provider (current: {config.llm_provider})")
+
+        # Initialize Ingestion Service
+        try:
+            from core.processing.ingestion import IngestionService
+            global ingestion_service
+            # SHARE EMBEDDINGS to avoid double loading memory spike
+            shared_embeddings = rag_engine.embeddings if rag_engine else None
+            ingestion_service = IngestionService(embeddings=shared_embeddings)
+            app.state.ingestion_service = ingestion_service
+            logger.info(" ✅ Ingestion Service initialized (with shared embeddings)")
+        except Exception as e:
+            logger.error(f" ❌ Failed to initialize Ingestion Service: {e}")
         
         # If index not loaded, try to build it (only if local retrieval is enabled)
         if config.enable_local_retrieval:
@@ -493,12 +542,37 @@ async def plan_next_step(request: PlanStepRequest):
             client_id=request.client_id,
             action_history=request.action_history or [],
             dom_diff=request.dom_diff or "",
-            conversation_history=request.conversation_history or ""
+            conversation_history=request.conversation_history or "",
+            last_dom_context=request.last_dom_context  # For fast validation
         )
         return result
     except Exception as e:
         logger.error(f"Planning error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/fast_sense")
+async def fast_sense(request: FastSenseRequest):
+    """
+    Fast Sense: Quick DOM scan for immediate TTS response.
+    Returns speech and relevant element IDs for filtering.
+    This should be called BEFORE plan_next_step for low-latency TTS.
+    """
+    if visual_orchestrator is None:
+        raise HTTPException(status_code=501, detail="Visual Orchestrator not initialized")
+
+    logger.info(f"⚡ Fast Sense Request | Session: {request.session_id} | Goal: '{request.goal}' | DOM: {len(request.dom_context)} elements")
+    
+    try:
+        result = await visual_orchestrator._run_fast_sense(
+            goal=request.goal,
+            dom_context=request.dom_context
+        )
+        logger.info(f"⚡ Fast Sense Response | Speech: \"{result.get('speech', '')[:50]}...\" | Relevant IDs: {len(result.get('relevant_ids', []))}")
+        return result
+    except Exception as e:
+        logger.error(f"Fast sense error: {e}", exc_info=True)
+        # Graceful fallback - return empty response
+        return {"speech": "", "relevant_ids": []}
 
 @app.post("/api/v1/get_map_hints")
 async def get_map_hints(request: MapHintsRequest):
@@ -567,6 +641,189 @@ async def embed_text(request_data: EmbedRequest):
         logger.error(f"Embedding error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent Skills & Rules Management Endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/skills", response_model=SkillRuleItem)
+async def create_skill_or_rule(request: SkillRuleCreateRequest):
+    """
+    Upsert a single agent skill or rule into Qdrant HiveMind.
+    Uses Universal Payload Schema.
+    """
+    if not app.state.rag_engine or not app.state.rag_engine.embeddings:
+        raise HTTPException(status_code=503, detail="Embeddings not initialized")
+    if not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
+        raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
+
+    if request.type not in ("agent_skill", "agent_rule"):
+        raise HTTPException(status_code=400, detail="type must be 'agent_skill' or 'agent_rule'")
+
+    try:
+        import uuid as _uuid
+        from qdrant_client.http import models as _models
+
+        # Embed the text
+        vector = app.state.rag_engine.embeddings.embed_query(request.text)
+
+        # Build payload via factory
+        if request.type == "agent_skill":
+            payload = agent_skill_payload(
+                text=request.text,
+                topic=request.topic,
+                tenant_id=request.tenant_id,
+            )
+        else:
+            payload = agent_rule_payload(
+                text=request.text,
+                topic=request.topic,
+                severity=request.severity or "standard",
+                tenant_id=request.tenant_id,
+            )
+
+        point_id = payload.pop("uuid")
+        timestamp = payload["created_at"]
+
+        await app.state.rag_engine.qdrant.client.upsert(
+            collection_name=app.state.rag_engine.qdrant.collection_name,
+            points=[
+                _models.PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload=payload,
+                )
+            ],
+        )
+
+        label = "Skill" if request.type == "agent_skill" else "Rule"
+        logger.info(f"🎯 {label} created: [{request.topic}] {request.text[:60]}...")
+
+        return SkillRuleItem(
+            id=point_id,
+            text=request.text,
+            type=request.type,
+            topic=request.topic,
+            severity=request.severity,
+            timestamp=timestamp,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to create skill/rule: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/skills", response_model=SkillRuleListResponse)
+async def list_skills_and_rules(tenant_id: str = "demo"):
+    """
+    List all agent skills and rules stored in Qdrant for a given tenant.
+    """
+    if not app.state.rag_engine or not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
+        raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
+
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.http import models as _models
+
+        qdrant = app.state.rag_engine.qdrant
+        sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key, check_compatibility=False)
+
+        skills = []
+        rules = []
+
+        for item_type in ("agent_skill", "agent_rule"):
+            # Match BOTH new schema doc_type AND legacy type field
+            result = sync_client.scroll(
+                collection_name=qdrant.collection_name,
+                scroll_filter=_models.Filter(
+                    must=[
+                        _models.FieldCondition(key="tenant_id", match=_models.MatchValue(value=tenant_id)),
+                    ],
+                    should=[
+                        _models.FieldCondition(key="type", match=_models.MatchValue(value=item_type)),
+                        _models.FieldCondition(
+                            key="doc_type",
+                            match=_models.MatchValue(value="Agent_Skill" if item_type == "agent_skill" else "Agent_Rule")
+                        ),
+                    ]
+                ),
+                limit=100,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for p in result[0]:
+                item = SkillRuleItem(
+                    id=str(p.id),
+                    text=read_text(p.payload),
+                    type=item_type,
+                    topic=p.payload.get("topic", "general"),
+                    severity=p.payload.get("severity"),
+                    timestamp=read_created_at(p.payload) or p.payload.get("timestamp"),
+                )
+                if item_type == "agent_skill":
+                    skills.append(item)
+                else:
+                    rules.append(item)
+
+        logger.info(f"🎯 Listed skills/rules: {len(skills)} skills, {len(rules)} rules")
+        return SkillRuleListResponse(skills=skills, rules=rules, total=len(skills) + len(rules))
+
+    except Exception as e:
+        logger.error(f"Failed to list skills/rules: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/skills/{point_id}")
+async def delete_skill_or_rule(point_id: str, tenant_id: str = "demo"):
+    """
+    Delete a specific agent skill or rule by its Qdrant point ID.
+    """
+    if not app.state.rag_engine or not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
+        raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
+
+    try:
+        from qdrant_client.http import models as _models
+
+        await app.state.rag_engine.qdrant.client.delete(
+            collection_name=app.state.rag_engine.qdrant.collection_name,
+            points_selector=_models.PointIdsList(points=[point_id]),
+        )
+
+        logger.info(f"🗑️ Deleted skill/rule: {point_id}")
+        return {"status": "deleted", "id": point_id}
+
+    except Exception as e:
+        logger.error(f"Failed to delete skill/rule: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    doc_type: str = Form("General"),
+    topics: str = Form(""),
+    tenant_id: str = Form("demo")
+):
+    """
+    Upload and process a document into the Knowledge Base.
+    Target: HiveMind (Qdrant)
+    """
+    if not getattr(app.state, "ingestion_service", None):
+        raise HTTPException(status_code=503, detail="Ingestion service not initialized")
+    
+    try:
+        result = await app.state.ingestion_service.ingest_file(
+            file=file,
+            doc_type=doc_type,
+            topics=topics,
+            tenant_id=tenant_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Upload error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/query", response_model=QueryResponse)
 async def query_knowledge_base(request_data: QueryRequest, request: Request):
     """
     Process knowledge base query with context-aware retrieval.
@@ -1196,6 +1453,10 @@ async def save_case(request: SaveCaseRequest):
                 broadcast_msg = {
                     "type": "new_knowledge",
                     "node": {
+                        "text": issue_text,
+                        "summary": solution_text,
+                        "doc_type": "Case_Memory",
+                        # Backward compat
                         "issue": issue_text,
                         "solution": solution_text,
                         "issue_type": "manual_entry",
@@ -1225,8 +1486,13 @@ class HiveMindPoint(BaseModel):
     id: str
     x: float
     y: float
-    issue: str
-    solution: str
+    text: str
+    summary: str
+    doc_type: Optional[str] = None
+    domain: Optional[str] = None
+    # Backward compat
+    issue: Optional[str] = None
+    solution: Optional[str] = None
     issue_type: Optional[str] = None
     customer_segment: Optional[str] = None
 
@@ -1315,8 +1581,12 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                         id=point_ids[0] if point_ids else "0",
                         x=0.0,
                         y=0.0,
-                        issue=payloads[0].get("issue", "") if payloads else "",
-                        solution=payloads[0].get("solution", "") if payloads else "",
+                        text=read_text(payloads[0]) if payloads else "",
+                        summary=read_summary(payloads[0]) if payloads else "",
+                        doc_type=read_doc_type(payloads[0]) if payloads else None,
+                        domain=payloads[0].get("domain") if payloads else None,
+                        issue=payloads[0].get("issue", read_text(payloads[0])) if payloads else None,
+                        solution=payloads[0].get("solution", read_summary(payloads[0])) if payloads else None,
                         issue_type=payloads[0].get("issue_type") if payloads else None,
                         customer_segment=payloads[0].get("customer_segment") if payloads else None
                     )
@@ -1357,8 +1627,12 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                 id=point_ids[i],
                 x=float(x),
                 y=float(y),
-                issue=payload.get("issue", "Unknown issue"),
-                solution=payload.get("solution", "No solution recorded"),
+                text=read_text(payload),
+                summary=read_summary(payload),
+                doc_type=read_doc_type(payload),
+                domain=payload.get("domain"),
+                issue=payload.get("issue", read_text(payload)),
+                solution=payload.get("solution", read_summary(payload)),
                 issue_type=payload.get("issue_type"),
                 customer_segment=payload.get("customer_segment")
             ))
@@ -1386,8 +1660,13 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
 
 class InsightItem(BaseModel):
     id: str
-    issue: str
-    solution: str
+    text: str
+    summary: str
+    doc_type: Optional[str] = None
+    domain: Optional[str] = None
+    # Backward compat
+    issue: Optional[str] = None
+    solution: Optional[str] = None
     issue_type: Optional[str] = None
     customer_segment: Optional[str] = None
     timestamp: Optional[str] = None
@@ -1458,11 +1737,15 @@ async def get_hive_mind_insights(limit: int = 10):
         recent_knowledge = [
             InsightItem(
                 id=str(p.id),
-                issue=p.payload.get("issue", "Unknown"),
-                solution=p.payload.get("solution", "")[:200] + "..." if len(p.payload.get("solution", "")) > 200 else p.payload.get("solution", ""),
+                text=read_text(p.payload),
+                summary=read_summary(p.payload),
+                doc_type=read_doc_type(p.payload),
+                domain=p.payload.get("domain"),
+                issue=p.payload.get("issue", read_text(p.payload)),
+                solution=read_summary(p.payload)[:200] + "..." if len(read_summary(p.payload)) > 200 else read_summary(p.payload),
                 issue_type=p.payload.get("issue_type"),
                 customer_segment=p.payload.get("customer_segment"),
-                timestamp=str(p.payload.get("timestamp")) if p.payload.get("timestamp") else None
+                timestamp=str(read_created_at(p.payload)) if read_created_at(p.payload) else None
             )
             for p in recent
         ]
@@ -1473,7 +1756,7 @@ async def get_hive_mind_insights(limit: int = 10):
         
         for point in all_points:
             payload = point.payload or {}
-            domain = payload.get("issue_type", "general")
+            domain = payload.get("domain") or read_doc_type(payload)
             segment = payload.get("customer_segment", "unknown")
             
             domain_counts[domain] = domain_counts.get(domain, 0) + 1

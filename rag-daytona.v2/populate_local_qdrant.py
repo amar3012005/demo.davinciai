@@ -9,6 +9,7 @@ import random
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from optimized_embeddings import OptimizedEmbeddings
+from models.hivemind_schema import case_memory_payload
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -186,17 +187,22 @@ async def populate():
             text = f"{case['issue']} {case['solution']}"
             vector = embeddings.embed_query(text)
             
+            # Build payload via Universal Schema factory
+            payload = case_memory_payload(
+                issue=case['issue'],
+                solution=case['solution'],
+                tenant_id="demo",
+                issue_type=case.get('issue_type', 'general'),
+            )
+            # Add extra legacy fields
+            payload["customer_segment"] = case.get('customer_segment', 'unknown')
+            payload["product"] = "daytona"
+            payload.pop("uuid", None)  # Use integer ID from CASES
+            
             points.append({
                 "id": case['id'],
                 "vector": vector,
-                "payload": {
-                    "issue": case['issue'],
-                    "solution": case['solution'],
-                    "issue_type": case['issue_type'],
-                    "customer_segment": case['customer_segment'],
-                    "product": "daytona",
-                    "timestamp": "2024-01-18T12:00:00Z"
-                }
+                "payload": payload
             })
         
         # Upsert batch
