@@ -141,10 +141,17 @@ class PlanStepRequest(BaseModel):
     dom_diff: Optional[str] = Field("First Step", description="Diff summary of DOM changes")
     conversation_history: Optional[str] = Field("", description="Recent conversation context (last 4 user requests)")
     last_dom_context: Optional[List[Dict[str, Any]]] = Field(None, description="Pre-action DOM snapshot for validation")
+    fast_sense_speech: Optional[str] = Field(None, description="Speech already spoken by fast_sense (to avoid double-speaking)")
+    interaction_mode: str = Field("interactive", description="Interaction mode (turbo or interactive)")
+    # v5: Semantic Page Graph fields
+    active_states: Optional[Dict[str, Any]] = Field(None, description="Active nav/tab states from widget")
+    data_tables: Optional[List[Dict[str, Any]]] = Field(None, description="Extracted table data from widget")
+    page_title: Optional[str] = Field("", description="Document title from widget")
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
     client_id: Optional[str] = Field("demo", description="Client/Tenant ID")
+    current_url: Optional[str] = Field("", description="Current page URL for domain filtering")
 
 class FastSenseRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
@@ -248,14 +255,6 @@ async def lifespan(app: FastAPI):
         logger.info(f" ✅ Session Analytics initialized using model: {config.analytics_model}")
         logger.info(f" 🤖 RAG Engine using LLM model: {config.llm_model}")
         
-        # Initialize Visual Orchestrator (requires Groq)
-        if config.llm_provider == "groq":
-            from visual_orchestrator import VisualOrchestrator
-            global visual_orchestrator
-            visual_orchestrator = VisualOrchestrator(rag_engine.llm, qdrant_client=rag_engine.qdrant, embeddings=rag_engine.embeddings)
-            logger.info(" ✅ Visual Orchestrator initialized with Qdrant GPS support")
-        else:
-            logger.warning(f" ℹ️ Visual Orchestrator requires 'groq' provider (current: {config.llm_provider})")
 
         # Initialize Ingestion Service
         try:
@@ -301,6 +300,21 @@ async def lifespan(app: FastAPI):
         except Exception as redis_error:
             logger.warning(f" Redis connection failed: {redis_error} - caching disabled")
             redis_client = None
+        
+        # Initialize Visual Orchestrator (requires Groq) - Wired AFTER Redis to enable sessions
+        if config.llm_provider == "groq":
+            from visual_orchestrator import VisualOrchestrator
+            global visual_orchestrator
+            # Pass redis_client for session persistence (A7)
+            visual_orchestrator = VisualOrchestrator(
+                rag_engine.llm, 
+                qdrant_client=rag_engine.qdrant, 
+                embeddings=rag_engine.embeddings,
+                redis_client=redis_client
+            )
+            logger.info(f" ✅ Visual Orchestrator initialized with Qdrant GPS & Redis Sessions ({'Connected' if redis_client else 'Disconnected'})")
+        else:
+            logger.warning(f" ℹ️ Visual Orchestrator requires 'groq' provider (current: {config.llm_provider})")
         
         # Initialize counters
         cache_hits = 0
@@ -543,7 +557,14 @@ async def plan_next_step(request: PlanStepRequest):
             action_history=request.action_history or [],
             dom_diff=request.dom_diff or "",
             conversation_history=request.conversation_history or "",
-            last_dom_context=request.last_dom_context  # For fast validation
+            last_dom_context=request.last_dom_context,  # For fast validation
+            fast_sense_speech=request.fast_sense_speech,
+            interaction_mode=request.interaction_mode,
+            session_id=request.session_id,
+            # v5: Semantic Page Graph fields
+            active_states=request.active_states,
+            data_tables=request.data_tables,
+            page_title=request.page_title or "",
         )
         return result
     except Exception as e:
@@ -588,7 +609,8 @@ async def get_map_hints(request: MapHintsRequest):
     try:
         hints = await visual_orchestrator.get_navigation_hints(
             goal=request.goal,
-            client_id=request.client_id
+            client_id=request.client_id,
+            current_url=request.current_url or ""
         )
         return {"hints": hints}
     except Exception as e:

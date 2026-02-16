@@ -507,10 +507,10 @@ class RAGEngine:
                 # LOG WHICH SKILLS ARE BEING USED
                 if skills_rules.get("skills"):
                     skill_names = [s.get("text", "")[:60] + "..." for s in skills_rules["skills"]]
-                    logger.info(f"🎯 TARA using Agent Skills: {skill_names}")
+                    logger.info(f"🎯 this agent skill is used: {skill_names}")
                 if skills_rules.get("rules"):
                     rule_names = [r.get("text", "")[:60] + "..." for r in skills_rules["rules"]]
-                    logger.info(f"⚖️ TARA applying Agent Rules: {rule_names}")
+                    logger.info(f"⚖️ this agent rule is applied: {rule_names}")
                     
             except asyncio.TimeoutError:
                 logger.warning("⏱️ Skills/Rules search TIMEOUT (>800ms) - skipping")

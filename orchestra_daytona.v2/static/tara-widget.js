@@ -55,6 +55,8 @@
 
   // LocalStorage key for cached orb SVG (delivered via WebSocket)
   const ORB_CACHE_KEY = 'tara_orb_svg_cache';
+  // LocalStorage key for mission persistence across navigations
+  const MISSION_STATE_KEY = 'tara_mission_state';
 
   function getCachedOrbUrl() {
     try {
@@ -371,13 +373,24 @@
       console.log('🔗 WebSocket:', this.config.wsUrl);
 
       // Auto-reconnect if navigated (preserving mode)
-      const savedSession = sessionStorage.getItem('tara_session_id');
-      const savedMode = sessionStorage.getItem('tara_mode');
-      const savedInteractionMode = sessionStorage.getItem('tara_interaction_mode');
+      // Use localStorage for cross-origin survival (e.g. daytona.io → docs.daytona.io)
+      const savedSession = localStorage.getItem('tara_session_id') || sessionStorage.getItem('tara_session_id');
+      const savedMode = localStorage.getItem('tara_mode') || sessionStorage.getItem('tara_mode');
+      const savedInteractionMode = localStorage.getItem('tara_interaction_mode') || sessionStorage.getItem('tara_interaction_mode');
+
       if (savedSession && savedMode === 'visual-copilot') {
+        // Check for a persisted mission to resume
+        const missionState = this._loadMissionState();
+        if (missionState && missionState.goal) {
+          console.log('🔄 STICKY AGENT: Resuming mission across navigation:', missionState.goal);
+          this.pendingMissionGoal = missionState.goal;
+        }
         console.log('🔄 Restoring Visual Co-Pilot session:', savedSession);
         this.startVisualCopilot(savedSession, savedInteractionMode || 'interactive');
       }
+
+      // Register beforeunload handler for mission persistence
+      this._registerNavigationPersistence();
     }
 
     createShadowDOM() {
@@ -1243,6 +1256,9 @@
       const text = this.chatInput.value.trim();
       if (!text) return;
 
+      // Sticky Agent: Track current mission goal for navigation persistence
+      this._currentMissionGoal = text;
+
       this.appendChatMessage(text, 'user');
       this.chatInput.value = '';
       this.sendButton.classList.remove('has-text');
@@ -1265,6 +1281,12 @@
       const lastMsg = this.chatMessages.lastElementChild;
       if (!lastMsg || lastMsg.dataset.sender !== 'ai' || lastMsg.dataset.streaming !== 'true') {
         this.appendChatMessage('', 'ai', true);
+      }
+
+      // TURBO MODE: Skip animation for instant feedback & to avoid overlapping updates
+      if (this.sessionMode === 'turbo') {
+        this.appendChatMessage(fullText + ' ', 'ai', true);
+        return;
       }
 
       const chunks = fullText.split(' ');
@@ -1328,12 +1350,18 @@
           interaction_mode: this.sessionMode,
           timestamp: Date.now(),
           session_id: resumeSessionId,
-          current_url: window.location.pathname
+          current_url: window.location.pathname,
+          pending_goal: this.pendingMissionGoal || null  // Sticky Agent: resume mission after navigation
         };
 
-        // Persist for auto-resume across navigation
+        // Clear the pending goal after sending it
+        this.pendingMissionGoal = null;
+
+        // Persist for auto-resume across navigation (both storage types for maximum reliability)
         sessionStorage.setItem('tara_mode', 'visual-copilot');
         sessionStorage.setItem('tara_interaction_mode', this.sessionMode);
+        localStorage.setItem('tara_mode', 'visual-copilot');
+        localStorage.setItem('tara_interaction_mode', this.sessionMode);
 
         console.log('📤 Sending session_config:', JSON.stringify(sessionConfig));
         this.ws.send(JSON.stringify(sessionConfig));
@@ -1346,7 +1374,10 @@
           this.ws.send(JSON.stringify({
             type: 'dom_update',
             elements: blueprint,
-            url: window.location.href
+            url: window.location.href,
+            title: document.title,
+            active_states: this.detectActiveStates(),
+            data_tables: this.extractVisibleTables()
           }));
           console.log('✅ dom_update sent successfully');
         }
@@ -1369,6 +1400,68 @@
       } catch (err) {
         console.error('❌ Failed to start Visual Co-Pilot:', err);
       }
+    }
+
+    // ── Sticky Agent: Mission Persistence ─────────────────────────────────
+
+    _registerNavigationPersistence() {
+      window.addEventListener('beforeunload', () => {
+        this._saveMissionState();
+      });
+    }
+
+    _saveMissionState() {
+      try {
+        // Only save if there's an active mission
+        if (!this.isActive) return;
+
+        const sessionId = sessionStorage.getItem('tara_session_id');
+        if (!sessionId) return;
+
+        // Grab the current goal from the chat bar or stored state
+        const currentGoal = this._currentMissionGoal || '';
+        if (!currentGoal) return;
+
+        const state = {
+          sessionId: sessionId,
+          goal: currentGoal,
+          url: window.location.href,
+          mode: this.sessionMode,
+          timestamp: Date.now()
+        };
+
+        localStorage.setItem(MISSION_STATE_KEY, JSON.stringify(state));
+        console.log('💾 Sticky Agent: Saved mission state for navigation survival');
+      } catch (e) {
+        /* localStorage not available or quota exceeded */
+      }
+    }
+
+    _loadMissionState() {
+      try {
+        const raw = localStorage.getItem(MISSION_STATE_KEY);
+        if (!raw) return null;
+
+        const state = JSON.parse(raw);
+
+        // Only resume if state is fresh (< 5 minutes old)
+        if (Date.now() - state.timestamp > 300000) {
+          console.log('🗑️ Sticky Agent: Saved state is stale (>5min), discarding');
+          localStorage.removeItem(MISSION_STATE_KEY);
+          return null;
+        }
+
+        return state;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    _clearMissionState() {
+      try {
+        localStorage.removeItem(MISSION_STATE_KEY);
+      } catch (e) { /* ignore */ }
+      this._currentMissionGoal = null;
     }
 
     async initializeAudioManager() {
@@ -1500,6 +1593,8 @@
       // Clear persistence
       sessionStorage.removeItem('tara_mode');
       sessionStorage.removeItem('tara_session_id');
+      localStorage.removeItem('tara_session_id');
+      this._clearMissionState();
       sessionStorage.removeItem('tara_interaction_mode');
 
       // Hide chat bar
@@ -1860,7 +1955,10 @@
           const payload = JSON.stringify({
             type: 'dom_update',
             elements: blueprint,
-            url: window.location.href
+            url: window.location.href,
+            title: document.title,
+            active_states: this.detectActiveStates(),
+            data_tables: this.extractVisibleTables()
           });
 
           this.ws.send(payload);
@@ -1933,7 +2031,19 @@
 
       const allElements = collectAllElements(document.documentElement);
 
+      // SVG internal element types that are never useful for interaction
+      const SVG_NOISE_TAGS = new Set([
+        'svg', 'path', 'rect', 'circle', 'line', 'polyline', 'polygon',
+        'ellipse', 'use', 'defs', 'clippath', 'g', 'mask', 'symbol',
+        'lineargradient', 'radialgradient', 'stop', 'pattern', 'marker',
+        'filter', 'fegaussianblur', 'feoffset', 'feblend', 'fecolormatrix',
+        'text', 'tspan'  // SVG text elements (not HTML text)
+      ]);
+
       allElements.forEach(el => {
+        // Skip SVG internals immediately — they are icon decoration with zero interaction value
+        if (el instanceof SVGElement || SVG_NOISE_TAGS.has(el.tagName.toLowerCase())) return;
+
         // Skip hidden/disabled early
         if (el.disabled || el.type === 'hidden' || el.type === 'password') return;
 
@@ -1948,9 +2058,12 @@
 
         const isInteractive = (isFocusable || isClickableRole || hasPointer) && !el.disabled;
 
-        // Context: Headers, Labels, Text Leafs (that are not interactive)
-        const isContext = el.matches('h1, h2, h3, h4, h5, h6, label, th, nav, legend') ||
-          (el.children.length === 0 && el.textContent.trim().length > 0);
+        // Context: Headers, Labels, Data Containers, Text Leafs
+        // CRITICAL: Include elements with meaningful text content (prices, stats, data values)
+        // This prevents "data blindness" where visible data on screen is ignored
+        const textContent = el.textContent ? el.textContent.trim() : '';
+        const isContext = el.matches('h1, h2, h3, h4, h5, h6, label, th, td, nav, legend, p, li, dt, dd, span[class*="value"], span[class*="price"], span[class*="stat"], span[class*="count"], span[class*="total"], [class*="metric"], [class*="amount"]') ||
+          (el.children.length === 0 && textContent.length > 2 && textContent.length < 200);
 
         if (!isInteractive && !isContext) return;
 
@@ -1960,16 +2073,17 @@
           rect.left < window.innerWidth &&
           rect.right > 0;
 
-        if (!isInViewport) return;
+        // v5: viewport filter REMOVED — inViewport kept as metadata only
+        // Agent sees the full DOM; scroll is purely for user's visual experience
         if (rect.width < 2 || rect.height < 2) return; // Ignore tiny specks
 
-        // --- Assign Persistent IDs ---
+        // --- Assign Persistent IDs (Stable Hash) ---
         let finalId = el.id || el.getAttribute('name');
         if (!finalId) {
           if (el.hasAttribute('data-tara-id')) {
             finalId = el.getAttribute('data-tara-id');
           } else {
-            finalId = `tara-${Math.random().toString(36).substr(2, 9)}`;
+            finalId = this.generateStableId(el);
             el.setAttribute('data-tara-id', finalId);
           }
         }
@@ -1987,12 +2101,35 @@
 
         const isNew = this.previousScanIds && !this.previousScanIds.has(finalId);
 
+        // State Detection — strict: only ARIA attributes and exact CSS classes
+        // [class*="active"] was over-matching (e.g. "interactive" contains "active")
+        let state = "";
+        if (document.activeElement === el) state = "focused";
+        else if (el.getAttribute('aria-current') || el.getAttribute('aria-selected') === 'true') state = "active";
+        else if (el.matches('.active, .selected') && el.matches('a, [role="tab"], [role="link"], [role="menuitem"]')) state = "active";
+
+        // v5: Zone classification (semantic grouping)
+        const zone = this.classifyZone(el);
+
+        // v5: Depth and parentId for tree reconstruction
+        const depth = this.getDepth(el);
+        const parentId = this.getParentInteractiveId(el);
+
         elements.push({
           id: finalId,
-          text: cleanText + (isNew ? ' [NEW]' : ''),
+          text: cleanText,
           type: type,
-          interactive: isInteractive, // EXPLICIT FLAG FOR BACKEND
-          isNew: isNew, // For sorting
+          interactive: isInteractive,
+          isNew: isNew,
+          state: state,
+          zone: zone,
+          role: el.getAttribute('role') || '',
+          depth: depth,
+          parentId: parentId,
+          inViewport: isInViewport,
+          ariaSelected: el.getAttribute('aria-selected'),
+          ariaCurrent: el.getAttribute('aria-current'),
+          ariaExpanded: el.getAttribute('aria-expanded'),
           rect: {
             x: Math.round(rect.left + window.scrollX),
             y: Math.round(rect.top + window.scrollY),
@@ -2010,10 +2147,14 @@
       this.lastDOMHash = newHash;
       this.previousScanIds = currentScanIds;
 
-      // SORT: Prioritize [NEW] elements to ensure popups aren't sliced off
-      elements.sort((a, b) => (b.isNew === a.isNew) ? 0 : b.isNew ? 1 : -1);
+      // SORT: Prioritize [NEW] elements, then interactive, then context
+      elements.sort((a, b) => {
+        if (a.isNew !== b.isNew) return b.isNew ? 1 : -1;
+        if (a.interactive !== b.interactive) return b.interactive ? 1 : -1;
+        return 0;
+      });
 
-      return elements.slice(0, 300);
+      return elements.slice(0, 600); // v5: increased from 400 — full DOM capture
     }
 
     forceScan() {
@@ -2025,15 +2166,48 @@
       const blueprint = this.scanPageBlueprint();
 
       if (blueprint && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        // v5: Include semantic metadata with full DOM scan
         const payload = JSON.stringify({
           type: 'dom_update',
           elements: blueprint,
-          url: window.location.href
+          url: window.location.href,
+          title: document.title,
+          active_states: this.detectActiveStates(),
+          data_tables: this.extractVisibleTables()
         });
 
         this.ws.send(payload);
         console.log('📤 Forced DOM update sent');
       }
+    }
+
+    generateStableId(el) {
+      const tag = el.tagName.toLowerCase();
+      const text = (el.textContent || '').trim().substring(0, 30);
+      const role = el.getAttribute('role') || '';
+      const href = el.getAttribute('href') || '';
+      const type = el.getAttribute('type') || '';
+
+      // Compute DOM path (nth-child chain) for positional stability
+      let path = '';
+      let node = el;
+      while (node && node !== document.documentElement) {
+        const parent = node.parentElement;
+        if (parent) {
+          const siblings = Array.from(parent.children);
+          const index = siblings.indexOf(node);
+          path = `${index}.${path}`;
+        }
+        node = parent;
+      }
+
+      // DJB2 hash of the composite key
+      const key = `${tag}|${text}|${role}|${href}|${type}|${path}`;
+      let hash = 5381;
+      for (let i = 0; i < key.length; i++) {
+        hash = ((hash << 5) + hash) ^ key.charCodeAt(i);
+      }
+      return `t-${(hash >>> 0).toString(36)}`;
     }
 
     generateDOMHash(elements) {
@@ -2050,13 +2224,135 @@
       return hash >>> 0; // Ensure unsigned 32-bit
     }
 
+    // ============================================
+    // v5: SEMANTIC PAGE GRAPH HELPERS
+    // ============================================
+
+    classifyZone(el) {
+      // Walk up the DOM to find the nearest semantic container
+      let node = el;
+      let depth = 0;
+      while (node && node !== document.documentElement && depth < 10) {
+        const tag = node.tagName ? node.tagName.toLowerCase() : '';
+        const role = node.getAttribute ? (node.getAttribute('role') || '') : '';
+
+        if (tag === 'nav' || role === 'navigation') return 'nav';
+        if (tag === 'aside' || role === 'complementary') return 'sidebar';
+        if (tag === 'footer' || role === 'contentinfo') return 'footer';
+        if (tag === 'header' || role === 'banner') {
+          // Top-level header = nav zone, nested header = main
+          if (!node.parentElement || node.parentElement === document.body) return 'nav';
+        }
+        if (role === 'dialog' || role === 'alertdialog' ||
+            (node.classList && (node.classList.contains('modal') || node.classList.contains('dialog')))) {
+          return 'modal';
+        }
+        if (tag === 'main' || role === 'main') return 'main';
+
+        node = node.parentElement;
+        depth++;
+      }
+      return 'main'; // default zone
+    }
+
+    getDepth(el) {
+      let depth = 0;
+      let node = el;
+      while (node && node !== document.documentElement && depth < 20) {
+        node = node.parentElement;
+        depth++;
+      }
+      return depth;
+    }
+
+    getParentInteractiveId(el) {
+      // Find the nearest ancestor that is interactive and has a tara id
+      let node = el.parentElement;
+      let steps = 0;
+      while (node && node !== document.documentElement && steps < 5) {
+        const id = node.id || node.getAttribute('data-tara-id');
+        if (id) {
+          const isInteractive = node.matches && node.matches(
+            'button, a[href], input, select, textarea, [role="button"], [role="link"], [role="tab"], [tabindex="0"]'
+          );
+          if (isInteractive || node.matches('nav, main, aside, header, footer, section, [role="navigation"]')) {
+            return id;
+          }
+        }
+        node = node.parentElement;
+        steps++;
+      }
+      return '';
+    }
+
+    detectActiveStates() {
+      const states = { activePage: null, activeTab: null, expandedSections: [] };
+      try {
+        // Only match strict ARIA active indicators — NOT CSS class substring matches
+        // [class*="active"] was over-matching (e.g. "interactive", mic "active" class)
+        const activeCandidates = document.querySelectorAll(
+          '[aria-current="page"], [aria-current="true"], [aria-current="step"], [aria-selected="true"]'
+        );
+        activeCandidates.forEach(el => {
+          // Skip TARA's own widget elements
+          if (el.closest('.tara-floating-widget, .tara-chat-bar')) return;
+          if (el.matches('a, [role="link"], [role="tab"], [role="menuitem"]')) {
+            const text = (el.textContent || '').trim().slice(0, 40);
+            if (!text) return;
+            if (el.closest('nav')) states.activePage = text;
+            else if (el.matches('[role="tab"], [aria-selected="true"]')) states.activeTab = text;
+          }
+        });
+
+        // Fallback: check for .active class ONLY on links/tabs inside <nav>
+        // (much narrower than [class*="active"] which matches everything)
+        if (!states.activePage) {
+          document.querySelectorAll('nav a.active, nav [role="link"].active').forEach(el => {
+            if (el.closest('.tara-floating-widget, .tara-chat-bar')) return;
+            const text = (el.textContent || '').trim().slice(0, 40);
+            if (text && !states.activePage) states.activePage = text;
+          });
+        }
+
+        document.querySelectorAll('[aria-expanded="true"]')
+          .forEach(el => {
+            if (el.closest('.tara-floating-widget, .tara-chat-bar')) return;
+            states.expandedSections.push((el.textContent || '').trim().slice(0, 40));
+          });
+      } catch (e) { /* safety */ }
+      return states;
+    }
+
+    extractVisibleTables() {
+      const tables = [];
+      try {
+        document.querySelectorAll('table, [role="grid"], [role="table"]').forEach(table => {
+          const rows = [];
+          table.querySelectorAll('tr, [role="row"]').forEach(row => {
+            const cells = [];
+            row.querySelectorAll('td, th, [role="cell"], [role="columnheader"]')
+              .forEach(cell => cells.push(cell.textContent.trim().slice(0, 60)));
+            if (cells.length) rows.push(cells);
+          });
+          if (rows.length) tables.push({ headers: rows[0], rows: rows.slice(1).slice(0, 15) });
+        });
+      } catch (e) { /* safety */ }
+      return tables;
+    }
+
     extractText(el) {
-      // 1. Check direct attributes (Accessiblity first)
+      // 1. Check direct attributes (Accessibility first)
       let text = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || '';
       if (text) return this.cleanText(text);
 
       // 2. Check inner text (if visible and meaningful)
-      text = el.innerText || el.value || '';
+      // For leaf nodes or data containers, get the direct text
+      if (el.children.length === 0 || el.matches('td, th, li, dt, dd, span, label, p')) {
+        text = el.innerText || el.textContent || el.value || '';
+      } else {
+        // For containers, prefer innerText (visible only) over textContent
+        text = el.innerText || el.value || '';
+      }
       const cleaned = this.cleanText(text);
       if (cleaned.length > 0) return cleaned;
 
@@ -2072,7 +2368,8 @@
 
     cleanText(str) {
       if (str === null || str === undefined) return '';
-      return String(str).replace(/\s+/g, ' ').trim().substring(0, 50);
+      // Allow longer text for data values (80 chars instead of 50)
+      return String(str).replace(/\s+/g, ' ').trim().substring(0, 80);
     }
 
     async handleBackendMessage(msg) {
@@ -2092,11 +2389,17 @@
       }
       else if (msg.type === 'session_created') {
         sessionStorage.setItem('tara_session_id', msg.session_id);
+        localStorage.setItem('tara_session_id', msg.session_id);
         console.log('💾 Session ID saved:', msg.session_id);
         // Connect dedicated audio WebSocket (interactive mode only)
         if (this.sessionMode === 'interactive') {
           this.connectAudioWebSocket(msg.session_id);
         }
+      }
+      else if (msg.type === 'mission_started') {
+        // Sticky Agent: Track the mission goal (covers voice-initiated missions from STT)
+        this._currentMissionGoal = msg.goal;
+        console.log('🎯 Mission goal tracked for navigation persistence:', msg.goal);
       }
       else if (msg.type === 'ping') {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -2136,35 +2439,54 @@
           window.location.href = msg.url;
         }
       }
+      else if (msg.type === 'turbo_speech') {
+        // TURBO MODE: Simulate typing for text-only feedback
+        this.simulateTyping(msg.text);
+      }
       else if (msg.type === 'command') {
         const payload = msg.payload || msg;
         const type = payload.type;
         const target_id = payload.target_id || payload.id; // Support both naming styles
         const text = payload.text;
-        const speech = payload.speech;
-
-        // TURBO MODE: Stream text response manually since TTS is muted/skipped
-        if (this.sessionMode === 'turbo' && speech) {
-          this.simulateTyping(speech); // Async (non-blocking) visual feedback
-        }
 
         console.log(`🤖 Executing: ${type} on ${target_id}`);
 
+        // Save pre-action state for structured outcome reporting
+        const preActionUrl = window.location.href;
+        const preActionHash = this.lastDOMHash;
+        const settleStart = Date.now();
+
         await this.executeCommand(type, target_id, text);
 
-        // --- MISSION AGENT HANDSHAKE ---
-        // 1. Capture FRESH DOM (wait for settling done in executeCommand)
-        const freshDOM = this.scanPageBlueprint(true); // Force scan
+        const settleTime = Date.now() - settleStart;
 
-        // 2. Send execution_complete WITH DOM
+        // --- MISSION AGENT HANDSHAKE (v4: Structured Outcome) ---
+        const freshDOM = this.scanPageBlueprint(true); // Force scan
+        const urlChanged = window.location.href !== preActionUrl;
+        const newElements = freshDOM ? freshDOM.filter(el => el.isNew).length : 0;
+        const domChanged = freshDOM !== null || this.lastDOMHash !== preActionHash;
+
         this.ws.send(JSON.stringify({
           type: 'execution_complete',
           status: 'success',
+          outcome: {
+            dom_changed: domChanged,
+            url_changed: urlChanged,
+            new_elements_count: newElements,
+            current_url: window.location.href,
+            has_modal: this.detectModal(),
+            settle_time_ms: settleTime,
+            dom_hash: this.lastDOMHash,
+            scroll_y: Math.round(window.scrollY)
+          },
           dom_context: freshDOM,
+          active_states: this.detectActiveStates(),
+          data_tables: this.extractVisibleTables(),
+          title: document.title,
           timestamp: Date.now()
         }));
 
-        console.log('✅ Execution complete sent with DOM context - Triggering next step');
+        console.log(`✅ Execution complete (${settleTime}ms settle, ${newElements} new, url_changed=${urlChanged})`);
 
         this.waitingForExecution = false;
         this.setOrbState('listening');
@@ -2260,10 +2582,27 @@
           const el = this.findElement(targetId, text);
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            this.highlightElement(el); // Brief visual confirm
+          } else {
+            // Fallback: If target not found, scroll by half a screen
+            this.robustScroll(1, window.innerHeight * 0.5);
           }
         } else if (type === 'scroll') {
-          // Blind scroll for exploration
-          window.scrollBy({ top: window.innerHeight * 0.7, behavior: 'smooth' });
+          // General scroll (up/down)
+          const direction = (text && text.includes('up')) ? -1 : 1;
+          this.robustScroll(direction);
+
+          // VISUAL FEEDBACK: Brief flash on side of screen to show action happened
+          const flash = document.createElement('div');
+          flash.style.cssText = `
+            position: fixed; top: 0; ${direction > 0 ? 'bottom: 0' : 'top: 0'}; 
+            right: 0; width: 6px; background: rgba(59, 130, 246, 0.5); z-index: 10000;
+            pointer-events: none; transition: opacity 0.5s; opacity: 1;
+          `;
+          document.body.appendChild(flash);
+          setTimeout(() => { flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 200);
+
+
         } else if (type === 'highlight') {
           this.executeHighlight(targetId, text);
         } else if (type === 'spotlight') {
@@ -2273,12 +2612,102 @@
           this.clearHighlights();
         }
 
-        // --- WAIT FOR DOM SETTLE (Crucial) ---
-        // --- WAIT FOR DOM SETTLE (Crucial) ---
-        await new Promise(r => setTimeout(r, 2000)); // Increased to 2s for complex React renders
+        // --- ADAPTIVE DOM SETTLE (MutationObserver) ---
+        // Scroll actions need more time for effective layout shift
+        const settleTime = (type === 'scroll' || type === 'scroll_to') ? 800 : 300;
+        await this.waitForDOMSettle(3000, settleTime);
 
       } catch (err) {
         console.warn("Execution partial error:", err);
+      }
+    }
+
+    detectModal() {
+      // Quick check for open dialog/modal elements
+      const dialogs = document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"], .modal.show, .modal.active, [aria-modal="true"]');
+      return dialogs.length > 0;
+    }
+
+    async waitForDOMSettle(maxWait = 3000, stableFor = 300) {
+      return new Promise((resolve) => {
+        let lastMutationTime = Date.now();
+        let settled = false;
+
+        const observer = new MutationObserver(() => {
+          lastMutationTime = Date.now();
+        });
+
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          characterData: true
+        });
+
+        const checkInterval = setInterval(() => {
+          const elapsed = Date.now() - lastMutationTime;
+          if (elapsed >= stableFor) {
+            settled = true;
+            cleanup();
+          }
+        }, 50);
+
+        const timeout = setTimeout(() => {
+          if (!settled) cleanup();
+        }, maxWait);
+
+        function cleanup() {
+          observer.disconnect();
+          clearInterval(checkInterval);
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    }
+
+    robustScroll(direction = 1, amount = null) {
+      if (!amount) amount = window.innerHeight * 0.7;
+      const top = amount * direction;
+
+      console.log(`📜 Robust Scroll: direction=${direction}, amount=${amount}`);
+
+      // 1. Try scrolling the window (standard)
+      window.scrollBy({ top, behavior: 'smooth' });
+
+      // 2. Identify and scroll common app containers (Groq/Next.js/React standard)
+      const containerSelectors = [
+        'main',
+        'section',
+        '#content',
+        '.content',
+        '[role="main"]',
+        '.overflow-y-auto',
+        '.overflow-auto',
+        '.main-content'
+      ];
+
+      let containerScrolled = false;
+      containerSelectors.forEach(selector => {
+        const containers = document.querySelectorAll(selector);
+        containers.forEach(c => {
+          if (c.scrollHeight > c.clientHeight) {
+            c.scrollBy({ top, behavior: 'smooth' });
+            containerScrolled = true;
+          }
+        });
+      });
+
+      // 3. Fallback: Search all visible elements for the TRUE scroller if standard ones failed
+      if (!containerScrolled) {
+        const all = document.querySelectorAll('div, aside, article');
+        for (const el of all) {
+          const style = window.getComputedStyle(el);
+          if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
+            el.scrollBy({ top, behavior: 'smooth' });
+            console.log("📜 Found ad-hoc scroller:", el);
+            break;
+          }
+        }
       }
     }
 

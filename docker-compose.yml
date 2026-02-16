@@ -22,32 +22,6 @@ services:
       - coolify.service.subId=7
       - coolify.service.subType=database
       - coolify.service.subName=redis
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=redis-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=redis
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=7
-      - coolify.service.subType=database
-      - coolify.service.subName=redis
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=redis-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=redis
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=7
-      - coolify.service.subType=database
-      - coolify.service.subName=redis
     environment:
       COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
       COOLIFY_CONTAINER_NAME: redis-ekgcgssw8css400gs8wwggwo
@@ -92,37 +66,10 @@ services:
       - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/rag-daytona.v2:/app/daytona_agent/services/rag'
       - '/data/coolify/services/ekgcgssw8css400gs8wwggwo/rag-daytona.v2/shared:/app/daytona_agent/services/shared'
     command: "uvicorn app:app --host 0.0.0.0 --port 8003 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem\n"
-
     networks:
       ekgcgssw8css400gs8wwggwo: null
     restart: unless-stopped
     labels:
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=rag-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=rag
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=25
-      - coolify.service.subType=application
-      - coolify.service.subName=rag
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=rag-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=rag
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=25
-      - coolify.service.subType=application
-      - coolify.service.subName=rag
       - coolify.managed=true
       - coolify.version=4.0.0-beta.462
       - coolify.serviceId=5
@@ -197,32 +144,6 @@ services:
       - coolify.service.subId=26
       - coolify.service.subType=application
       - coolify.service.subName=stt
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=stt-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=stt
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=26
-      - coolify.service.subType=application
-      - coolify.service.subName=stt
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=stt-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=stt
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=26
-      - coolify.service.subType=application
-      - coolify.service.subName=stt
     env_file:
       - .env
   tts:
@@ -249,19 +170,6 @@ services:
       ekgcgssw8css400gs8wwggwo: null
     restart: unless-stopped
     labels:
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=tts-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=tts
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=27
-      - coolify.service.subType=application
-      - coolify.service.subName=tts
       - coolify.managed=true
       - coolify.version=4.0.0-beta.462
       - coolify.serviceId=5
@@ -308,32 +216,6 @@ services:
       ekgcgssw8css400gs8wwggwo: null
     restart: unless-stopped
     labels:
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=orchestrator-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=orchestrator
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=28
-      - coolify.service.subType=application
-      - coolify.service.subName=orchestrator
-      - coolify.managed=true
-      - coolify.version=4.0.0-beta.462
-      - coolify.serviceId=5
-      - coolify.type=service
-      - coolify.name=orchestrator-ekgcgssw8css400gs8wwggwo
-      - coolify.resourceName=service-a8s08cks4cskgs8gsow48oo4
-      - coolify.projectName=blaiq-amar
-      - coolify.serviceName=orchestrator
-      - coolify.environmentName=production
-      - coolify.pullRequestId=0
-      - coolify.service.subId=28
-      - coolify.service.subType=application
-      - coolify.service.subName=orchestrator
       - coolify.managed=true
       - coolify.version=4.0.0-beta.462
       - coolify.serviceId=5

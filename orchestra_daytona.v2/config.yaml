@@ -50,6 +50,7 @@ services:
     similarity_threshold: 0.7
     enable_incremental: true
     language: "german"
+    enable_map: false  # Disable HiveMind map lookups by default
   
   intent:
     url: "http://tara-task-intent:8002"

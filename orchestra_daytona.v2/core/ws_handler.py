@@ -159,6 +159,9 @@ class OrchestratorSession:
     appointment_fsm: Optional[SimpleAppointmentFSM] = None  # Active FSM instance
     fsm_active: bool = False  # True when in FSM mode
 
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    map_status_checked: bool = False
+
     # Host-based configuration overrides
     agent_name: str = "demo"
     agent_id: Optional[str] = None
@@ -167,6 +170,12 @@ class OrchestratorSession:
     flow_config: Dict[str, Any] = field(default_factory=dict)
     rag_url: Optional[str] = None
     voice_id_override: Optional[str] = None
+
+    # Connection health tracking
+    last_pong_time: Optional[float] = None  # Last time browser responded to ping
+    
+    # Audio chunk counter (continuous across _enqueue_foreground_audio calls)
+    _audio_chunk_counter: int = 0
 
     def is_connected(self) -> bool:
         """Check if the WebSocket is still connected and open."""
@@ -421,14 +430,21 @@ class OrchestratorWSHandler:
         if source in ["stt_groq", "stt_groq_whisper"]:
             logger.warning(f"🔍 [{session_id}] Internal service '{source}' connected. Preventing session hijack.")
             await websocket.accept()
-            # We accept the connection but DO NOT assign it to the session.
-            # We just hold it open to prevent the service from retrying aggressively
-            # or we could implement a separate handler if we needed its push events.
+            # Accept but DO NOT assign to the session. Drain messages until disconnect
+            # instead of sleeping forever (which creates zombie connections).
             try:
                 while True:
-                    await asyncio.sleep(60) # Keep alive
-            except Exception:
-                pass
+                    # Actually read from the WS so we detect disconnects immediately
+                    msg = await asyncio.wait_for(websocket.receive(), timeout=120.0)
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+            except (asyncio.TimeoutError, WebSocketDisconnect, Exception) as e:
+                logger.debug(f"[{session_id}] Internal service '{source}' disconnected: {type(e).__name__}")
+            finally:
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
             return
         
         await websocket.accept()
@@ -718,8 +734,8 @@ class OrchestratorWSHandler:
         elif msg_type == "request_asset":
             await self._handle_request_asset(session, msg)
         elif msg_type == "pong":
-            # Heartbeat response - can be safely ignored
-            pass
+            # Track last pong for dead connection detection
+            session.last_pong_time = time.time()
         else:
             logger.warning(f"[{session.session_id}] Unknown message type: {msg_type}")
     
@@ -909,17 +925,27 @@ class OrchestratorWSHandler:
         if not session.tts_client:
             return
         
+        reconnect_delay = 1.0  # Start with 1s, backoff on consecutive failures
+        max_reconnect_delay = 10.0
+        
         while not session.is_closed:
             try:
                 # Check connection status
                 if not session.tts_client.ws or session.tts_client.ws.closed:
+                    # Guard: Don't reconnect if session is being torn down
+                    if session.is_closed:
+                        break
                     logger.info(f"[{session.session_id}] 🔌 Reconnecting to TTS service...")
                     connected = await session.tts_client.connect(session.session_id)
                     if not connected:
-                        logger.warning(f"[{session.session_id}] ❌ Failed to reconnect to TTS service, retrying in 2s...")
+                        logger.warning(f"[{session.session_id}] ❌ Failed to reconnect to TTS service, retrying in {reconnect_delay:.1f}s...")
                         session.tts_connected_event.clear()
-                        await asyncio.sleep(2.0)
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
                         continue
+                
+                # Reset backoff on successful connection
+                reconnect_delay = 1.0
                 
                 # Signal connection success
                 session.tts_connected_event.set()
@@ -936,7 +962,15 @@ class OrchestratorWSHandler:
                     await asyncio.sleep(0)
                     
                     # Store in queue for _stream_tts_to_browser
-                    await session.tts_audio_queue.put(data)
+                    try:
+                        session.tts_audio_queue.put_nowait(data)
+                    except asyncio.QueueFull:
+                        # Drop oldest if queue is full (prevent memory buildup)
+                        try:
+                            session.tts_audio_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        await session.tts_audio_queue.put(data)
 
                     # Record first audio chunk time for TTFC
                     if "speech_end" in session.current_turn_timers and "first_audio" not in session.current_turn_timers:
@@ -946,9 +980,6 @@ class OrchestratorWSHandler:
                         
                         # UPDATE TURN METRICS (fix for 0.0 average in session report)
                         if session.turn_metrics:
-                            # The metrics entry for this turn was already appended to turn_metrics
-                            # in _process_user_input, but ttfc_ms was likely None at that time.
-                            # We update the last entry if the user_text matches.
                             last_metrics = session.turn_metrics[-1]
                             if last_metrics.get("user_text") == session.current_turn_timers.get("user_text"):
                                 last_metrics["ttfc_ms"] = ttfc
@@ -957,7 +988,7 @@ class OrchestratorWSHandler:
                 if not session.is_closed:
                     logger.warning(f"[{session.session_id}] ⚠️ TTS connection dropped, attempting reconnection...")
                     session.tts_connected_event.clear()
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(reconnect_delay)
                     
             except asyncio.CancelledError:
                 logger.info(f"[{session.session_id}] TTS receive loop cancelled")
@@ -1796,6 +1827,7 @@ class OrchestratorWSHandler:
         Stream FSM response to browser and TTS.
         
         This handles appointment booking responses separately from RAG responses.
+        Uses _stream_tts_to_browser (queue-based) to avoid concurrent receive_audio() calls.
         """
         if session.is_closed:
             return
@@ -1824,85 +1856,10 @@ class OrchestratorWSHandler:
             # Add to history
             session.history_manager.add_agent_turn(response_text, metadata={"source": "fsm"})
             
-            # Connect to TTS if needed
-            if not session.tts_client.ws or session.tts_client.ws.closed:
-                await session.tts_client.connect(session.session_id)
-            
-            if session.tts_client.ws and not session.tts_client.ws.closed:
-                # CRITICAL: Cancel any existing playback timer at the start of a new stream
-                if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
-                    session.audio_playback_server_timer.cancel()
-                    logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new FSM stream")
-                
-                # Send to TTS for voice output (using correct stream_chunk method)
-                await session.tts_client.stream_chunk(response_text, language=output_language, voice_id=session.voice_id_override)
-                await session.tts_client.stream_end()
-                
-                # Transition to SPEAKING
-                speaking_side_effects = await state_mgr.transition(State.SPEAKING, trigger="fsm_audio")
-                await self._broadcast_state(session, State.SPEAKING)
-                
-                # Receive and forward audio from TTS (same pattern as _stream_response_and_tts)
-                audio_received = False
-                session.tts_total_bytes = 0  # Reset for this response
-                session.audio_playback_start_time = None # Reset timing
-                
-                async for data in session.tts_client.receive_audio():
-                    if session.is_closed:
-                        break
-                    
-                    msg_type = data.get("type")
-                    
-                    # Capture and store format configuration from TTS service
-                    if msg_type == "connected":
-                        session.tts_sample_rate = data.get("sample_rate", session.tts_sample_rate)
-                        session.tts_format = data.get("format", session.tts_format)
-                        logger.info(f"[{session.session_id}] 📨 TTS connected: {session.tts_sample_rate}Hz, {session.tts_format}")
-                        continue
-                    
-                    if msg_type in ("prewarmed", "sentence_start", "sentence_playing", "pong", "timeout"):
-                        continue
-                    
-                    if msg_type == "audio":
-                        audio_data = data.get("data")
-                        if audio_data:
-                            audio_received = True
-                            
-                            if data.get("is_binary"):
-                                audio_bytes = audio_data
-                                audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                            else:
-                                audio_b64 = audio_data
-                                audio_bytes = base64.b64decode(audio_b64)
-                                
-                            session.tts_total_bytes += len(audio_bytes)
-                            
-                            # Use buffered sending for smooth playback
-                            sample_rate = data.get("sample_rate", session.tts_sample_rate)
-                            encoding = data.get("format", session.tts_format)
-                            await self._enqueue_foreground_audio(session, audio_bytes, sample_rate=sample_rate, encoding=encoding)
-                            
-                    elif msg_type in ("complete", "stream_complete", "sentence_complete"):
-                        logger.debug(f"[{session.session_id}] ✅ FSM TTS stream complete")
-                        break
-                    elif msg_type == "error":
-                        logger.error(f"[{session.session_id}] ❌ FSM TTS error: {data.get('message', 'unknown')}")
-                        break
-                
-                # Signal audio complete
-                if audio_received:
-                    # Flush remaining buffer
-                    await self._enqueue_foreground_audio(session, b"", flush=True, sample_rate=session.tts_sample_rate, encoding=session.tts_format)
-                    
-                    await self._send_json(session.websocket, {
-                        "type": "audio_complete",
-                        "timestamp": time.time()
-                    }, session)
-                    
-                    # Calculate and wait for playback duration
-                    duration_sec = session.tts_total_bytes / 48000.0  # 24kHz 16-bit mono
-                    logger.info(f"[{session.session_id}] 🔊 FSM audio sent, waiting {duration_sec:.1f}s for playback")
-                    await asyncio.sleep(max(duration_sec, 0.5))
+            # Use _stream_tts_to_browser which correctly reads from tts_audio_queue
+            # (populated by _tts_receive_loop — the ONLY consumer of receive_audio())
+            # This avoids the "Concurrent call to receive()" error.
+            await self._stream_tts_to_browser(session, response_text, output_language)
             
             # Transition to LISTENING
             if state_mgr.state != State.LISTENING:
@@ -2299,7 +2256,39 @@ class OrchestratorWSHandler:
 
             # Proactively trigger Intro if switching to visual-copilot for the first time
             is_resume = msg.get("session_id") is not None
-            if mode == "visual-copilot" and prev_mode != "visual-copilot" and not is_resume:
+            pending_goal = msg.get("pending_goal")
+            
+            if mode == "visual-copilot" and is_resume and pending_goal:
+                # ── STICKY AGENT RESUME ────────────────────────────────────────
+                # Widget survived a full page navigation and wants to continue its mission.
+                # Skip intro, speak a brief resume message, and re-trigger the mission loop.
+                logger.info(f"[{session.session_id}] 🔁 STICKY AGENT: Resuming mission across navigation: '{pending_goal[:60]}'")
+                
+                # Update URL
+                if msg.get("current_url"):
+                    session.current_url = msg.get("current_url")
+                
+                # Brief resume narration
+                async def sticky_resume():
+                    await asyncio.sleep(1.0)  # Wait for DOM to arrive
+                    if session.is_closed:
+                        return
+                    
+                    # Transition to THINKING for mission processing
+                    if session.state_manager.state in (State.IDLE, State.LISTENING):
+                        await session.state_manager.transition(State.THINKING, trigger="sticky_resume")
+                        await self._broadcast_state(session, State.THINKING)
+                    
+                    # Brief narration
+                    resume_speech = "Page loaded. Continuing where we left off."
+                    await self._stream_tts_to_browser(session, resume_speech, session.current_language)
+                    
+                    # Re-start mission with the saved goal
+                    await self._start_mission(session, pending_goal)
+                
+                asyncio.create_task(sticky_resume())
+            
+            elif mode == "visual-copilot" and prev_mode != "visual-copilot" and not is_resume:
                 logger.info(f"[{session.session_id}] 👋 Triggering Visual Co-Pilot Intro | Resume: {is_resume}")
                 
                 # Check if elements were sent together with the config
@@ -2403,13 +2392,13 @@ class OrchestratorWSHandler:
             session.current_url = msg.get("url")
             
         # IMMEDIATE MAP MODE CHECK (First load only)
-        if not getattr(session, 'map_status_checked', False) and session.current_url:
+        if self.config.services.rag.enable_map and not getattr(session, 'map_status_checked', False) and session.current_url:
             session.map_status_checked = True
             try:
                 async with httpx.AsyncClient() as client:
                     # 1. Check Domain Status
                     resp = await client.post(
-                        f"{self.config.rag_url}/api/v1/check_domain_status",
+                        f"{session.rag_url}/api/v1/check_domain_status",
                         json={"url": session.current_url, "client_id": "demo"},
                         timeout=3.0
                     )
@@ -2422,7 +2411,7 @@ class OrchestratorWSHandler:
                             logger.info(f"[{session.session_id}] 🗺️ MAP MODE ACTIVE: {status.get('reason')}")
                             # 2. Fetch Hints Immediately
                             hints_resp = await client.post(
-                                f"{self.config.rag_url}/api/v1/get_map_hints",
+                                f"{session.rag_url}/api/v1/get_map_hints",
                                 json={"goal": "sitemap", "client_id": "demo"},
                                 timeout=3.0
                             )
@@ -2445,6 +2434,11 @@ class OrchestratorWSHandler:
         else:
             logger.warning(f"[{session.session_id}] ⚠️ Received invalid DOM update format: {type(elements)}")
 
+        # Store v5 semantic data from widget (active states, tables, page title)
+        session._active_states = msg.get("active_states")
+        session._data_tables = msg.get("data_tables")
+        session._page_title = msg.get("title", "")
+
         # Reset timeout timer on DOM update (keep session alive during navigation)
         session.last_activity = time.time()
 
@@ -2464,8 +2458,27 @@ class OrchestratorWSHandler:
             session.dom_context = elements
             logger.info(f"[{session.session_id}] 👁️ Updated DOM context from execution_complete ({len(elements)} items)")
 
+        # Store v5 semantic data from widget (active states, tables, page title)
+        session._active_states = msg.get("active_states")
+        session._data_tables = msg.get("data_tables")
+        session._page_title = msg.get("title", "")
+
+        # Update URL from execution outcome (CRITICAL for sub-goal advancement)
+        outcome = msg.get("outcome", {})
+        if outcome.get("current_url"):
+            old_url = session.current_url
+            session.current_url = outcome["current_url"]
+            if old_url != session.current_url:
+                logger.info(f"[{session.session_id}] 🔗 URL changed: {old_url} → {session.current_url}")
+
         # MISSION MODE: Re-trigger planner
         if session.mode == "visual-copilot" and session.is_mission_active:
+            # TURBO MODE STABILIZATION
+            # Give the browser a moment to breathe/render after execution
+            if getattr(session, 'interaction_mode', 'interactive') == 'turbo':
+                # Small 500ms delay to prevent race conditions with DOM updates
+                await asyncio.sleep(0.5)
+            
             logger.info(f"[{session.session_id}] 🔄 Re-triggering planner for next step...")
             await self._execute_next_step(session)
         else:
@@ -2640,6 +2653,17 @@ class OrchestratorWSHandler:
     
     async def _stream_tts_to_browser(self, session: OrchestratorSession, text: str, language: str, cancellation_task: Optional[asyncio.Task] = None):
         """Stream TTS audio/text to browser with optional cancellation support"""
+        
+        # TURBO MODE: Send text directly for instant display (skipping TTS generation)
+        if getattr(session, 'interaction_mode', 'interactive') == 'turbo':
+            logger.debug(f"[{session.session_id}] 🚀 TURBO MODE: Sending text '{text[:40]}...' (skipping TTS)")
+            await self._send_json(session.websocket, {
+                "type": "turbo_speech",
+                "text": text,
+                "timestamp": time.time()
+            }, session)
+            return
+
         # Check TTS mode - route to text streaming if in mock mode
         if hasattr(session, 'tts_mode') and session.tts_mode == 'text':
             await self._stream_text_response(session, text)
@@ -2712,9 +2736,11 @@ class OrchestratorWSHandler:
                     continue
 
                 if msg_type == "audio":
-                    # INTERRUPTION LOGIC: Stop if state is no longer THINKING or SPEAKING
+                    # INTERRUPTION LOGIC: Stop if state clearly indicates user interrupted
+                    # Allow LISTENING state because the state can transition mid-stream
+                    # (e.g., server-side timer fires while audio is still being sent)
                     state_mgr = session.state_manager
-                    if state_mgr.state not in (State.SPEAKING, State.THINKING):
+                    if state_mgr.state not in (State.SPEAKING, State.THINKING, State.LISTENING):
                          logger.info(f"[{session.session_id}] 🛑 Stopping TTS receive loop - state changed to {state_mgr.state.value}")
                          break
                          
@@ -3510,8 +3536,12 @@ class OrchestratorWSHandler:
         """
         Send application-level heartbeats (pings) to keep connection open.
         This prevents load balancers (Traefik, AWS ELB) from closing idle connections.
+        Also detects dead connections via consecutive send failures.
         """
         logger.info(f"[{session.session_id}] ❤️ KeepAlive loop started")
+        consecutive_failures = 0
+        max_failures = 3  # Close session after 3 consecutive failed pings (60s dead)
+        
         while not session.is_closed:
             try:
                 await asyncio.sleep(20.0)  # Send every 20 seconds (well below 60s standard timeout)
@@ -3520,16 +3550,28 @@ class OrchestratorWSHandler:
                     break
                     
                 # Send explicit ping message
-                await self._send_json(session.websocket, {
+                success = await self._send_json(session.websocket, {
                     "type": "ping",
                     "timestamp": time.time()
                 }, session)
                 
-                logger.debug(f"[{session.session_id}] 💓 Keep-alive ping sent")
+                if success:
+                    consecutive_failures = 0
+                    logger.debug(f"[{session.session_id}] 💓 Keep-alive ping sent")
+                else:
+                    consecutive_failures += 1
+                    logger.warning(f"[{session.session_id}] 💔 Keep-alive ping failed ({consecutive_failures}/{max_failures})")
+                    if consecutive_failures >= max_failures:
+                        logger.error(f"[{session.session_id}] 💀 Connection dead (3 consecutive ping failures). Closing session.")
+                        session.is_closed = True
+                        break
                 
             except Exception as e:
                 if not session.is_closed:
-                    logger.warning(f"[{session.session_id}] KeepAlive failed: {e}")
+                    logger.warning(f"[{session.session_id}] KeepAlive exception: {e}")
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_failures:
+                        session.is_closed = True
                 break
 
     async def _timeout_monitor(self, session: OrchestratorSession):
@@ -3609,9 +3651,14 @@ class OrchestratorWSHandler:
         Routes audio to dedicated audio WebSocket (/stream) when available,
         falling back to control WebSocket if not connected.
         """
+        # Early exit if session is dead
+        if session.is_closed:
+            return
+        
         bytes_per_sample = 4 if "f32" in encoding else 2
         frame_size_bytes = int(sample_rate * 0.1) * bytes_per_sample
-        chunk_counter = 0
+        
+        
         use_audio_ws = session.audio_ws_connected and session.audio_websocket is not None
 
         # Add new bytes to buffer
@@ -3620,6 +3667,10 @@ class OrchestratorWSHandler:
 
         # Process full frames from buffer
         while len(session.fg_buffer) >= frame_size_bytes:
+            # Early exit check inside the loop
+            if session.is_closed:
+                return
+            
             # Extract full frame
             chunk = bytes(session.fg_buffer[:frame_size_bytes])
             del session.fg_buffer[:frame_size_bytes]
@@ -3634,12 +3685,15 @@ class OrchestratorWSHandler:
                     session.audio_ws_connected = False
                     use_audio_ws = False
                     # Fallback: send via control WS
-                    await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter)
+                    await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, session._audio_chunk_counter)
             else:
                 # CONTROL WS FALLBACK: Original behavior (binary + JSON metadata)
-                await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter)
+                await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, session._audio_chunk_counter)
 
-            chunk_counter += 1
+            session._audio_chunk_counter += 1
+            # CRITICAL: Yield to event loop to prevent blocking other tasks (like Pings)
+            # during large audio bursts. This prevents "keepalive ping failed" errors.
+            await asyncio.sleep(0)
 
         # Handle flush (pad remainder)
         if flush and len(session.fg_buffer) > 0:
@@ -3661,21 +3715,23 @@ class OrchestratorWSHandler:
                 except Exception as e:
                     logger.warning(f"[{session.session_id}] Audio WS flush failed: {e}")
                     session.audio_ws_connected = False
-                    await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter, is_final=True)
+                    await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, session._audio_chunk_counter, is_final=True)
             else:
-                await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, chunk_counter, is_final=True)
+                await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, session._audio_chunk_counter, is_final=True)
+            
+            # Reset counter after flush (stream is complete)
+            session._audio_chunk_counter = 0
 
     async def _send_audio_via_control_ws(self, session: OrchestratorSession, chunk: bytes, sample_rate: int, encoding: str, chunk_counter: int, is_final: bool = False):
         """Send audio via the control WebSocket (original behavior, used as fallback)"""
-        try:
-            if session.websocket.client_state.name == "CONNECTED":
-                async with session.send_lock:
-                    await session.websocket.send_bytes(chunk)
-        except Exception as e:
-            logger.warning(f"[{session.session_id}] Failed to send binary audio: {e}")
+        # Use the _send_bytes helper which properly checks connection state and uses locking
+        binary_sent = await self._send_bytes(session.websocket, chunk, session)
+        if not binary_sent:
+            # Connection is dead, don't try to send JSON metadata either
             return False
 
-        await self._send_json(session.websocket, {
+        # Only send JSON metadata if binary was delivered successfully
+        return await self._send_json(session.websocket, {
             "type": "audio_chunk",
             "sample_rate": sample_rate,
             "format": encoding,
@@ -3919,6 +3975,13 @@ class OrchestratorWSHandler:
         session.map_hints = ""  # Will be fetched once
         logger.info(f"[{session.session_id}] 🎯 Mission Started: '{goal}'")
         
+        # Notify widget of mission goal (for Sticky Agent navigation persistence)
+        await self._send_json(session.websocket, {
+            "type": "mission_started",
+            "goal": goal,
+            "timestamp": time.time()
+        }, session)
+        
         # Fetch GPS Hints from Qdrant ONCE at mission start
         try:
             session.map_hints = await self._fetch_map_hints(session, goal)
@@ -3933,12 +3996,14 @@ class OrchestratorWSHandler:
     async def _fetch_map_hints(self, session: OrchestratorSession, goal: str) -> str:
         """Fetch navigation hints from Qdrant (called ONCE at mission start)."""
         base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
+        current_url = session.current_url or ""
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(
                 f"{base_rag_url}/api/v1/get_map_hints",
                 json={
                     "goal": goal,
-                    "client_id": session.tenant_id or "demo"
+                    "client_id": session.tenant_id or "demo",
+                    "current_url": current_url
                 }
             )
             if response.status_code == 200:
@@ -4040,7 +4105,13 @@ class OrchestratorWSHandler:
         
         if current_action_signature == session.last_action and action_type == 'click':
             logger.warning(f"[{session.session_id}] 🛑 RECURSION GUARD: Prevented duplicate {current_action_signature}. Forcing WAIT.")
-            loop_warning = f"CRITICAL SYSTEM ALERT: RECURSION DETECTED. The previous action 'click {current_target}' FAILED to change the state. DO NOT REPEAT THIS ACTION. You MUST select a different element or action (e.g. scroll, wait)."
+            # Track the blocked target so planner doesn't pick it again
+            blocked_entry = f"BLOCKED click on {current_target} (already tried, had no effect)"
+            if not hasattr(session, 'action_history') or session.action_history is None:
+                session.action_history = []
+            session.action_history.append(blocked_entry)
+            session.goal_step_count += 1  # Count this as a step so we hit the limit sooner
+            loop_warning = f"CRITICAL SYSTEM ALERT: RECURSION DETECTED. The previous action 'click {current_target}' FAILED to change the state. DO NOT REPEAT THIS ACTION. Element '{current_target}' is BLOCKED. You MUST select a DIFFERENT element or action. If the current page already shows the needed content, use 'answer' action type instead."
             await asyncio.sleep(2.0)
             await self._execute_next_step(session, extra_warning=loop_warning)
             return
@@ -4079,6 +4150,12 @@ class OrchestratorWSHandler:
             # Pause and return, waiting for next user command (e.g. "I'm done")
             return
 
+        elif action_type == "answer":
+            # Agent answered a data question from visible DOM - speak the answer and end
+            answer_text = plan.get("speech") or action_payload.get("text", "Here's what I found.")
+            logger.info(f"[{session.session_id}] 💡 Data Answer: {answer_text[:80]}")
+            await self._end_mission(session, answer_text)
+
         elif action_type == "wait":
             logger.info(f"[{session.session_id}] ⏳ Waiting for page to load...")
             # Narrate the wait
@@ -4110,10 +4187,33 @@ class OrchestratorWSHandler:
                 session.action_history = session.action_history[-5:]
             
             # IMPROVED LOOP DETECTION: Check if this action was already done recently
-            if session.action_history.count(current_action_sig) > 1:
-                logger.warning(f"[{session.session_id}] 🔄 LOOP DETECTED: '{current_action_sig}' already in history: {session.action_history}")
-                await self._end_mission(session, "I seem to be going in circles. Let me stop here so you can guide me.")
-                return
+            # SCROLL EXEMPTION: Scrolling is a viewport shift, not a state mutation.
+            # The DOM may not change even though new content becomes visible.
+            # Allow up to 5 consecutive scrolls before considering it a loop.
+            is_scroll_action = action_type in ("scroll", "scroll_to")
+            
+            if is_scroll_action:
+                # Count consecutive scrolls in recent history
+                consecutive_scrolls = 0
+                for sig in reversed(session.action_history):
+                    if sig.startswith("scroll"):
+                        consecutive_scrolls += 1
+                    else:
+                        break
+                
+                if consecutive_scrolls > 5:
+                    logger.warning(f"[{session.session_id}] 🔄 SCROLL LOOP: {consecutive_scrolls} consecutive scrolls with no other action")
+                    await self._end_mission(session, "I've scrolled through the page but couldn't find what we need. Could you point me in the right direction?")
+                    return
+            elif True:
+                # Check for standard action loops
+                # Relax threshold for Turbo Mode to be more resilient to stale DOM reads
+                limit = 3 if getattr(session, 'interaction_mode', 'interactive') == 'turbo' else 1
+                
+                if session.action_history.count(current_action_sig) > limit:
+                    logger.warning(f"[{session.session_id}] 🔄 LOOP DETECTED: '{current_action_sig}' repeated > {limit} times: {session.action_history}")
+                    await self._end_mission(session, "I seem to be going in circles. Let me stop here so you can guide me.")
+                    return
             
             session.last_action = current_action_sig
             logger.info(f"[{session.session_id}] 🎬 Step {session.goal_step_count}: {action_type} on {actual_target}")
@@ -4123,10 +4223,22 @@ class OrchestratorWSHandler:
             # Start TTS simultaneously with action for true co-browsing feel
             step_speech = plan.get("speech")
             tts_task = None
+            
+            # Cancel any lingering TTS from previous step before starting new one
+            if session.tts_task and not session.tts_task.done():
+                logger.debug(f"[{session.session_id}] ⏹️ Cancelling previous TTS before new step")
+                session.tts_task.cancel()
+                try:
+                    await asyncio.wait_for(session.tts_task, timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            
             if step_speech:
                 logger.info(f"[{session.session_id}] 🗣️ Narrating: {step_speech}")
                 # Launch TTS but save the task so we can wait for it
-                tts_task = asyncio.create_task(self._stream_tts_to_browser(session, step_speech, session.current_language))
+                # CRITICAL: Save to session.tts_task so it can be interrupted by new user input
+                session.tts_task = asyncio.create_task(self._stream_tts_to_browser(session, step_speech, session.current_language))
+                tts_task = session.tts_task
             
             # Handle navigate specially (tells frontend to change URL)
             if action_type == "navigate":
@@ -4198,49 +4310,63 @@ class OrchestratorWSHandler:
         # ═══════════════════════════════════════════════════════════════
         fast_sense_start = time.time()
         fast_response = None
+        fast_speech = ""
         
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                fast_response_obj = await client.post(
-                    f"{base_rag_url}/api/v1/fast_sense",
-                    json={
-                        "goal": session.current_goal,
-                        "dom_context": dom[:150],  # Lighter snapshot for fast processing
-                        "session_id": session.session_id
-                    }
-                )
-                fast_response_obj.raise_for_status()
-                fast_response = fast_response_obj.json()
-                
-                fast_sense_ms = int((time.time() - fast_sense_start) * 1000)
-                logger.info(f"[{session.session_id}] ⚡ Fast Sense completed in {fast_sense_ms}ms")
-                
-                # Extract speech for immediate TTS
-                fast_speech = fast_response.get("speech", "")
-                if fast_speech:
-                    logger.info(f"[{session.session_id}] 🔊 Streaming Fast TTS: \"{fast_speech[:60]}...\"")
-                    # Stream TTS immediately (non-blocking)
-                    output_language = self._get_output_language(session.current_language, session)
-                    session.tts_task = asyncio.create_task(
-                        self._stream_tts_to_browser(session, fast_speech, output_language)
+        # ONLY run fast_sense on the FIRST step of a mission (not on retries/re-triggers)
+        # This prevents repeating the same speech like "I see the call history..." 5 times
+        is_first_step = session.goal_step_count == 0 and not warning
+        
+        if is_first_step:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    fast_response_obj = await client.post(
+                        f"{base_rag_url}/api/v1/fast_sense",
+                        json={
+                            "goal": session.current_goal,
+                            "dom_context": dom[:150],  # Lighter snapshot for fast processing
+                            "session_id": session.session_id
+                        }
                     )
-                
-        except Exception as e:
-            logger.warning(f"[{session.session_id}] Fast Sense failed (fallback to planning): {e}")
-            # Continue to full planning even if Fast Sense fails
+                    fast_response_obj.raise_for_status()
+                    fast_response = fast_response_obj.json()
+                    
+                    fast_sense_ms = int((time.time() - fast_sense_start) * 1000)
+                    logger.info(f"[{session.session_id}] ⚡ Fast Sense completed in {fast_sense_ms}ms")
+                    
+                    # Extract speech for immediate TTS
+                    fast_speech = fast_response.get("speech", "")
+                    if fast_speech:
+                        logger.info(f"[{session.session_id}] 🔊 Streaming Fast TTS: \"{fast_speech[:60]}...\"")
+                        # Stream TTS immediately (non-blocking)
+                        output_language = self._get_output_language(session.current_language, session)
+                        session.tts_task = asyncio.create_task(
+                            self._stream_tts_to_browser(session, fast_speech, output_language)
+                        )
+            except Exception as e:
+                logger.warning(f"[{session.session_id}] Fast Sense failed (fallback to planning): {e}")
+                # Continue to full planning even if Fast Sense fails
+        else:
+            # Not first step — skip fast_sense entirely to avoid repeating speech
+            logger.debug(f"[{session.session_id}] Skipping Fast Sense on step {session.goal_step_count} (not first step)")
 
         # ═══════════════════════════════════════════════════════════════
         # PHASE 2: FULL PLANNING (Deep Reasoning)
         # ═══════════════════════════════════════════════════════════════
-        # Optional: Filter DOM based on relevant_ids from Fast Sense
-        filtered_dom = dom[:300]  # Default: use first 300 elements
+        # v5: Send full DOM to planner — query-focused slicing happens server-side
+        filtered_dom = dom[:600]
         if fast_response and fast_response.get("relevant_ids"):
             relevant_ids = set(fast_response["relevant_ids"])
-            # Keep only relevant elements (but cap at 300 for safety)
-            filtered_dom = [el for el in dom if el.get("id") in relevant_ids][:300]
-            logger.info(f"[{session.session_id}] 🔍 Filtered DOM: {len(dom)} → {len(filtered_dom)} elements")
-        
-        async with httpx.AsyncClient(timeout=10.0) as client:
+            relevant = [el for el in dom if el.get("id") in relevant_ids]
+            rest = [el for el in dom if el.get("id") not in relevant_ids]
+            filtered_dom = (relevant + rest)[:600]
+            logger.info(f"[{session.session_id}] 🔍 DOM priority sort: {len(relevant)} relevant boosted to front out of {len(dom)} total")
+
+        # v5: Extract semantic metadata from stored context
+        active_states = getattr(session, '_active_states', None)
+        data_tables = getattr(session, '_data_tables', None)
+        page_title = getattr(session, '_page_title', '')
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 f"{base_rag_url}/api/v1/plan_next_step",
                 json={
@@ -4256,17 +4382,23 @@ class OrchestratorWSHandler:
                     "session_id": session.session_id,
                     "dom_diff": dom_diff, # Context awareness
                     "conversation_history": conversation_history,  # Recent user requests
-                    "last_dom_context": session.last_dom_context[:50] if session.last_dom_context else None
+                    "last_dom_context": session.last_dom_context[:50] if session.last_dom_context else None,
+                    "fast_sense_speech": fast_speech if is_first_step and fast_speech else None,
+                    "interaction_mode": getattr(session, "interaction_mode", "interactive"),
+                    # v5: Semantic Page Graph fields
+                    "active_states": active_states,
+                    "data_tables": data_tables,
+                    "page_title": page_title,
                 }
             )
 
             response.raise_for_status()
             plan = response.json()
-            
+
             # Inject fast_sense speech into plan metadata
             if fast_response and fast_response.get("speech"):
                 plan["_fast_speech"] = fast_response["speech"]
-            
+
             return plan
 
 

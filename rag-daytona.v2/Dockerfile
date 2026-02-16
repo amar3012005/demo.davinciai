@@ -5,9 +5,8 @@
 # Step 1: Base image with uv installed
 FROM python:3.11-slim AS base
 
-# Install uv for lightning-fast dependency resolution
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvbin/uv
-ENV PATH="/uvbin:${PATH}"
+# Install uv via pip to avoid GHCR timeouts
+RUN pip install uv
 ENV UV_SYSTEM_PYTHON=1
 
 WORKDIR /app

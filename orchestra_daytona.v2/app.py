@@ -363,6 +363,23 @@ app.add_middleware(MetricsMiddleware)
 # Mount static files to serve tara-widget.js
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
+    # Dedicated endpoint for widget JS with no-cache headers to prevent stale versions
+    from starlette.responses import FileResponse
+    
+    @app.get("/static/tara-widget.js")
+    async def serve_widget_js():
+        """Serve widget JS with cache-busting headers"""
+        widget_path = os.path.join(static_dir, "tara-widget.js")
+        return FileResponse(
+            widget_path,
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     logger.info(f"✅ Static files mounted from {static_dir}")
 else:

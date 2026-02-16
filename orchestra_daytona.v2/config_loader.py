@@ -61,6 +61,7 @@ class RAGConfig:
     similarity_threshold: float = 0.7
     enable_incremental: bool = True
     language: str = "german"
+    enable_map: bool = False
 
 
 @dataclass
@@ -290,7 +291,8 @@ class ConfigLoader:
                     top_k=int(os.getenv("RAG_TOP_K", rag_data.get("top_k", 5))),
                     similarity_threshold=float(os.getenv("RAG_SIMILARITY_THRESHOLD", rag_data.get("similarity_threshold", 0.7))),
                     enable_incremental=os.getenv("ENABLE_INCREMENTAL_RAG", str(rag_data.get("enable_incremental", True))).lower() == "true",
-                    language=os.getenv("RAG_LANGUAGE", rag_data.get("language", "german"))
+                    language=os.getenv("RAG_LANGUAGE", rag_data.get("language", "german")),
+                    enable_map=os.getenv("ENABLE_MAP", str(rag_data.get("enable_map", False))).lower() == "true"
                 )
             
             # Intent config (with env var overrides)
