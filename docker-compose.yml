@@ -71,7 +71,7 @@ services:
       ANALYTICS_MODEL: qwen/qwen3-32b
       LOG_LEVEL: DEBUG
       REDIS_URL: 'redis://redis:6379/0'
-      QDRANT_URL: 'http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333'
+      QDRANT_URL: 'http://qdrant-uo8gso0sg4o4000os4888ccw.116.202.24.69.sslip.io:6333'
       QDRANT_API_KEY: WAkhOeXiD3DShev81qxn5PYKpQ9t6ufb
       ENABLE_HIVE_MIND: 'true'
       COOLIFY_RESOURCE_UUID: ekgcgssw8css400gs8wwggwo
@@ -82,6 +82,7 @@ services:
       SERVICE_NAME_STT: stt
       SERVICE_NAME_TTS: tts
       SERVICE_NAME_ORCHESTRATOR: orchestrator
+      TENANT_ID: 'demo'
     ports:
       - '8444:8003'
     volumes:
@@ -136,7 +137,7 @@ services:
       - .env
   stt:
     build:
-      context: ./stt_groq_whisper
+      context: ./stt_sarvam
       dockerfile: Dockerfile
     container_name: stt-ekgcgssw8css400gs8wwggwo
     restart: unless-stopped
@@ -149,12 +150,11 @@ services:
     environment:
       PYTHONUNBUFFERED: 1
       LOG_LEVEL: DEBUG
-      GROQ_API_KEY: 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
-      GROQ_WHISPER_MODEL: whisper-large-v3
-      ENABLE_MICRO_CHUNKING: 'false'
-      VAD_ENERGY_THRESHOLD: 700
-      MIN_SILENCE_DURATION_MS: 400
-      GROQ_LANGUAGE: en
+      SARVAM_API_KEY: sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI
+      SARVAM_MODEL: saaras:v2.5
+      SARVAM_VAD_SIGNALS: 'true'
+      SARVAM_HIGH_VAD: 'true'
+      SARVAM_FLUSH_SIGNAL: 'true'
       STT_HOST: 0.0.0.0
       STT_PORT: 8002
       ORCHESTRATOR_WS_URL: 'wss://orchestrator:8004/ws'
@@ -299,6 +299,9 @@ services:
       SERVICE_NAME_TTS: tts
       SERVICE_NAME_ORCHESTRATOR: orchestrator
       ENABLE_FILLERS: 'false'
+      ORCHESTRATOR_WS_URL: 'wss://demo.davinciai.eu:8443/ws'
+      FSM_APPOINTMENT_URL: 'https://cal.com/amar-nadig-uy2g3b/30min'
+      TENANT_ID: 'demo'
     command: "uvicorn app:app --host 0.0.0.0 --port 8004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0\n"
     networks:
       ekgcgssw8css400gs8wwggwo: null

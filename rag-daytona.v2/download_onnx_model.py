@@ -4,7 +4,7 @@ from optimum.onnxruntime import ORTModelForFeatureExtraction
 from transformers import AutoTokenizer
 
 model_id = "Xenova/paraphrase-multilingual-MiniLM-L12-v2"
-save_directory = "/home/prometheus/leibniz_agent/TARA-MICROSERVICE/rag-daytona.v2/models/Xenova/paraphrase-multilingual-MiniLM-L12-v2"
+save_directory = "./models/Xenova/paraphrase-multilingual-MiniLM-L12-v2"
 
 print(f"Downloading model {model_id} to {save_directory}...")
 

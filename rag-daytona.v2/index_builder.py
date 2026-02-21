@@ -300,7 +300,7 @@ class IndexBuilder:
             Dictionary with index statistics
         """
         # Determine embedding dimension dynamically
-        embedding_dimension = 1024  # Default for BGE-M3
+        embedding_dimension = 384  # Default for miniLM model
         
         # Try to get from FAISS index if available
         index_path = os.path.join(self.config.vector_store_path, "index.faiss")

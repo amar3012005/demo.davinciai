@@ -3,19 +3,19 @@
   "dialogues": {
     "intro": [
       {
-        "text": "Hello, I am TARA, your Daytona intelligent assistant built by DaVinci AI. How can I help you manage your development environments today?",
+        "text": "Hello, I am TARA, your TASK intelligent assistant built by Davinci AI. How can I help you manage your development environments today?",
         "emotion": "warm",
         "audio_file": "intro_en.wav"
       },
       {
-        "text": "Hi there! I'm TARA, built by DaVinci AI. I'm here to help you with Daytona. What would you like to build?",
+        "text": "Hi there! I'm TARA, built by Davinci AI. I'm here to help you with TASK. What would you like to build?",
         "emotion": "friendly",
         "audio_file": "intro_alt_en.wav"
       }
     ],
     "exit": [
       {
-        "text": "Thank you for using Daytona. TARA signing off. Happy coding!",
+        "text": "Thank you for using TASK. TARA signing off. Happy coding!",
         "emotion": "grateful",
         "audio_file": "exit_en.wav",
         "keywords": [

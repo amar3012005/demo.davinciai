@@ -1,0 +1,8 @@
+[project]
+name = "demo-davinciai"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "cartesia-line>=0.2.2",
+    "google-generativeai>=0.8.6",
+]

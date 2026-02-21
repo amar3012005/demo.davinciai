@@ -726,10 +726,17 @@
 
             <!-- Controls Panel -->
             <aside class="controls-panel">
-                <!-- Session Control -->
                 <div class="panel-section">
                     <h4 class="section-title">Identity</h4>
-                    <input type="tel" class="session-input" id="phoneNumber" placeholder="Phone Number (e.g. +1...)" />
+                    <div style="display: flex; gap: 8px;">
+                        <input type="tel" class="session-input" id="phoneNumber" placeholder="Phone Number (e.g. +1...)"
+                            style="flex: 1;" />
+                        <button id="callBtn" class="session-button start"
+                            style="width: auto; padding: 0 12px; height: 36px; margin-top: 0; background: #10b981;"
+                            title="Initiate Outgoing Call">
+                            <span class="material-icons-round">call</span>
+                        </button>
+                    </div>
 
                     <h4 class="section-title" style="margin-top: 16px;">Session</h4>
                     <button class="session-button start" id="startSession">
@@ -892,9 +899,11 @@
                 this.state = 'idle';
                 this.audioContext = null;
                 this.audioQueue = [];
+                this.binaryQueue = [];  // Queue binary frames to pair with JSON metadata
                 this.isProcessingQueue = false;
                 this.isPlayingAudio = false;
                 this.currentSource = null;
+                this.activeSources = new Set();  // Track all scheduled audio sources for cleanup
                 this.playbackStartTime = null;
                 this.audioStreamComplete = false;  // Track when server finished sending audio
                 this.playbackFallbackTimer = null;  // Fallback timer for audio_complete timeout
@@ -948,6 +957,7 @@
                 this.langEn = document.getElementById('langEn');
                 this.langDe = document.getElementById('langDe');
                 this.phoneNumberInput = document.getElementById('phoneNumber');
+                this.callBtn = document.getElementById('callBtn');
 
                 // New UI Elements
                 this.vadVisualizer = document.getElementById('vadVisualizer');
@@ -1000,8 +1010,40 @@
 
                 this.languageToggle.onclick = () => this.toggleLanguage();
                 this.mockModeToggle.onclick = () => this.toggleMockMode();
+                this.callBtn.onclick = () => this.initiateCall();
 
                 this.addLog('Ready to connect', 'info');
+            }
+
+            async initiateCall() {
+                const phone = this.phoneNumberInput.value.trim();
+                if (!phone) {
+                    this.addLog('Please enter a phone number', 'warning');
+                    return;
+                }
+
+                this.addLog(`Initiating call to ${phone}...`, 'info');
+                this.callBtn.disabled = true;
+                this.callBtn.style.opacity = '0.5';
+
+                try {
+                    const response = await fetch('/api/phone/call', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ to: phone })
+                    });
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        this.addLog(`Call initiated! SID: ${result.call_sid}`, 'success');
+                    } else {
+                        throw new Error(result.detail || 'Failed to start call');
+                    }
+                } catch (e) {
+                    this.addLog(`Call failed: ${e.message}`, 'error');
+                } finally {
+                    this.callBtn.disabled = false;
+                    this.callBtn.style.opacity = '1';
+                }
             }
 
             // ───────────────────────────────────────────────────────────────────
@@ -1026,6 +1068,7 @@
                 }
 
                 this.ws = new WebSocket(url);
+                this.ws.binaryType = 'arraybuffer';  // Receive binary as ArrayBuffer (sync, no Blob conversion needed)
 
                 this.ws.onopen = async () => {
                     this.addLog('WebSocket connected', 'success');
@@ -1045,25 +1088,30 @@
                         this.micButton.disabled = false;
                     }
 
-                    // Send session start with mode and language information
+                    // Send session config: Explicitly define mode and tenant
                     this.send({
-                        type: 'start_session',
-                        mode: 'conversation',
-                        stt_mode: this.mockMode ? 'text' : 'audio',
-                        tts_mode: this.mockMode ? 'text' : 'audio',
-                        language: this.fillerLanguage
+                        type: 'session_config',
+                        config: {
+                            mode: 'voice',
+                            tenant_id: 'TARAxTASK',
+                            user_id: phone || 'anonymous_user',
+                            stt_mode: this.mockMode ? 'text' : 'audio',
+                            tts_mode: this.mockMode ? 'text' : 'audio',
+                            language: this.fillerLanguage
+                        }
                     });
+                    this.addLog('Sent session config: mode=voice, tenant=TARAxTASK', 'info');
+
+                    // Trigger greeting intro (same as phone sessions get automatically)
+                    this.send({ type: 'start_session', timestamp: Date.now() / 1000 });
 
                     this.sessionActive = true;
                 };
 
                 this.ws.onmessage = async (event) => {
-                    if (event.data instanceof Blob) {
-                        // Ignore audio data for now or process it if needed
-                        // In client.html we mainly care about JSON control messages
-                        return;
-                    }
                     if (event.data instanceof ArrayBuffer) {
+                        // Queue binary frames — they'll be paired with JSON metadata
+                        this.binaryQueue.push(event.data);
                         return;
                     }
                     try {
@@ -1206,6 +1254,10 @@
                     case 'state_update':
                         this.state = data.state;
                         this.updateStateDisplay(data.state);
+                        // Stop old audio when new turn starts (prevents overlapping voices)
+                        if (data.state === 'thinking' || data.state === 'interrupt') {
+                            this.stopAudioPlayback();
+                        }
                         // Auto-start microphone when transitioning to LISTENING (if not in mock mode)
                         if (data.state === 'listening' && !this.mockMode && !this.isMicActive) {
                             this.startMicrophone();
@@ -1256,15 +1308,28 @@
                         break;
 
                     case 'audio_chunk':
-                        // Handle both 'data' and 'audio' fields for compatibility
-                        const audioB64 = data.data || data.audio;
                         if (data.is_final) {
                             this.addLog('Audio stream complete from server', 'info');
                             this.audioStreamComplete = true;
+                            // Drain any stale binary queue entries
+                            if (data.binary_sent && this.binaryQueue.length > 0) this.binaryQueue.shift();
                             // Check if we can finalize now
                             this.checkPlaybackComplete();
-                        } else if (audioB64) {
+                        }
+                        // 1. Dequeue paired binary frame (matches tara-widget.js pattern)
+                        else if (data.binary_sent && this.binaryQueue.length > 0) {
+                            const chunk = this.binaryQueue.shift();
                             // Record TTFC on first audio chunk
+                            if (this.turnStartTime && !this.hasTtfcForTurn) {
+                                const ttfc = Math.round(performance.now() - this.turnStartTime);
+                                this.metricTtfcEl.textContent = `${ttfc}ms`;
+                                this.hasTtfcForTurn = true;
+                            }
+                            await this.processAudioChunk(chunk, data.sample_rate || 44100, data.format || 'pcm_f32le');
+                        }
+                        // 2. Fallback: embedded base64 audio in JSON
+                        else if (data.data || data.audio) {
+                            const audioB64 = data.data || data.audio;
                             if (this.turnStartTime && !this.hasTtfcForTurn) {
                                 const ttfc = Math.round(performance.now() - this.turnStartTime);
                                 this.metricTtfcEl.textContent = `${ttfc}ms`;
@@ -1729,13 +1794,18 @@
 
             stopAudioPlayback() {
                 this.isPlayingAudio = false;
+                // Stop ALL scheduled audio sources (prevents overlapping voices)
+                for (const src of this.activeSources) {
+                    try { src.stop(); } catch (e) { }
+                }
+                this.activeSources.clear();
                 if (this.currentSource) {
-                    try {
-                        this.currentSource.stop();
-                    } catch (e) { }
+                    try { this.currentSource.stop(); } catch (e) { }
                     this.currentSource = null;
                 }
-                this.nextPlayTime = 0; // Reset nextPlayTime on interruption
+                this.nextPlayTime = 0;
+                this.binaryQueue.length = 0;  // Drain stale binary frames
+                this.audioStreamComplete = false;
             }
 
             // ───────────────────────────────────────────────────────────────────
@@ -1753,33 +1823,45 @@
                 }
             }
 
-            async processAudioChunk(base64Data, sampleRate, format) {
-                if (!base64Data) return;
+            async processAudioChunk(data, sampleRate, format) {
+                if (!data) return;
 
                 try {
                     await this.initAudio();
 
-                    // Decode Base64 to binary string
-                    const binaryString = atob(base64Data);
-                    const len = binaryString.length;
-
-                    // Create Uint8Array from binary string
-                    const bytes = new Uint8Array(len);
-                    for (let i = 0; i < len; i++) {
-                        bytes[i] = binaryString.charCodeAt(i);
-                    }
-
                     let float32Data;
-                    if (format === 'pcm_s16le') {
-                        // Convert Int16 to Float32
-                        const int16Data = new Int16Array(bytes.buffer);
-                        float32Data = new Float32Array(int16Data.length);
-                        for (let i = 0; i < int16Data.length; i++) {
-                            float32Data[i] = int16Data[i] / 32768.0;
+
+                    // Handle ArrayBuffer (Binary Frame)
+                    if (data instanceof ArrayBuffer) {
+                        if (format === 'pcm_s16le') {
+                            const int16Data = new Int16Array(data);
+                            float32Data = new Float32Array(int16Data.length);
+                            for (let i = 0; i < int16Data.length; i++) {
+                                float32Data[i] = int16Data[i] / 32768.0;
+                            }
+                        } else {
+                            // Assume pcm_f32le
+                            float32Data = new Float32Array(data);
                         }
-                    } else {
-                        // Assume pcm_f32le
-                        float32Data = new Float32Array(bytes.buffer);
+                    }
+                    // Handle Base64 String (Legacy JSON)
+                    else if (typeof data === 'string') {
+                        const binaryString = atob(data);
+                        const len = binaryString.length;
+                        const bytes = new Uint8Array(len);
+                        for (let i = 0; i < len; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+
+                        if (format === 'pcm_s16le') {
+                            const int16Data = new Int16Array(bytes.buffer);
+                            float32Data = new Float32Array(int16Data.length);
+                            for (let i = 0; i < int16Data.length; i++) {
+                                float32Data[i] = int16Data[i] / 32768.0;
+                            }
+                        } else {
+                            float32Data = new Float32Array(bytes.buffer);
+                        }
                     }
 
                     // Create AudioBuffer
@@ -1792,7 +1874,9 @@
                     source.buffer = audioBuffer;
                     source.connect(this.audioContext.destination);
 
+                    this.activeSources.add(source);
                     source.onended = () => {
+                        this.activeSources.delete(source);
                         this.checkPlaybackComplete();
                     };
 

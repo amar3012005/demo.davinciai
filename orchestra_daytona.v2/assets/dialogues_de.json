@@ -3,25 +3,34 @@
   "dialogues": {
     "intro": [
       {
-        "text": "Hallo! Willkommen an der Daytona. Ich bin hier, um Ihnen bei Fragen zu helfen. Wie kann ich Ihnen heute behilflich sein?",
-        "translation_en": "Hello! Welcome to Daytona. I am here to help you with any questions. How can I assist you today?",
+        "text": "Hallo! Willkommen bei TASK. Ich bin hier, um Ihnen bei Fragen zu helfen. Wie kann ich Ihnen heute behilflich sein?",
+        "translation_en": "Hello! Welcome to TASK. I am here to help you with any questions. How can I assist you today?",
         "emotion": "warm",
         "audio_file": "intro_de.wav"
       },
       {
-        "text": "Guten Tag! Ich bin Ihr virtueller Assistent an der Daytona. Womit kann ich Ihnen helfen?",
-        "translation_en": "Good day! I am your virtual assistant at Daytona. How can I help you?",
+        "text": "Guten Tag! Ich bin Ihr virtueller Assistent von TASK. Womit kann ich Ihnen helfen?",
+        "translation_en": "Good day! I am your virtual assistant from TASK. How can I help you?",
         "emotion": "friendly",
         "audio_file": "intro_alt_de.wav"
       }
     ],
     "exit": [
       {
-        "text": "Vielen Dank, dass Sie die Daytona kontaktiert haben. Falls Sie weitere Hilfe benötigen, zögern Sie bitte nicht, uns zu kontaktieren. Einen schönen Tag noch!",
-        "translation_en": "Thank you for contacting Daytona. If you need further assistance, please do not hesitate to contact us. Have a nice day!",
+        "text": "Vielen Dank, dass Sie TASK kontaktiert haben. Falls Sie weitere Hilfe benötigen, zögern Sie bitte nicht, uns zu kontaktieren. Einen schönen Tag noch!",
+        "translation_en": "Thank you for contacting TASK. If you need further assistance, please do not hesitate to contact us. Have a nice day!",
         "emotion": "grateful",
         "audio_file": "exit_de.wav",
-        "keywords": ["tschüss", "auf wiedersehen", "bis bald", "danke", "vielen dank", "das war's", "nichts weiter", "nichts mehr"]
+        "keywords": [
+          "tschüss",
+          "auf wiedersehen",
+          "bis bald",
+          "danke",
+          "vielen dank",
+          "das war's",
+          "nichts weiter",
+          "nichts mehr"
+        ]
       },
       {
         "text": "Es war mir eine Freude, Ihnen heute zu helfen. Kontaktieren Sie uns gerne wieder, wenn Sie Fragen haben. Auf Wiedersehen!",

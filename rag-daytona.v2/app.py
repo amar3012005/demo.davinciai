@@ -19,7 +19,8 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
 
 import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, File, UploadFile, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +30,11 @@ from pydantic import BaseModel, Field
 from daytona_agent.services.shared.redis_client import get_redis_client, close_redis_client, ping_redis
 from daytona_agent.services.rag.config import RAGConfig
 from daytona_agent.services.rag.rag_engine import RAGEngine
+from models.hivemind_schema import (
+    agent_skill_payload, agent_rule_payload,
+    read_text, read_summary, read_doc_type, read_created_at,
+    SCHEMA_VERSION,
+)
 from daytona_agent.services.rag.index_builder import IndexBuilder
 
 # Configure logging
@@ -107,6 +113,8 @@ class AnalyzeSessionRequest(BaseModel):
     user_id: Optional[str] = Field(None, description="User identifier")
     tenant_id: str = Field("demo", description="Tenant identifier")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
+    brief_context: Optional[str] = Field(None, description="Brief summary of what happened in the session (pre-computed)")
+    backend_url: Optional[str] = Field(None, description="Optional backend URL to send the session report to")
 
 
 class AnalyzeSessionResponse(BaseModel):
@@ -135,10 +143,24 @@ class PlanStepRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     dom_diff: Optional[str] = Field("First Step", description="Diff summary of DOM changes")
     conversation_history: Optional[str] = Field("", description="Recent conversation context (last 4 user requests)")
+    last_dom_context: Optional[List[Dict[str, Any]]] = Field(None, description="Pre-action DOM snapshot for validation")
+    fast_sense_speech: Optional[str] = Field(None, description="Speech already spoken by fast_sense (to avoid double-speaking)")
+    interaction_mode: str = Field("interactive", description="Interaction mode (turbo or interactive)")
+    # v5: Semantic Page Graph fields
+    active_states: Optional[Dict[str, Any]] = Field(None, description="Active nav/tab states from widget")
+    data_tables: Optional[List[Dict[str, Any]]] = Field(None, description="Extracted table data from widget")
+    page_title: Optional[str] = Field("", description="Document title from widget")
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
     client_id: Optional[str] = Field("demo", description="Client/Tenant ID")
+    current_url: Optional[str] = Field("", description="Current page URL for domain filtering")
+
+class FastSenseRequest(BaseModel):
+    goal: str = Field(..., description="The user's mission goal")
+    dom_context: List[Dict[str, Any]] = Field(..., description="List of visible DOM elements")
+    session_id: str = Field(..., description="Session identifier")
+
 
 class EmbedRequest(BaseModel):
     text: str = Field(..., description="Text to embed")
@@ -151,6 +173,30 @@ class DynamicExitRequest(BaseModel):
     language: Optional[str] = Field("english", description="Response language")
 
 
+# ── Agent Skills & Rules Models ──────────────────────────────────────────────
+
+class SkillRuleCreateRequest(BaseModel):
+    text: str = Field(..., min_length=5, description="Skill or rule description text")
+    type: str = Field(..., description="'agent_skill' or 'agent_rule'")
+    topic: str = Field("general", description="Topic category (e.g. debugging, identity, format)")
+    severity: Optional[str] = Field(None, description="For rules: 'critical' or 'standard'")
+    tenant_id: str = Field("demo", description="Tenant identifier")
+
+class SkillRuleItem(BaseModel):
+    id: str
+    text: str
+    type: str
+    topic: str
+    severity: Optional[str] = None
+    score: Optional[float] = None
+    timestamp: Optional[int] = None
+
+class SkillRuleListResponse(BaseModel):
+    skills: List[SkillRuleItem]
+    rules: List[SkillRuleItem]
+    total: int
+
+
 # Global state (initialized in lifespan)
 rag_engine: Optional[RAGEngine] = None
 visual_orchestrator: Optional[Any] = None
@@ -160,6 +206,7 @@ cache_hits = 0
 cache_misses = 0
 app_start_time = 0.0
 hive_mind_connections: List[WebSocket] = []
+ingestion_service: Optional[Any] = None
 
 
 # Redis client utilities
@@ -182,7 +229,7 @@ async def lifespan(app: FastAPI):
         # Load config
         config = RAGConfig.from_env()
         logger.info(" Configuration loaded")
-        
+
         # Log web search configuration
         if config.enable_web_search:
             if config.google_search_api_key and config.google_cse_id:
@@ -191,17 +238,17 @@ async def lifespan(app: FastAPI):
                 logger.warning(f" ⚠️ Web search enabled but credentials missing (API key: {'present' if config.google_search_api_key else 'missing'}, CSE ID: {'present' if config.google_cse_id else 'missing'})")
         else:
             logger.info(" ℹ️ Web search DISABLED (set ENABLE_WEB_SEARCH=true to enable)")
-        
+
         # Create RAG engine
         rag_engine = RAGEngine(config)
-        
+
         # Log Qdrant (Hive Mind) status
         if rag_engine.qdrant and rag_engine.qdrant.enabled:
             logger.info(f"🧠 ✅ Qdrant Hive Mind CONNECTED: {rag_engine.qdrant.url}")
             logger.info(f"🧠    Collection: {rag_engine.qdrant.collection_name}")
         else:
             logger.warning(f"🧠 ⚠️ Qdrant Hive Mind NOT AVAILABLE - check QDRANT_URL and QDRANT_API_KEY env vars")
-        
+
         # Initialize Session Analytics
         from daytona_agent.services.rag.session_analytics import SessionAnalytics
         app.state.session_analytics = SessionAnalytics(
@@ -210,15 +257,19 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f" ✅ Session Analytics initialized using model: {config.analytics_model}")
         logger.info(f" 🤖 RAG Engine using LLM model: {config.llm_model}")
-        
-        # Initialize Visual Orchestrator (requires Groq)
-        if config.llm_provider == "groq":
-            from visual_orchestrator import VisualOrchestrator
-            global visual_orchestrator
-            visual_orchestrator = VisualOrchestrator(rag_engine.llm, qdrant_client=rag_engine.qdrant, embeddings=rag_engine.embeddings)
-            logger.info(" ✅ Visual Orchestrator initialized with Qdrant GPS support")
-        else:
-            logger.warning(f" ℹ️ Visual Orchestrator requires 'groq' provider (current: {config.llm_provider})")
+
+
+        # Initialize Ingestion Service
+        try:
+            from core.processing.ingestion import IngestionService
+            global ingestion_service
+            # SHARE EMBEDDINGS to avoid double loading memory spike
+            shared_embeddings = rag_engine.embeddings if rag_engine else None
+            ingestion_service = IngestionService(embeddings=shared_embeddings)
+            app.state.ingestion_service = ingestion_service
+            logger.info(" ✅ Ingestion Service initialized (with shared embeddings)")
+        except Exception as e:
+            logger.error(f" ❌ Failed to initialize Ingestion Service: {e}")
         
         # If index not loaded, try to build it (only if local retrieval is enabled)
         if config.enable_local_retrieval:
@@ -253,6 +304,24 @@ async def lifespan(app: FastAPI):
             logger.warning(f" Redis connection failed: {redis_error} - caching disabled")
             redis_client = None
         
+        # Initialize Visual Orchestrator (requires Groq) - Wired AFTER Redis to enable sessions
+        if config.llm_provider == "groq":
+            from visual_orchestrator import VisualOrchestrator
+            global visual_orchestrator
+            # Pass redis_client for session persistence (A7)
+            visual_orchestrator = VisualOrchestrator(
+                rag_engine.llm,
+                qdrant_client=rag_engine.qdrant,
+                embeddings=rag_engine.embeddings,
+                redis_client=redis_client
+            )
+            logger.info(f" ✅ Visual Orchestrator initialized with Qdrant GPS & Redis Sessions ({'Connected' if redis_client else 'Disconnected'})")
+            
+            # Store in app.state for Ultimate TARA to access GPS hints
+            app.state.visual_orchestrator = visual_orchestrator
+        else:
+            logger.warning(f" ℹ️ Visual Orchestrator requires 'groq' provider (current: {config.llm_provider})")
+        
         # Initialize counters
         cache_hits = 0
         cache_misses = 0
@@ -263,7 +332,78 @@ async def lifespan(app: FastAPI):
         app.state.cache_hits = cache_hits
         app.state.cache_misses = cache_misses
         app.state.start_time = app_start_time
+
+        # ═══════════════════════════════════════════════════════════
+        # ULTIMATE TARA MODULES INITIALIZATION (AFTER redis ready)
+        # ═══════════════════════════════════════════════════════════
+        logger.info("=" * 70)
+        logger.info("🚀 Initializing ULTIMATE TARA Architecture")
+        logger.info("=" * 70)
         
+        # Import Ultimate TARA modules
+        from tara_models import TacticalSchema, ActionIntent
+        from mind_reader import MindReader
+        from hive_interface import HiveInterface
+        from live_graph import LiveGraph
+        from semantic_detective import SemanticDetective
+        from mission_brain import MissionBrain
+        
+        # Initialize Mind Reader
+        try:
+            app.state.mind_reader = MindReader(rag_engine.llm)
+            logger.info("✅ Mind Reader initialized (Llama-3.1-8B for intent parsing)")
+        except Exception as e:
+            logger.warning(f"⚠️ Mind Reader init failed: {e}")
+            app.state.mind_reader = None
+        
+        # Initialize Hive Interface
+        try:
+            app.state.hive_interface = HiveInterface(
+                qdrant_client=rag_engine.qdrant.client if rag_engine.qdrant else None,
+                embeddings=rag_engine.embeddings,
+                redis_client=app.state.redis,
+                collection_name=config.qdrant_collection or "tara_hive"
+            )
+            logger.info("✅ Hive Interface initialized (Qdrant dual-retrieval)")
+        except Exception as e:
+            logger.warning(f"⚠️ Hive Interface init failed: {e}")
+            app.state.hive_interface = None
+        
+        # Initialize Live Graph
+        try:
+            app.state.live_graph = LiveGraph(app.state.redis)
+            logger.info("✅ Live Graph initialized (Redis DOM mirror)")
+        except Exception as e:
+            logger.warning(f"⚠️ Live Graph init failed: {e}")
+            app.state.live_graph = None
+        
+        # Initialize Semantic Detective
+        # Reuse the already-loaded embeddings from rag_engine to avoid a second model load
+        try:
+            app.state.semantic_detective = SemanticDetective(
+                live_graph=app.state.live_graph,
+                embeddings=rag_engine.embeddings
+            )
+            logger.info("✅ Semantic Detective initialized (hybrid scoring)")
+        except Exception as e:
+            logger.warning(f"⚠️ Semantic Detective init failed: {e}")
+            app.state.semantic_detective = None
+        
+        # Initialize Mission Brain
+        try:
+            app.state.mission_brain = MissionBrain(
+                redis_client=app.state.redis,
+                hive_interface=app.state.hive_interface
+            )
+            logger.info("✅ Mission Brain initialized (constraint enforcement)")
+        except Exception as e:
+            logger.warning(f"⚠️ Mission Brain init failed: {e}")
+            app.state.mission_brain = None
+        
+        logger.info("=" * 70)
+        logger.info("✅ ULTIMATE TARA Architecture Ready")
+        logger.info("=" * 70)
+
         logger.info(" RAG service ready")
         
         yield
@@ -470,17 +610,117 @@ async def visual_orchestrate(request: VisualOrchestrateRequest):
 
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 
+# ═══════════════════════════════════════════════════════════
+# ULTIMATE TARA ENDPOINTS (Primary Pipeline)
+# ═══════════════════════════════════════════════════════════
+
 @app.post("/api/v1/plan_next_step")
 async def plan_next_step(request: PlanStepRequest):
     """
-    Core planning endpoint for multi-step missions.
-    Decides the single next action to take based on goal and current DOM.
+    ULTIMATE TARA PIPELINE - Primary planning endpoint.
+    
+    Uses:
+    - Mind Reader (intent parsing)
+    - Hive Interface (Qdrant retrieval)
+    - Mission Brain (constraint enforcement)
+    - Semantic Detective (hybrid scoring)
+    - Live Graph (Redis DOM mirror)
+    
+    Falls back to legacy if Ultimate TARA modules unavailable.
+    """
+    logger.info(f"🚀 Ultimate TARA Plan | Session: {request.session_id} | Goal: '{request.goal}' | Step: {request.step_number}")
+    
+    # Check if Ultimate TARA modules are available
+    if not all([
+        app.state.mind_reader,
+        app.state.hive_interface,
+        app.state.mission_brain,
+        app.state.semantic_detective,
+        app.state.live_graph
+    ]):
+        logger.warning("⚠️ Ultimate TARA not fully available, falling back to legacy")
+        return await legacy_plan_next_step(request)
+    
+    try:
+        from ultimate_api import ultimate_plan_next_step
+        
+        # First ingest DOM into Live Graph
+        if request.dom_context:
+            from tara_models import GraphNode
+            nodes = [GraphNode.from_dict(el) for el in request.dom_context if isinstance(el, dict)]
+            delta = {
+                "delta_type": "full_scan",
+                "nodes": [n.to_redis_dict() for n in nodes],
+                "url": request.current_url,
+                "timestamp": time.time()
+            }
+            await app.state.live_graph.ingest_delta(request.session_id, delta)
+        
+        # Run Ultimate TARA pipeline
+        result = await ultimate_plan_next_step(
+            app=app,
+            session_id=request.session_id,
+            goal=request.goal,
+            current_url=request.current_url,
+            step_number=request.step_number,
+            action_history=request.action_history or []
+        )
+        
+        if result and result.get("success"):
+            logger.info(f"✅ Ultimate TARA success: {result.get('action', {}).get('type')} on {result.get('action', {}).get('target_id', 'none')}")
+            return result
+        
+        # ═══════════════════════════════════════════════════════════
+        # Fallback to legacy — but INJECT hive context so the LLM
+        # doesn't hallucinate navigation steps
+        # ═══════════════════════════════════════════════════════════
+        logger.warning("⚠️ Ultimate TARA returned no result, falling back to legacy with hive context")
+        try:
+            from tara_models import TacticalSchema, ActionIntent
+            from mind_reader import MindReader
+            schema = await app.state.mind_reader.translate(
+                user_input=request.goal,
+                current_url=request.current_url
+            )
+            hive_response = await app.state.hive_interface.retrieve(schema)
+            hive_context_parts = []
+            if hive_response.strategy:
+                hive_context_parts.append(
+                    f"STRATEGY SEQUENCE: {' → '.join(hive_response.strategy.sequence)}"
+                )
+            if hive_response.visual_hints:
+                hint_strs = [
+                    f"- {h.text_pattern} ({h.element_type} in {h.zone}, selector={h.selector})"
+                    for h in hive_response.visual_hints[:8]
+                ]
+                hive_context_parts.append(
+                    "VISUAL HINTS:\n" + "\n".join(hint_strs)
+                )
+            if hive_context_parts:
+                extra_hints = "\n\n".join(hive_context_parts)
+                request.map_hints = (request.map_hints or "") + "\n\n" + extra_hints
+                logger.info(f"   💡 Injected hive context into legacy fallback: strategy={bool(hive_response.strategy)}, hints={len(hive_response.visual_hints)}")
+        except Exception as hive_err:
+            logger.warning(f"⚠️ Could not inject hive context into fallback: {hive_err}")
+        
+        return await legacy_plan_next_step(request)
+        
+    except Exception as e:
+        logger.error(f"❌ Ultimate TARA failed: {e}", exc_info=True)
+        logger.warning("⚠️ Falling back to legacy pipeline")
+        return await legacy_plan_next_step(request)
+
+
+async def legacy_plan_next_step(request: PlanStepRequest):
+    """
+    Legacy planning endpoint (fallback).
+    Uses old visual_orchestrator with detective.py
     """
     if visual_orchestrator is None:
         raise HTTPException(status_code=501, detail="Visual Orchestrator not initialized")
 
-    logger.info(f"🎯 Planner Request | Session: {request.session_id} | Goal: '{request.goal}' | Step: {request.step_number} | URL: {request.current_url}")
-    
+    logger.info(f"🎯 [LEGACY] Planner Request | Session: {request.session_id} | Goal: '{request.goal}'")
+
     try:
         result = await visual_orchestrator.plan_next_step(
             goal=request.goal,
@@ -489,16 +729,68 @@ async def plan_next_step(request: PlanStepRequest):
             warning_message=request.warning_message,
             current_url=request.current_url,
             last_action=request.last_action,
-            map_hints=request.map_hints,  # Pre-fetched, no Qdrant query here
+            map_hints=request.map_hints,
             client_id=request.client_id,
             action_history=request.action_history or [],
             dom_diff=request.dom_diff or "",
-            conversation_history=request.conversation_history or ""
+            conversation_history=request.conversation_history or "",
+            last_dom_context=request.last_dom_context,
+            fast_sense_speech=request.fast_sense_speech,
+            interaction_mode=request.interaction_mode,
+            session_id=request.session_id,
+            active_states=request.active_states,
+            data_tables=request.data_tables,
+            page_title=request.page_title or "",
         )
         return result
     except Exception as e:
-        logger.error(f"Planning error: {e}", exc_info=True)
+        logger.error(f"Legacy planning error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/fast_sense")
+async def fast_sense(request: FastSenseRequest):
+    """
+    Fast Sense: Quick DOM scan for immediate TTS response.
+    Uses Mind Reader for fast intent parsing.
+    """
+    logger.info(f"⚡ Fast Sense | Session: {request.session_id} | Goal: '{request.goal}' | DOM: {len(request.dom_context)} elements")
+    
+    # Try Ultimate TARA fast sense first
+    if app.state.mind_reader:
+        try:
+            # Fast intent parsing with Mind Reader
+            schema = await app.state.mind_reader.translate(
+                user_input=request.goal,
+                current_url=""
+            )
+            
+            # Simple speech generation based on intent
+            speech = f"Looking for {schema.target_entity}..."
+            
+            return {
+                "speech": speech,
+                "relevant_ids": [],
+                "intent": schema.action.value,
+                "pipeline": "ultimate_fast"
+            }
+        except Exception as e:
+            logger.warning(f"⚠️ Ultimate fast sense failed: {e}")
+    
+    # Fallback to legacy
+    if visual_orchestrator is None:
+        return {"speech": "", "relevant_ids": []}
+    
+    try:
+        result = await visual_orchestrator._run_fast_sense(
+            goal=request.goal,
+            dom_context=request.dom_context
+        )
+        logger.info(f"⚡ [LEGACY] Fast Sense Response | Speech: \"{result.get('speech', '')[:50]}...\"")
+        return result
+    except Exception as e:
+        logger.error(f"Fast sense error: {e}", exc_info=True)
+        return {"speech": "", "relevant_ids": []}
 
 @app.post("/api/v1/get_map_hints")
 async def get_map_hints(request: MapHintsRequest):
@@ -514,7 +806,8 @@ async def get_map_hints(request: MapHintsRequest):
     try:
         hints = await visual_orchestrator.get_navigation_hints(
             goal=request.goal,
-            client_id=request.client_id
+            client_id=request.client_id,
+            current_url=request.current_url or ""
         )
         return {"hints": hints}
     except Exception as e:
@@ -567,6 +860,189 @@ async def embed_text(request_data: EmbedRequest):
         logger.error(f"Embedding error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent Skills & Rules Management Endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/skills", response_model=SkillRuleItem)
+async def create_skill_or_rule(request: SkillRuleCreateRequest):
+    """
+    Upsert a single agent skill or rule into Qdrant HiveMind.
+    Uses Universal Payload Schema.
+    """
+    if not app.state.rag_engine or not app.state.rag_engine.embeddings:
+        raise HTTPException(status_code=503, detail="Embeddings not initialized")
+    if not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
+        raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
+
+    if request.type not in ("agent_skill", "agent_rule"):
+        raise HTTPException(status_code=400, detail="type must be 'agent_skill' or 'agent_rule'")
+
+    try:
+        import uuid as _uuid
+        from qdrant_client.http import models as _models
+
+        # Embed the text
+        vector = app.state.rag_engine.embeddings.embed_query(request.text)
+
+        # Build payload via factory
+        if request.type == "agent_skill":
+            payload = agent_skill_payload(
+                text=request.text,
+                topic=request.topic,
+                tenant_id=request.tenant_id,
+            )
+        else:
+            payload = agent_rule_payload(
+                text=request.text,
+                topic=request.topic,
+                severity=request.severity or "standard",
+                tenant_id=request.tenant_id,
+            )
+
+        point_id = payload.pop("uuid")
+        timestamp = payload["created_at"]
+
+        await app.state.rag_engine.qdrant.client.upsert(
+            collection_name=app.state.rag_engine.qdrant.collection_name,
+            points=[
+                _models.PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload=payload,
+                )
+            ],
+        )
+
+        label = "Skill" if request.type == "agent_skill" else "Rule"
+        logger.info(f"🎯 {label} created: [{request.topic}] {request.text[:60]}...")
+
+        return SkillRuleItem(
+            id=point_id,
+            text=request.text,
+            type=request.type,
+            topic=request.topic,
+            severity=request.severity,
+            timestamp=timestamp,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to create skill/rule: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/skills", response_model=SkillRuleListResponse)
+async def list_skills_and_rules(tenant_id: str = "demo"):
+    """
+    List all agent skills and rules stored in Qdrant for a given tenant.
+    """
+    if not app.state.rag_engine or not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
+        raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
+
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.http import models as _models
+
+        qdrant = app.state.rag_engine.qdrant
+        sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key, check_compatibility=False)
+
+        skills = []
+        rules = []
+
+        for item_type in ("agent_skill", "agent_rule"):
+            # Match BOTH new schema doc_type AND legacy type field
+            result = sync_client.scroll(
+                collection_name=qdrant.collection_name,
+                scroll_filter=_models.Filter(
+                    must=[
+                        _models.FieldCondition(key="tenant_id", match=_models.MatchValue(value=tenant_id)),
+                    ],
+                    should=[
+                        _models.FieldCondition(key="type", match=_models.MatchValue(value=item_type)),
+                        _models.FieldCondition(
+                            key="doc_type",
+                            match=_models.MatchValue(value="Agent_Skill" if item_type == "agent_skill" else "Agent_Rule")
+                        ),
+                    ]
+                ),
+                limit=100,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for p in result[0]:
+                item = SkillRuleItem(
+                    id=str(p.id),
+                    text=read_text(p.payload),
+                    type=item_type,
+                    topic=p.payload.get("topic", "general"),
+                    severity=p.payload.get("severity"),
+                    timestamp=read_created_at(p.payload) or p.payload.get("timestamp"),
+                )
+                if item_type == "agent_skill":
+                    skills.append(item)
+                else:
+                    rules.append(item)
+
+        logger.info(f"🎯 Listed skills/rules: {len(skills)} skills, {len(rules)} rules")
+        return SkillRuleListResponse(skills=skills, rules=rules, total=len(skills) + len(rules))
+
+    except Exception as e:
+        logger.error(f"Failed to list skills/rules: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/skills/{point_id}")
+async def delete_skill_or_rule(point_id: str, tenant_id: str = "demo"):
+    """
+    Delete a specific agent skill or rule by its Qdrant point ID.
+    """
+    if not app.state.rag_engine or not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
+        raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
+
+    try:
+        from qdrant_client.http import models as _models
+
+        await app.state.rag_engine.qdrant.client.delete(
+            collection_name=app.state.rag_engine.qdrant.collection_name,
+            points_selector=_models.PointIdsList(points=[point_id]),
+        )
+
+        logger.info(f"🗑️ Deleted skill/rule: {point_id}")
+        return {"status": "deleted", "id": point_id}
+
+    except Exception as e:
+        logger.error(f"Failed to delete skill/rule: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    doc_type: str = Form("General"),
+    topics: str = Form(""),
+    tenant_id: str = Form("demo")
+):
+    """
+    Upload and process a document into the Knowledge Base.
+    Target: HiveMind (Qdrant)
+    """
+    if not getattr(app.state, "ingestion_service", None):
+        raise HTTPException(status_code=503, detail="Ingestion service not initialized")
+    
+    try:
+        result = await app.state.ingestion_service.ingest_file(
+            file=file,
+            doc_type=doc_type,
+            topics=topics,
+            tenant_id=tenant_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Upload error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/query", response_model=QueryResponse)
 async def query_knowledge_base(request_data: QueryRequest, request: Request):
     """
     Process knowledge base query with context-aware retrieval.
@@ -1044,6 +1520,8 @@ async def analyze_session(request: AnalyzeSessionRequest):
     """
     DavinciAI Sentiment & Reasoning Pipeline.
     Analyzes post-session logs for business intelligence and Hivemind storage.
+    
+    If backend_url is provided, the full report (including brief_context) will be sent there.
     """
     try:
         analytics_engine = app.state.session_analytics
@@ -1051,9 +1529,11 @@ async def analyze_session(request: AnalyzeSessionRequest):
             raise HTTPException(status_code=503, detail="Session Analytics engine not initialized")
             
         # 1. Run full analysis (Reasoning + Sentiment + Distillation)
+        # Pass brief_context if provided, otherwise it will be auto-generated
         report = await analytics_engine.analyze_session(
             raw_logs=request.history_context, 
-            session_id=request.session_id
+            session_id=request.session_id,
+            brief_context=request.brief_context
         )
         
         # 2. Extract & Save Collective Knowledge to Hive Mind
@@ -1118,12 +1598,45 @@ async def analyze_session(request: AnalyzeSessionRequest):
             "summary": saved_hivemind_chunks
         }
         
-        # 4. Clear Final Report in Logs
+        # 4. Send report to backend URL if provided
+        backend_response = None
+        if request.backend_url:
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    payload = {
+                        "session_id": request.session_id,
+                        "user_id": request.user_id,
+                        "tenant_id": request.tenant_id,
+                        "timestamp": report["timestamp"],
+                        "brief_context": report.get("brief_context", ""),
+                        "metrics": report["metrics"],
+                        "business_signals": report["business_signals"],
+                        "analysis": report["analysis"],
+                        "hivemind_updates": report["hivemind_updates"],
+                        "metadata": request.metadata or {}
+                    }
+                    backend_resp = await client.post(request.backend_url, json=payload)
+                    backend_response = {
+                        "status_code": backend_resp.status_code,
+                        "sent": True
+                    }
+                    logger.info(f"📤 Session report sent to backend: {request.backend_url} (status: {backend_resp.status_code})")
+            except Exception as e:
+                logger.warning(f"Failed to send report to backend URL {request.backend_url}: {e}")
+                backend_response = {
+                    "sent": False,
+                    "error": str(e)
+                }
+        
+        # 5. Clear Final Report in Logs
         logger.info(f"📊 FINAL SESSION REPORT: {request.session_id}")
+        logger.info(f"   ├─ Brief Context: {report.get('brief_context', 'N/A')[:80]}...")
         logger.info(f"   ├─ Sentiment: {report['analysis'].get('overall_sentiment', 'N/A')} ({report['analysis'].get('resolution_status', 'Unknown')})")
         logger.info(f"   ├─ Churn Risk: {report['business_signals'].get('is_churn_risk', 'N/A')} | Priority: {report['business_signals'].get('priority_level', 'NORMAL')}")
         logger.info(f"   ├─ Agent IQ: {report['metrics'].get('agent_iq', 'N/A')} | Velocity: {report['metrics'].get('frustration_velocity', 'STABLE')}")
-        logger.info(f"   └─ Hivemind: {len(saved_hivemind_chunks)} knowledge units learned and archived.")
+        logger.info(f"   ├─ Hivemind: {len(saved_hivemind_chunks)} knowledge units learned and archived.")
+        if backend_response:
+            logger.info(f"   └─ Backend Report: {'✅ Sent' if backend_response.get('sent') else '❌ Failed'}")
         
         if saved_hivemind_chunks:
             for i, chunk in enumerate(saved_hivemind_chunks):
@@ -1196,6 +1709,10 @@ async def save_case(request: SaveCaseRequest):
                 broadcast_msg = {
                     "type": "new_knowledge",
                     "node": {
+                        "text": issue_text,
+                        "summary": solution_text,
+                        "doc_type": "Case_Memory",
+                        # Backward compat
                         "issue": issue_text,
                         "solution": solution_text,
                         "issue_type": "manual_entry",
@@ -1225,8 +1742,13 @@ class HiveMindPoint(BaseModel):
     id: str
     x: float
     y: float
-    issue: str
-    solution: str
+    text: str
+    summary: str
+    doc_type: Optional[str] = None
+    domain: Optional[str] = None
+    # Backward compat
+    issue: Optional[str] = None
+    solution: Optional[str] = None
     issue_type: Optional[str] = None
     customer_segment: Optional[str] = None
 
@@ -1315,8 +1837,12 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                         id=point_ids[0] if point_ids else "0",
                         x=0.0,
                         y=0.0,
-                        issue=payloads[0].get("issue", "") if payloads else "",
-                        solution=payloads[0].get("solution", "") if payloads else "",
+                        text=read_text(payloads[0]) if payloads else "",
+                        summary=read_summary(payloads[0]) if payloads else "",
+                        doc_type=read_doc_type(payloads[0]) if payloads else None,
+                        domain=payloads[0].get("domain") if payloads else None,
+                        issue=payloads[0].get("issue", read_text(payloads[0])) if payloads else None,
+                        solution=payloads[0].get("solution", read_summary(payloads[0])) if payloads else None,
                         issue_type=payloads[0].get("issue_type") if payloads else None,
                         customer_segment=payloads[0].get("customer_segment") if payloads else None
                     )
@@ -1357,8 +1883,12 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                 id=point_ids[i],
                 x=float(x),
                 y=float(y),
-                issue=payload.get("issue", "Unknown issue"),
-                solution=payload.get("solution", "No solution recorded"),
+                text=read_text(payload),
+                summary=read_summary(payload),
+                doc_type=read_doc_type(payload),
+                domain=payload.get("domain"),
+                issue=payload.get("issue", read_text(payload)),
+                solution=payload.get("solution", read_summary(payload)),
                 issue_type=payload.get("issue_type"),
                 customer_segment=payload.get("customer_segment")
             ))
@@ -1386,8 +1916,13 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
 
 class InsightItem(BaseModel):
     id: str
-    issue: str
-    solution: str
+    text: str
+    summary: str
+    doc_type: Optional[str] = None
+    domain: Optional[str] = None
+    # Backward compat
+    issue: Optional[str] = None
+    solution: Optional[str] = None
     issue_type: Optional[str] = None
     customer_segment: Optional[str] = None
     timestamp: Optional[str] = None
@@ -1458,11 +1993,15 @@ async def get_hive_mind_insights(limit: int = 10):
         recent_knowledge = [
             InsightItem(
                 id=str(p.id),
-                issue=p.payload.get("issue", "Unknown"),
-                solution=p.payload.get("solution", "")[:200] + "..." if len(p.payload.get("solution", "")) > 200 else p.payload.get("solution", ""),
+                text=read_text(p.payload),
+                summary=read_summary(p.payload),
+                doc_type=read_doc_type(p.payload),
+                domain=p.payload.get("domain"),
+                issue=p.payload.get("issue", read_text(p.payload)),
+                solution=read_summary(p.payload)[:200] + "..." if len(read_summary(p.payload)) > 200 else read_summary(p.payload),
                 issue_type=p.payload.get("issue_type"),
                 customer_segment=p.payload.get("customer_segment"),
-                timestamp=str(p.payload.get("timestamp")) if p.payload.get("timestamp") else None
+                timestamp=str(read_created_at(p.payload)) if read_created_at(p.payload) else None
             )
             for p in recent
         ]
@@ -1473,7 +2012,7 @@ async def get_hive_mind_insights(limit: int = 10):
         
         for point in all_points:
             payload = point.payload or {}
-            domain = payload.get("issue_type", "general")
+            domain = payload.get("domain") or read_doc_type(payload)
             segment = payload.get("customer_segment", "unknown")
             
             domain_counts[domain] = domain_counts.get(domain, 0) + 1

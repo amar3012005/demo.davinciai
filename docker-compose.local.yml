@@ -1,0 +1,205 @@
+services:
+  # ═══════════════════════════════════════════════════════════
+  # REDIS - Required for Live Graph and Mission State
+  # ═══════════════════════════════════════════════════════════
+  redis:
+    image: 'redis:7-alpine'
+    container_name: redis-local
+    ports:
+      - '6379:6379'
+    command: 'redis-server --appendonly yes --bind 0.0.0.0'
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  # ═══════════════════════════════════════════════════════════
+  # RAG Service (with Ultimate TARA modules)
+  # ═══════════════════════════════════════════════════════════
+  rag:
+    build:
+      context: ./rag-daytona.v2
+      dockerfile: Dockerfile
+    container_name: rag-local
+    environment:
+      # LLM Configuration
+      LLM_PROVIDER: groq
+      LLM_API_KEY: ${LLM_API_KEY:-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}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+
+      # Ultimate TARA - Mind Reader
+      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
+
+      # Ultimate TARA - Hive Interface (Qdrant)
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_hive}
+      ENABLE_HIVE_MIND: ${ENABLE_HIVE_MIND:-true}
+
+      # Ultimate TARA - Live Graph (Redis)
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+
+      # Feature Flags
+      USE_NEW_DETECTIVE: ${USE_NEW_DETECTIVE:-true}
+      USE_MISSION_BRAIN: ${USE_MISSION_BRAIN:-true}
+      USE_LIVE_GRAPH: ${USE_LIVE_GRAPH:-true}
+      USE_HIVE_INTERFACE: ${USE_HIVE_INTERFACE:-true}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TENANT_ID: ${TENANT_ID:-demo}
+      LIVE_GRAPH_SCAN_PATH: /app/daytona_agent/services/orchestra_daytona.v2/live_graph_scan.md
+
+      # Model cache - use local files only (no HuggingFace network calls)
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
+    ports:
+      - '8003:8003'
+    volumes:
+      - rag-index:/app/index
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ./orchestra_daytona.v2:/app/daytona_agent/services/orchestra_daytona.v2
+    command: "uvicorn app:app --host 0.0.0.0 --port 8003"
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  # ═══════════════════════════════════════════════════════════
+  # STT Service
+  # ═══════════════════════════════════════════════════════════
+  stt:
+    build:
+      context: ./stt_sarvam
+      dockerfile: Dockerfile
+    container_name: stt-local
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: INFO
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI}
+      SARVAM_MODEL: ${SARVAM_MODEL:-saaras:v2.5}
+      SARVAM_VAD_SIGNALS: 'true'
+      SARVAM_HIGH_VAD: 'true'
+      SARVAM_FLUSH_SIGNAL: 'true'
+      SARVAM_MODE: 'translate'
+      STT_HOST: 0.0.0.0
+      STT_PORT: 8002
+      ORCHESTRATOR_WS_URL: 'ws://orchestrator:8004/ws'
+      ORCHESTRATOR_SKIP_SSL_VERIFY: 'true'
+    ports:
+      - '8002:8002'
+    command: 'uvicorn app:app --host 0.0.0.0 --port 8002'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=5)" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # TTS Service
+  # ═══════════════════════════════════════════════════════════
+  tts:
+    build:
+      context: ./tts_cartesia
+      dockerfile: Dockerfile
+    container_name: tts-local
+    environment:
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-sk_car_k6RiuJVp2gEzAP6ozyCrdp}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-07bc462a-c644-49f1-baf7-82d5599131be}
+      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
+      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+    ports:
+      - '8000:8000'
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Sarvam TTS Service
+  # ═══════════════════════════════════════════════════════════
+  tts_sarvam:
+    build:
+      context: ./tts_sarvam
+      dockerfile: Dockerfile
+    container_name: tts-sarvam-local
+    environment:
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI}
+      SARVAM_MODEL: ${SARVAM_MODEL:-bulbul:v3-beta}
+      SARVAM_VOICE_ID: ${SARVAM_VOICE_ID:-aditya}
+      SARVAM_SAMPLE_RATE: ${SARVAM_SAMPLE_RATE:-24000}
+    ports:
+      - '8001:8001'
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Orchestrator (with Ultimate TARA WebSocket handlers)
+  # ═══════════════════════════════════════════════════════════
+  orchestrator:
+    build:
+      context: ./orchestra_daytona.v2
+      dockerfile: Dockerfile
+    container_name: orchestrator-local
+    ports:
+      - '8004:8004'
+    environment:
+      # Redis Connection
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+
+      # Service URLs
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag:8003}
+      STT_SERVICE_URL: ${STT_SERVICE_URL:-http://stt:8002}
+      TTS_SERVICE_URL: ${TTS_SERVICE_URL:-http://tts:8000}
+
+      # WebSocket Configuration (LOCAL - no SSL)
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8004}
+      ORCHESTRATOR_WS_URL: ${ORCHESTRATOR_WS_URL:-ws://localhost:8004/ws}
+
+      # Ultimate TARA - Widget Configuration
+      WIDGET_WS_URL: ${WIDGET_WS_URL:-ws://localhost:8004/ws}
+
+      # Features
+      ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
+      FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-https://cal.com/amar-nadig-uy2g3b/30min}
+      TENANT_ID: ${TENANT_ID:-demo}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    command: "uvicorn app:app --host 0.0.0.0 --port 8004 --ws-ping-interval 0"
+    dns:
+      - 8.8.8.8
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - rag
+
+  # ═══════════════════════════════════════════════════════════
+  # Qdrant (Optional - Local Vector Database)
+  # Comment out if using cloud Qdrant
+  # ═══════════════════════════════════════════════════════════
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-local
+    ports:
+      - '6333:6333'
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: '6334'
+    restart: unless-stopped
+    profiles:
+      - with-qdrant # Run with: docker-compose --profile with-qdrant up
+
+volumes:
+  redis-data:
+  rag-index:
+  qdrant-storage:
+
+
+networks:
+  default:
+    name: tara-local-network

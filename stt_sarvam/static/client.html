@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sarvam STT Test Client</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a; color: #e0e0e0;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 2rem;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
+  .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.85rem; }
+  .controls { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+  button {
+    padding: 0.75rem 2rem; border: none; border-radius: 8px;
+    font-size: 1rem; cursor: pointer; transition: all 0.2s;
+    font-weight: 600;
+  }
+  #startBtn {
+    background: #22c55e; color: #000;
+  }
+  #startBtn:hover { background: #16a34a; }
+  #startBtn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  #stopBtn {
+    background: #ef4444; color: #fff;
+  }
+  #stopBtn:hover { background: #dc2626; }
+  #stopBtn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .status-bar {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 1.5rem; font-size: 0.85rem;
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #333; transition: background 0.3s;
+  }
+  .dot.connected { background: #22c55e; }
+  .dot.recording { background: #ef4444; animation: pulse 1s infinite; }
+  .dot.speaking { background: #f59e0b; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .transcript-box {
+    width: 100%; max-width: 700px;
+    background: #111; border: 1px solid #222; border-radius: 12px;
+    padding: 1.5rem; min-height: 200px; margin-bottom: 1rem;
+  }
+  .transcript-box h3 { color: #888; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.75rem; }
+  #liveTranscript {
+    font-size: 1.1rem; line-height: 1.6; color: #ccc;
+    min-height: 2rem;
+  }
+  #liveTranscript .partial { color: #888; font-style: italic; }
+  #liveTranscript .final { color: #fff; }
+  .log-box {
+    width: 100%; max-width: 700px;
+    background: #111; border: 1px solid #222; border-radius: 12px;
+    padding: 1rem; max-height: 250px; overflow-y: auto;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 0.75rem;
+    color: #666; line-height: 1.5;
+  }
+  .log-box .event { color: #f59e0b; }
+  .log-box .error { color: #ef4444; }
+  .log-box .info { color: #3b82f6; }
+  .energy-bar {
+    width: 100%; max-width: 700px; height: 6px;
+    background: #222; border-radius: 3px; margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .energy-bar .fill {
+    height: 100%; width: 0%; background: #22c55e;
+    transition: width 0.05s; border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Sarvam STT Test Client</h1>
+<p class="subtitle">Real-time Speech-to-Text-Translate via WebSocket</p>
+
+<div class="status-bar">
+  <div class="dot" id="statusDot"></div>
+  <span id="statusText">Disconnected</span>
+</div>
+
+<div class="controls">
+  <button id="startBtn" onclick="startRecording()">Start Recording</button>
+  <button id="stopBtn" onclick="stopRecording()" disabled>Stop</button>
+</div>
+
+<div class="energy-bar"><div class="fill" id="energyFill"></div></div>
+
+<div class="transcript-box">
+  <h3>Transcript</h3>
+  <div id="liveTranscript"><span class="partial">Press "Start Recording" and speak...</span></div>
+</div>
+
+<div class="log-box" id="logBox"></div>
+
+<script>
+let ws = null;
+let audioContext = null;
+let mediaStream = null;
+let processor = null;
+let finalTexts = [];
+let currentPartial = '';
+
+const SAMPLE_RATE = 16000;
+const BUFFER_SIZE = 4096;
+
+function log(msg, cls = '') {
+  const el = document.getElementById('logBox');
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  el.innerHTML += `<div class="${cls}">[${time}] ${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(text, dotClass) {
+  document.getElementById('statusText').textContent = text;
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot ' + dotClass;
+}
+
+function updateTranscript() {
+  const el = document.getElementById('liveTranscript');
+  let html = finalTexts.map(t => `<span class="final">${t}</span>`).join(' ');
+  if (currentPartial) {
+    html += (html ? ' ' : '') + `<span class="partial">${currentPartial}</span>`;
+  }
+  el.innerHTML = html || '<span class="partial">Listening...</span>';
+}
+
+async function startRecording() {
+  try {
+    // Get mic
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    });
+
+    audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    const source = audioContext.createMediaStreamSource(mediaStream);
+
+    // ScriptProcessor for PCM extraction
+    processor = audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+    processor.onaudioprocess = (e) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const float32 = e.inputBuffer.getChannelData(0);
+
+      // Compute energy for visual feedback
+      let sum = 0;
+      for (let i = 0; i < float32.length; i++) sum += float32[i] * float32[i];
+      const rms = Math.sqrt(sum / float32.length);
+      const pct = Math.min(100, rms * 500);
+      document.getElementById('energyFill').style.width = pct + '%';
+
+      // Float32 → Int16 PCM
+      const int16 = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      ws.send(int16.buffer);
+    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    // Connect WebSocket
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${proto}://${location.host}/api/v1/transcribe/stream`;
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      setStatus('Connected — speak now', 'recording');
+      log('WebSocket connected', 'info');
+      finalTexts = [];
+      currentPartial = '';
+      updateTranscript();
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === 'data') {
+        const { transcript, is_final, latency_ms } = msg.data;
+        if (is_final) {
+          finalTexts.push(transcript);
+          currentPartial = '';
+          const lat = latency_ms ? ` (${latency_ms.toFixed(0)}ms)` : '';
+          log(`FINAL: "${transcript}"${lat}`, 'info');
+        } else {
+          currentPartial = transcript;
+          log(`partial: "${transcript}"`);
+        }
+        updateTranscript();
+
+      } else if (msg.type === 'events') {
+        const sig = msg.data.signal_type;
+        log(`VAD: ${sig}`, 'event');
+        if (sig === 'SPEECH_START') setStatus('Speaking...', 'speaking');
+        else if (sig === 'SPEECH_END') setStatus('Processing...', 'connected');
+
+      } else if (msg.type === 'connected') {
+        log(`Session: ${msg.session_id} | Model: ${msg.config?.model}`, 'info');
+
+      } else if (msg.type === 'error') {
+        log(`ERROR: ${msg.message}`, 'error');
+
+      } else if (msg.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() / 1000 }));
+      }
+    };
+
+    ws.onerror = (e) => {
+      log('WebSocket error', 'error');
+      setStatus('Error', '');
+    };
+
+    ws.onclose = () => {
+      log('WebSocket closed', 'info');
+      setStatus('Disconnected', '');
+    };
+
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+
+  } catch (err) {
+    log(`Mic error: ${err.message}`, 'error');
+    setStatus('Mic access denied', '');
+  }
+}
+
+function stopRecording() {
+  if (processor) { processor.disconnect(); processor = null; }
+  if (audioContext) { audioContext.close(); audioContext = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (ws) { ws.close(); ws = null; }
+
+  setStatus('Disconnected', '');
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('energyFill').style.width = '0%';
+  log('Recording stopped', 'info');
+}
+</script>
+</body>
+</html>

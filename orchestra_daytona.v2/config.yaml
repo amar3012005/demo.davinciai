@@ -7,8 +7,8 @@ server:
   log_level: "INFO"
 
 organization:
-  name: "Daytona"
-  full_name: "Daytona"
+  name: "TASK"
+  full_name: "TASK"
   knowledge_base_path: "/home/prometheus/daytona_agent/daytona_knowledge_base"
 
 languages:
@@ -24,61 +24,62 @@ languages:
 
 services:
   stt:
-    url: "http://stt-elevenlabs-daytona:8001"
-    type: "lemonfox"  # LemonFox STT service (Whisper v3-based)
+    url: "http://stt:8002"
+    type: "sarvam"  # Sarvam STT service
     streaming: true
     language_detection: true
   
   tts:
-    url: "http://tts-daytona:8006"
+    url: "http://tts:8000"
     type: "elevenlabs"  # TTS-LABS service (ElevenLabs)
     streaming: true
     streaming_mode: "continuous"  # "buffered" or "continuous"
     voices:
       en:
-        voice_id: "a0e99841-438c-4a64-b679-ae501e7d6091"
+        voice_id: "07bc462a-c644-49f1-baf7-82d5599131be"
         language: "en-US"
       de:
         voice_id: "a0e99841-438c-4a64-b679-ae501e7d6091"
         language: "de-DE"
   
   rag:
-    url: "http://rag-daytona:8000"
+    url: "http://rag:8003"
     stream_endpoint: "/api/v1/stream_query"
     knowledge_base_path: "/home/prometheus/daytona_agent/daytona_knowledge_base"
     top_k: 5
     similarity_threshold: 0.7
     enable_incremental: true
-    language: "german"
+    language: "english"
+    enable_map: false  # Disable HiveMind map lookups by default
   
   intent:
-    url: "http://tara-task-intent:8002"
+    url: "http://intent:8002"
     enabled: false  # Skip intent service for direct RAG queries
   
   redis:
-    url: "redis://tara-daytona-redis:6382/0"
-    host: "tara-daytona-redis"
-    port: 6382
+    url: "redis://redis:6379/0"
+    host: "redis"
+    port: 6379
     db: 0
     enabled: true  # For state persistence only
   
-  davinciai_backend_url: "https://api.enterprise.davinciai.eu:8450/api/metrics/session-report"
+  davinciai_backend_url: "https://api.enterprise.davinciai.eu:8450/api/webhooks/session"
 
 dialogue:
   en:
     intro:
-      - text: "Hello! Welcome to Daytona. I'm your virtual assistant. How can I help you today?"
+      - text: "Hello! Welcome to TASK. I'm TARA, your virtual assistant. How can I help you today?"
         emotion: "warm"
         audio_file: "intro_en.wav"
-      - text: "Good day! I'm here to assist you with information about Daytona. What would you like to know?"
+      - text: "Good day! I'm TARA from TASK. What would you like to know?"
         emotion: "friendly"
     
     exit:
-      - text: "Thank you for contacting Daytona. If you need any further assistance, please don't hesitate to reach out. Have a wonderful day!"
+      - text: "Thank you for contacting TASK. If you need any further assistance, please don't hesitate to reach out. Have a wonderful day!"
         emotion: "grateful"
         audio_file: "exit_en.wav"
         keywords: ["bye", "goodbye", "see you", "thanks", "thank you", "that's all"]
-      - text: "I'm glad I could help! If you have any more questions, feel free to ask. Take care!"
+      - text: "I'm glad I could help! If you have any more questions about TASK, feel free to ask. Take care!"
         emotion: "friendly"
         audio_file: "exit_alt_en.wav"
     
@@ -107,11 +108,11 @@ dialogue:
         trigger: "delay_ms:1800"
     
     timeout:
-      - text: "Are you still there? I'm here to help you with any questions about Daytona."
+      - text: "Are you still there? I'm here to help you with any questions about TASK."
         emotion: "concerned"
         trigger: "timeout_ms:30000"
         audio_file: "timeout_en.wav"
-      - text: "Can you hear me? If you'd like to ask something, please speak."
+      - text: "Can you hear me? If you'd like to ask something about TASK, please speak."
         emotion: "helpful"
         trigger: "timeout_ms:30000"
         audio_file: "timeout_alt_en.wav"
@@ -124,14 +125,14 @@ dialogue:
 
   de:
     intro:
-      - text: "Hallo! Willkommen an der Daytona. Ich bin Ihr virtueller Assistent. Wie kann ich Ihnen heute helfen?"
+      - text: "Hallo! Willkommen bei TASK. Ich bin TARA. Wie kann ich Ihnen heute helfen?"
         emotion: "warm"
         audio_file: "intro_de.wav"
-      - text: "Guten Tag! Ich bin hier, um Ihnen bei Fragen zur Daytona zu helfen. Womit kann ich Ihnen behilflich sein?"
+      - text: "Guten Tag! Ich bin hier, um Ihnen bei Fragen zu TASK zu helfen. Womit kann ich Ihnen behilflich sein?"
         emotion: "friendly"
     
     exit:
-      - text: "Vielen Dank, dass Sie die Daytona kontaktiert haben. Falls Sie weitere Hilfe benötigen, zögern Sie bitte nicht, uns zu kontaktieren. Einen schönen Tag noch!"
+      - text: "Vielen Dank, dass Sie TASK kontaktiert haben. Falls Sie weitere Hilfe benötigen, zögern Sie bitte nicht, uns zu kontaktieren. Einen schönen Tag noch!"
         emotion: "grateful"
         audio_file: "exit_de.wav"
         keywords: ["auf wiedersehen", "tschüss", "bis später", "danke", "vielen dank", "das war's"]

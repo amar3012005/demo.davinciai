@@ -40,7 +40,8 @@ class RAGEngine:
         """
         self.config = config
         
-        if self.config.enable_local_retrieval:
+        # Initialize Embeddings if Local Retrieval OR Hive Mind is enabled
+        if self.config.enable_local_retrieval or self.config.enable_hive_mind:
             # Initialize Optimized ONNX Embeddings (Target: <500ms cold start)
             try:
                 # Use model from config (can be local path or HuggingFace ID)
@@ -64,7 +65,7 @@ class RAGEngine:
                 logger.error(f"❌ Failed to init OptimizedEmbeddings: {e}")
                 raise e
         else:
-            logger.info("ℹ️ Local retrieval is DISABLED via config - skipping embedding model initialization")
+            logger.info("ℹ️ Retrieval is DISABLED (Local & HiveMind off) - skipping embedding model initialization")
             self.embeddings = None
 
         # Initialize LLM with fallback support
@@ -251,8 +252,13 @@ class RAGEngine:
 
     def _retrieve_with_boosting(self, query: str, context: Dict, boost_categories: list, max_context_chars: int, precomputed_embedding: Optional[np.ndarray] = None) -> tuple:
         """FAISS retrieval with category boosting."""
-        # 1. Fallback to rule-based retrieval if vector search is disabled
-        if not self.config.enable_local_retrieval or self.vector_store is None:
+        # 1. Check if local retrieval is explicitly disabled
+        if not self.config.enable_local_retrieval:
+            logger.info("🚫 Local retrieval is DISABLED (config.enable_local_retrieval=False). Returning 0 docs.")
+            return [], {"embedding_ms": 0, "search_ms": 0}
+
+        # 1b. Fallback to rule-based retrieval if vector store is missing but retrieval is ENABLED
+        if self.vector_store is None:
             return self._retrieve_rule_based(query, context, boost_categories, max_context_chars)
         
         timing = {}
@@ -375,11 +381,14 @@ class RAGEngine:
         if context and 'language' in context:
             original_language = context['language'].lower()
         
-        # Fast local German detection (avoid LLM for simple cases)
-        if original_language not in ['de', 'german', 'deutsch']:
+        # Fast local language detection (avoid LLM for simple cases)
+        if original_language not in ['de', 'german', 'deutsch', 'te', 'telugu']:
             german_indicators = ['wie ', 'was ', 'ist ', 'der ', 'die ', 'das ', 'mit ']
+            telugu_indicators = ['ఎక్కడ', 'ఎలా', 'ఏమిటి', 'చెప్పు', 'ఉంది', 'చేయాలి']
             if any(ind in query.lower() for ind in german_indicators):
                 original_language = 'german'
+            elif any(ind in query.lower() for ind in telugu_indicators):
+                original_language = 'telugu'
         
         # Async Translation if needed (skip for obvious English)
         if original_language in ['de', 'german', 'deutsch'] and self.groq_client:
@@ -475,9 +484,9 @@ class RAGEngine:
             except Exception as e:
                 logger.warning(f"⚠️ Query rewriting failed: {e}")
         
-        # 3. Parallel Retrieval
+        # 3. PRIORITY: Skills & Rules retrieval FIRST (Sequential)
+        # This ensures we know what capabilities TARA has before doing other retrievals
         retrieval_start = time.time()
-        tasks = []
         
         # PRE-COMPUTE EMBEDDING ONCE (Optimization: save CPU and prevent redundant work)
         shared_vector = None
@@ -487,16 +496,20 @@ class RAGEngine:
             shared_vector = np.array(v_list, dtype=np.float32).reshape(1, -1)
             timing['shared_embedding_ms'] = (time.time() - v_start) * 1000
         
+        # STEP 1: Retrieve Skills & Rules FIRST (Sequential - Priority)
         # Detected pattern
         pattern = None if is_context_dependent else self._detect_query_pattern(query_english)
         boost_cats = pattern.get("faiss_boost", []) if pattern else []
         max_chars = pattern.get("max_context_chars", 2500) if pattern else 2500
         
+        # STEP 2: Parallel Retrieval (Local RAG, Hive Mind, Web Search, Skills & Rules)
+        tasks = []
+        
         # Task 1: Local RAG (Now uses shared vector)
         tasks.append(self._do_local_rag(query_english, context or {}, boost_cats, max_chars, precomputed_embedding=shared_vector))
         
-        # Task 2: Hive Mind (Now uses shared vector + domain filtering)
-        async def do_hive_mind():
+        # Task 2: Unified Qdrant Search (Case Memory, Skills, Rules, General KB)
+        async def do_unified_search():
             if self.qdrant and self.qdrant.enabled:
                 if shared_vector is not None:
                     try:
@@ -506,41 +519,82 @@ class RAGEngine:
                             try:
                                 from urllib.parse import urlparse
                                 parsed = urlparse(context["url"])
-                                domain = parsed.netloc.replace("www.", "")  # e.g., "groq.com"
+                                domain = parsed.netloc.replace("www.", "")
                             except:
                                 pass
                         
-                        # Check if domain has HiveMind knowledge (MAPPED vs EXPLORER)
-                        use_hivemind = False # Default to Explorer Mode (Safety First)
+                        # Use unified search with doc_type filter
+                        # "in case of a general wss connection... filter of doc_type in all ..."
+                        target_types = ["Case_Memory", "Agent_Skill", "Agent_Rule", "General_KB"]
                         
-                        if domain:
-                            has_knowledge = await self.qdrant.check_domain_has_knowledge(domain, tenant_id=tenant_id)
-                            if has_knowledge:
-                                logger.info(f"🗺️ MAPPED MODE: Domain '{domain}' has HiveMind knowledge - using domain filter")
-                                use_hivemind = True
-                            else:
-                                logger.info(f"🧭 EXPLORER MODE: Domain '{domain}' has no HiveMind knowledge - skipping HiveMind search")
-                        else:
-                             # No domain found in context -> Force Explorer Mode to avoid leaking global vectors
-                             logger.info("🧭 EXPLORER MODE: No domain detected in context - skipping HiveMind search")
+                        v_raw = shared_vector.flatten().tolist()
+                        unified_start = time.time()
                         
-                        if use_hivemind:
-                            # Extract the raw list for Qdrant
-                            v_raw = shared_vector.flatten().tolist()
-                            results = await asyncio.wait_for(
-                                self.qdrant.search_hive_mind(v_raw, tenant_id=tenant_id, domain=domain, limit=3),
-                                timeout=0.8
-                            )
-                            if results:
-                                return "\n".join([f"Issue: {r['issue']}\nSolution: {r['solution']}" for r in results])
+                        # Perform unified search
+                        results = await asyncio.wait_for(
+                            self.qdrant.search_unified_memory(
+                                query_vector=v_raw,
+                                tenant_id=tenant_id,
+                                doc_types=target_types,
+                                limit=8, # Slightly higher limit to get mix of types
+                                score_threshold=0.35
+                            ),
+                            timeout=1.2 # Allow slightly more time for complex filter
+                        )
+                        
+                        search_time = (time.time() - unified_start) * 1000
+                        
+                        # Post-process results into categories
+                        processed = {
+                            "hive_mind_text": "",
+                            "skills": [],
+                            "rules": [],
+                            "general_kb": []
+                        }
+                        
+                        hm_entries = []
+                        for r in results:
+                            dt = r.get("doc_type")
+                            payload = r.get("payload", {})
+                            
+                            if dt == "Agent_Skill":
+                                processed["skills"].append({"text": r["text"], "topic": payload.get("topic", "general"), "score": r["score"]})
+                            elif dt == "Agent_Rule":
+                                processed["rules"].append({"text": r["text"], "topic": payload.get("topic", "general"), "severity": payload.get("severity", "standard"), "score": r["score"]})
+                            elif dt == "Case_Memory":
+                                # Format Case Memory as Issue/Solution pairs
+                                issue = payload.get("issue", r["text"])
+                                solution = payload.get("solution", r["summary"])
+                                hm_entries.append(f"Issue: {issue}\nSolution: {solution}")
+                            elif dt == "General_KB":
+                                # Format General KB as context chunks
+                                source = payload.get("filename", "Internal Doc")
+                                text = r["text"]
+                                hm_entries.append(f"[{source}]: {text}")
+                        
+                        if hm_entries:
+                            processed["hive_mind_text"] = "\n---\n".join(hm_entries)
+                            
+                        # Logging
+                        if processed["skills"]:
+                            logger.info(f"🎯 Unified Search found {len(processed['skills'])} skills")
+                        if processed["rules"]:
+                            logger.info(f"⚖️ Unified Search found {len(processed['rules'])} rules")
+                        if hm_entries:
+                            logger.info(f"🧠 Unified Search found {len(hm_entries)} memory/KB items")
+
+                        return processed, search_time
+                        
                     except asyncio.TimeoutError:
-                        logger.warning("⏱️ Hive Mind search TIMEOUT (>800ms) - skipping")
+                        logger.warning("⏱️ Unified Qdrant search TIMEOUT (>1.2s) - skipping")
                     except Exception as e:
-                        logger.error(f"❌ Hive Mind error: {e}")
+                        logger.error(f"❌ Unified Qdrant search error: {e}")
                 else:
-                    logger.warning("🧠 Hive Mind enabled but embeddings not initialized")
-            return ""
-        tasks.append(do_hive_mind())
+                    logger.warning("🧠 Qdrant enabled but embeddings not initialized")
+            
+            return {"hive_mind_text": "", "skills": [], "rules": [], "general_kb": []}, 0
+
+        tasks.append(do_unified_search())
         
         # Task 3: Web Search
         async def do_web():
@@ -550,14 +604,29 @@ class RAGEngine:
             return ""
         tasks.append(do_web())
         
+        # Execute parallel tasks
         retrieval_results = await asyncio.gather(*tasks)
+        
         relevant_docs, doc_timing = retrieval_results[0]
-        hive_mind_context = retrieval_results[1]
+        
+        # Unpack Unified Results
+        unified_data, unified_timing = retrieval_results[1]
+        hive_mind_context = unified_data["hive_mind_text"]
+        
+        # Unpack Web Results
         web_results = retrieval_results[2]
         
+        # Pack final skills/rules/timing
+        skills_rules = {
+            "skills": unified_data["skills"],
+            "rules": unified_data["rules"]
+        }
+        timing['qdrant_unified_ms'] = unified_timing
+
+
         timing.update(doc_timing)
         timing['retrieval_ms'] = (time.time() - retrieval_start) * 1000
-        
+
         return {
             "query_original": query,
             "query_english": query_english,
@@ -565,6 +634,8 @@ class RAGEngine:
             "relevant_docs": relevant_docs,
             "hive_mind_context": hive_mind_context,
             "web_results": web_results,
+            "agent_skills": skills_rules.get("skills", []),
+            "agent_rules": skills_rules.get("rules", []),
             "timing": timing,
             "fast_path_type": fast_path_type,
             "history_context": history_context
@@ -589,16 +660,18 @@ class RAGEngine:
         relevant_docs = retrieval_data['relevant_docs']
         hive_mind_context = retrieval_data['hive_mind_context']
         web_results = retrieval_data['web_results']
+        agent_skills = retrieval_data.get('agent_skills', [])
+        agent_rules = retrieval_data.get('agent_rules', [])
         timing = retrieval_data['timing']
         fast_path_type = retrieval_data['fast_path_type']
         
         # 3.5 Language Context Strategy
         # Detect explicit intent to switch response language
         combined_context_text = (str(history_context) + " " + query).lower()
-        if any(x in combined_context_text for x in ["speak in german", "antworte auf deutsch", "rede deutsch", "speak german"]):
-            logger.info("🌐 User requested German response (explicit intent detected)")
-            original_language = "german"
-        elif any(x in combined_context_text for x in ["speak in english", "speak english", "antworte auf englisch"]):
+        if any(x in combined_context_text for x in ["speak in telugu", "speak telugu", "తెలుగులో మాట్లాడు", "telugu"]):
+            logger.info("🌐 User requested Telugu response (explicit intent detected)")
+            original_language = "telugu"
+        elif any(x in combined_context_text for x in ["speak in english", "speak english"]):
             logger.info("🌐 User requested English response (explicit intent detected)")
             original_language = "english"
         
@@ -606,11 +679,14 @@ class RAGEngine:
         query_clean = query_english.lower().strip()
         
         if fast_path_type == "identity":
+            org = self.config.organization_name
             response = (
-                "I am TARA, an advanced AI Assistant built by Davinci AI for Daytona (daytona.io). "
-                "I'm here to help you manage your development environments, optimize your workflows, "
-                "and ensure your team is as productive as possible!"
+                f"I am TARA, an advanced AI Assistant built by Davinci AI for {org}. "
+                "Just to clarify: I work for the organization TASK (Telangana Academy for Skill and Knowledge), not to perform generic tasks. "
+                "I'm here to help you with skilling, employment, and career development opportunities!"
             )
+            if original_language == "telugu":
+                response = f"నేను TARA, {org} కోసం Davinci AI ద్వారా నిర్మించబడిన అధునాతన AI సహాయకుడిని. మీకు నైపుణ్యాభివృద్ధి, ఉపాధి మరియు కెరీర్ అవకాశాలలో సహాయం చేయడానికి నేను ఇక్కడ ఉన్నాను!"
             if streaming_callback: streaming_callback(response, True)
             duration = (time.time() - start_time) * 1000
             return {
@@ -623,10 +699,9 @@ class RAGEngine:
 
         if fast_path_type == "pricing":
             response = (
-                "Daytona is open source and completely free for local use! "
-                "For cloud and enterprise environments, we offer a flexible pay-as-you-go model: "
-                "CPU starts at $0.0504/hr, Memory at $0.0162/GB/hr, and Storage at $0.0001/GB/hr. "
-                "By the way, solo developers get $200 in free compute credits to start!"
+                "TASK services are primarily government-funded and focused on skilling and employment enhancement. "
+                "Registration fees are nominal: ₹500 + GST for SC/ST students and ₹1000 + GST for others (valid for 4 years). "
+                "You can access various skilling courses, placement drives, and internships through this membership."
             )
             if streaming_callback: streaming_callback(response, True)
             duration = (time.time() - start_time) * 1000
@@ -667,13 +742,19 @@ class RAGEngine:
 
         # 4. Context Architecture (Zoned XML Assembly)
         # Using the new ContextArchitect for <500ms TTFT and robust context boundaries
+        # Zone D: Dynamic skills/rules retrieved from Qdrant HiveMind
+        skill_texts = [s.get("text", "") for s in agent_skills if s.get("text")]
+        rule_texts = [r.get("text", "") for r in agent_rules if r.get("text")]
+
         prompt = ContextArchitect.assemble_prompt(
             query=query_english,
             retrieved_docs=relevant_docs,
             history=history_list,
             hive_mind=hive_mind_state,
             user_profile=user_profile,
-            language=original_language
+            language=original_language,
+            agent_skills=skill_texts,
+            agent_rules=rule_texts
         )
         
         # 5. Generation
@@ -768,9 +849,11 @@ class RAGEngine:
             'metadata': {
                 'method': 'xml-rag',
                 'language': original_language,
-                'zones_used': ['A', 'B', 'C'],
+                'zones_used': ['A', 'B', 'C'] + (['D'] if skill_texts or rule_texts else []),
                 'hive_mind_used': bool(hive_mind_context),
-                'web_search_used': bool(web_results)
+                'web_search_used': bool(web_results),
+                'active_skills': len(skill_texts),
+                'active_rules': len(rule_texts)
             }
         }
 
@@ -778,11 +861,12 @@ class RAGEngine:
         """Handle greetings and thanks without RAG."""
         start = time.time()
         
+        org = self.config.organization_name
         system_prompt = (
-            f"You are TARA, an advanced AI Assistant built by Davinci AI for Daytona. "
-            f"You are speaking in {language}. Be humanized, warm, and professional. "
-            f"Acknowledge the user's greeting or thanks naturally, but don't ask 'How can I help you?' "
-            f"unless it feels very natural. Keep it to 1-2 sentences."
+            f"You are TARA, an empathetic AI Colleague at {org}. "
+            f"You are speaking in {language}. Be warm, professional, and helpful. "
+            f"Acknowledge the user's greeting or thanks naturally. "
+            f"Keep it to 1-2 sentences."
         )
         
         # Handle async/sync LLM
@@ -822,7 +906,7 @@ class RAGEngine:
 
     async def distill_history_to_case(self, history: str) -> List[Dict[str, str]]:
         """
-        Distill conversation history into professional Daytona support cases.
+        Distill conversation history into professional support cases for the Organization.
         Supports multi-issue segmentation and GDPR/PII anonymization.
         Uses the CaseDistiller for robust prompt handling.
         """
@@ -859,16 +943,18 @@ class RAGEngine:
             lang_full = language
             if language.lower() in ("en", "eng"): lang_full = "english"
             elif language.lower() in ("de", "deu", "ger"): lang_full = "german"
+            elif language.lower() in ("te", "tel"): lang_full = "telugu"
 
+            org = self.config.organization_name
             prompt = (
                 f"<system_configuration>\n"
-                f"You are TARA, an expressive Visual Co-Pilot for Daytona. "
-                f"The user is ending the session. Your task is to briefly summarize what happened in this session (if possible) "
+                f"You are TARA, a caring and professional AI Colleague for {org}. "
+                f"The user is ending the session. Your task is to briefly summarize what happened (if useful) "
                 f"and then ask if there's anything else the user needs help with.\n"
                 f"RULES:\n"
                 f"1. Be warm, human-like, and professional.\n"
-                f"2. Summarize the LAST few actions or accomplishments briefly if detectable, otherwise just be warm.\n"
-                f"3. End with a polite closing question (e.g., 'Is there anything else I can assist you with before I go?').\n"
+                f"2. Summarize the LAST few actions briefly if detectable.\n"
+                f"3. End with a polite closing question.\n"
                 f"4. TOTAL LENGTH: MAX 2-3 SENTENCES.\n"
                 f"5. Language: {lang_full}.\n"
                 f"</system_configuration>\n\n"
@@ -886,9 +972,10 @@ class RAGEngine:
             return str(response).strip()
         except Exception as e:
             logger.error(f"Dynamic exit generation failed: {e}")
-            if language.lower().startswith("ger") or language.lower().startswith("de"):
-                return "Vielen Dank für die Nutzung von Daytona. Kann ich sonst noch etwas für Sie tun?"
-            return "Thank you for using Daytona. Is there anything else I can help you with today?"
+            org = self.config.organization_name
+            if language.lower().startswith("tel"):
+                return f"{org} సేవలను ఉపయోగించినందుకు ధన్యవాదాలు. ఈ రోజు నేను మీకు ఇంకా ఏమైనా సహాయం చేయగలనా?" 
+            return f"Thank you for using {org}. Is there anything else I can help you with today?"
 
     def validate_response_quality(self, response: str) -> Dict[str, Any]:
 

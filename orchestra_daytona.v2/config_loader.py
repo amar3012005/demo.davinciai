@@ -61,6 +61,7 @@ class RAGConfig:
     similarity_threshold: float = 0.7
     enable_incremental: bool = True
     language: str = "german"
+    enable_map: bool = False
 
 
 @dataclass
@@ -88,7 +89,7 @@ class ServicesConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
     intent: IntentConfig = field(default_factory=IntentConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
-    davinciai_backend_url: str = "https://api.enterprise.davinciai.eu:8450/api/metrics/session-report"
+    davinciai_backend_url: str = "https://api.enterprise.davinciai.eu:8450/api/webhooks/session"
 
 
 @dataclass
@@ -107,6 +108,13 @@ class OrganizationConfig:
     name: str = "General Agent"
     full_name: str = "DaVinci AI Assistant"
     knowledge_base_path: str = ""
+    # Identity (Env Var Overrides)
+    agent_id: str = "agent-demo-001"
+    agent_name: str = "demo"
+    tenant_id: str = "5fc3fa72-d15d-48dc-812c-5c845b5172eb"
+    # Integrations
+    fsm_appointment_url: str = ""
+    orchestrator_ws_url: str = ""
 
 
 @dataclass
@@ -208,7 +216,14 @@ class ConfigLoader:
             config.organization = OrganizationConfig(
                 name=os.getenv("ORGANIZATION_NAME", org_data.get("name", "General Agent")),
                 full_name=os.getenv("ORGANIZATION_FULL_NAME", org_data.get("full_name", "DaVinci AI Assistant")),
-                knowledge_base_path=os.getenv("KNOWLEDGE_BASE_PATH", org_data.get("knowledge_base_path", ""))
+                knowledge_base_path=os.getenv("KNOWLEDGE_BASE_PATH", org_data.get("knowledge_base_path", "")),
+                # New identity fields with env overrides
+                agent_id=os.getenv("AGENT_ID", org_data.get("agent_id", "davinci-demo-agent-001")),
+                agent_name=os.getenv("AGENT_NAME", org_data.get("agent_name", "demo")),
+                tenant_id=os.getenv("TENANT_ID", org_data.get("tenant_id", "5fc3fa72-d15d-48dc-812c-5c845b5172eb")),
+                # Integrations
+                fsm_appointment_url=os.getenv("FSM_APPOINTMENT_URL", org_data.get("fsm_appointment_url", "")),
+                orchestrator_ws_url=os.getenv("ORCHESTRATOR_WS_URL", org_data.get("orchestrator_ws_url", ""))
             )
         
         # Language config (with env var overrides)
@@ -235,10 +250,6 @@ class ConfigLoader:
             if "stt" in services_data:
                 stt_data = services_data["stt"]
                 stt_url = os.getenv("STT_SERVICE_URL", stt_data.get("url", "http://tara-task-stt-vad:8001"))
-                # FORCE FIX: Ensure internal STT uses HTTPS
-                if "stt:8002" in stt_url and stt_url.startswith("http:"):
-                    stt_url = stt_url.replace("http:", "https:")
-                    logger.info(f"🔧 Auto-corrected STT URL to: {stt_url}")
                     
                 config.services.stt = STTConfig(
                     url=stt_url,
@@ -270,10 +281,6 @@ class ConfigLoader:
             if "rag" in services_data:
                 rag_data = services_data["rag"]
                 rag_url = os.getenv("RAG_SERVICE_URL", rag_data.get("url", "http://rag-service:8003"))
-                # FORCE FIX: Ensure internal RAG uses HTTPS
-                if "rag:8003" in rag_url and rag_url.startswith("http:"):
-                    rag_url = rag_url.replace("http:", "https:")
-                    logger.info(f"🔧 Auto-corrected RAG URL to: {rag_url}")
                     
                 config.services.rag = RAGConfig(
                     url=rag_url,
@@ -282,7 +289,8 @@ class ConfigLoader:
                     top_k=int(os.getenv("RAG_TOP_K", rag_data.get("top_k", 5))),
                     similarity_threshold=float(os.getenv("RAG_SIMILARITY_THRESHOLD", rag_data.get("similarity_threshold", 0.7))),
                     enable_incremental=os.getenv("ENABLE_INCREMENTAL_RAG", str(rag_data.get("enable_incremental", True))).lower() == "true",
-                    language=os.getenv("RAG_LANGUAGE", rag_data.get("language", "german"))
+                    language=os.getenv("RAG_LANGUAGE", rag_data.get("language", "german")),
+                    enable_map=os.getenv("ENABLE_MAP", str(rag_data.get("enable_map", False))).lower() == "true"
                 )
             
             # Intent config (with env var overrides)

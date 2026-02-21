@@ -5,9 +5,8 @@
 # Step 1: Base image with uv installed
 FROM python:3.11-slim AS base
 
-# Install uv for lightning-fast dependency resolution
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvbin/uv
-ENV PATH="/uvbin:${PATH}"
+# Install uv via pip to avoid GHCR timeouts
+RUN pip install uv
 ENV UV_SYSTEM_PYTHON=1
 
 WORKDIR /app
@@ -56,7 +55,7 @@ ENV OMP_NUM_THREADS=4
 ENV ONNXRUNTIME_EXECUTION_MODE=parallel
 
 # Configuration
-ENV DAYTONA_RAG_EMBEDDING_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+ENV DAYTONA_RAG_EMBEDDING_MODEL="Xenova/paraphrase-multilingual-MiniLM-L12-v2"
 ENV DAYTONA_RAG_VECTOR_STORE_PATH="/app/index"
 ENV DAYTONA_RAG_KNOWLEDGE_BASE_PATH="/app/daytona_knowledge_base"
 ENV PORT="8000"

@@ -6,6 +6,25 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Prompt for generating brief session context/summary
+SESSION_CONTEXT_PROMPT = """You are a session summarizer for an AI assistant called TARA.
+Your task is to create a brief, objective summary of what happened in this session.
+
+### RULES:
+1. **Be concise**: Maximum 2-3 sentences describing the main topic and outcome.
+2. **Focus on substance**: What was the user trying to achieve? Was it resolved?
+3. **Neutral tone**: Objective description without emotional language.
+4. **Key elements**: Mention the main topic, any key actions taken, and the result.
+5. **No PII**: Remove any personal identifiers, names, emails, or specific IDs.
+
+### OUTPUT FORMAT:
+Provide only the summary text, no JSON, no markdown, no meta-commentary.
+
+### SESSION TRANSCRIPT:
+{transcript}
+
+BRIEF CONTEXT SUMMARY:"""
+
 class SessionAnalytics:
     """
     DavinciAI Sentiment & Reasoning Pipeline.
@@ -38,9 +57,14 @@ class SessionAnalytics:
             
         return formatted_transcript
 
-    async def analyze_session(self, raw_logs: List[Dict[str, Any]], session_id: str) -> Dict[str, Any]:
+    async def analyze_session(self, raw_logs: List[Dict[str, Any]], session_id: str, brief_context: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes the full analytics pipeline.
+        
+        Args:
+            raw_logs: Raw conversation logs
+            session_id: Session identifier
+            brief_context: Optional pre-computed brief context (will be generated if not provided)
         """
         start_time = time.time()
         
@@ -56,10 +80,15 @@ class SessionAnalytics:
         # 4. Classify Business Signals
         business_signals = self._classify_business_signals(reasoning_output.get('session_summary', {}), davinci_metrics)
         
-        # 5. Extract Final Report for Orchestrator/Backend
+        # 5. Generate Brief Context (if not provided)
+        if not brief_context:
+            brief_context = await self._generate_brief_context(transcript, reasoning_output.get('session_summary', {}))
+        
+        # 6. Extract Final Report for Orchestrator/Backend
         report = {
             "session_id": session_id,
             "timestamp": datetime.utcnow().isoformat(),
+            "brief_context": brief_context,
             "metrics": davinci_metrics,
             "business_signals": business_signals,
             "analysis": reasoning_output.get('session_summary', {}),
@@ -69,6 +98,48 @@ class SessionAnalytics:
         
         logger.info(f"Analytics complete for {session_id} in {report['processing_time']}s")
         return report
+
+    async def _generate_brief_context(self, transcript: str, session_summary: Dict[str, Any]) -> str:
+        """
+        Generate a brief context/summary of what happened in the session.
+        Uses LLM to create a concise 2-3 sentence summary.
+        """
+        try:
+            # Use the reasoning model to generate context
+            prompt = SESSION_CONTEXT_PROMPT.format(transcript=transcript[:3000])  # Limit transcript length
+            
+            response = await self.llm_provider.generate_messages(
+                messages=[
+                    {"role": "system", "content": "You are a session summarizer. Be concise and objective."},
+                    {"role": "user", "content": prompt}
+                ],
+                model=self.model_name,
+                max_tokens=150
+            )
+            
+            # Clean up the response
+            summary = response.strip() if isinstance(response, str) else response.get('content', '').strip()
+            
+            # Fallback if response is too short or empty
+            if not summary or len(summary) < 20:
+                # Generate a basic fallback summary from session_summary
+                resolution = session_summary.get('resolution_status', 'Unknown')
+                sentiment = session_summary.get('overall_sentiment', 0)
+                pain_points = session_summary.get('customer_pain_points', [])
+                
+                if pain_points:
+                    main_topic = pain_points[0]
+                    summary = f"Session focused on: {main_topic}. Resolution status: {resolution}."
+                else:
+                    summary = f"Support session completed. Resolution status: {resolution}."
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to generate brief context: {e}")
+            # Return a minimal fallback summary
+            resolution = session_summary.get('resolution_status', 'Unknown')
+            return f"Support session completed. Resolution status: {resolution}."
 
     async def _run_reasoning_engine(self, transcript: str, session_id: str) -> Dict[str, Any]:
         """

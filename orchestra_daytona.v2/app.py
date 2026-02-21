@@ -38,6 +38,7 @@ import time
 # Phone integration imports
 from fastapi import Request, Response, HTTPException
 from twilio.twiml.voice_response import VoiceResponse, Start, Stream
+from twilio.rest import Client
 
 # Configure logging
 logging.basicConfig(
@@ -294,6 +295,58 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to initialize WebSocket Handler: {e}")
         raise
+
+    # ═══════════════════════════════════════════════════════════
+    # ULTIMATE TARA MODULES INITIALIZATION
+    # ═══════════════════════════════════════════════════════════
+    ultimate_orchestrator = None
+    try:
+        # Check if Ultimate TARA is enabled via environment
+        use_ultimate = os.getenv("USE_ULTIMATE_TARA", "false").lower() == "true"
+        
+        if use_ultimate and redis_client:
+            logger.info("=" * 70)
+            logger.info("🚀 Initializing ULTIMATE TARA Architecture")
+            logger.info("=" * 70)
+            
+            from visual_orchestrator_ultimate import UltimateVisualOrchestrator, UltimateConfig
+            
+            # Build Ultimate config from environment
+            ultimate_config = UltimateConfig(
+                qdrant_url=os.getenv("QDRANT_URL"),
+                qdrant_api_key=os.getenv("QDRANT_API_KEY"),
+                qdrant_collection=os.getenv("QDRANT_COLLECTION", "tara_hive"),
+                redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+                use_new_detective=os.getenv("USE_NEW_DETECTIVE", "true").lower() == "true",
+                use_mission_brain=os.getenv("USE_MISSION_BRAIN", "true").lower() == "true",
+                use_live_graph=os.getenv("USE_LIVE_GRAPH", "true").lower() == "true",
+                use_hive_interface=os.getenv("USE_HIVE_INTERFACE", "true").lower() == "true"
+            )
+            
+            # Create Ultimate Orchestrator (pass None for groq for now, will use fallback)
+            ultimate_orchestrator = UltimateVisualOrchestrator(
+                groq_provider=None,  # Use fallback mode initially
+                config=ultimate_config
+            )
+            
+            # Store in app state for WebSocket handler to access
+            app.state.ultimate_orchestrator = ultimate_orchestrator
+            
+            logger.info("✅ ULTIMATE TARA Architecture initialized")
+            logger.info(f"   - Mind Reader: {'✅' if ultimate_orchestrator.mind_reader else '❌'}")
+            logger.info(f"   - Hive Interface: {'✅' if ultimate_orchestrator.hive_interface else '❌'}")
+            logger.info(f"   - Live Graph: {'✅' if ultimate_orchestrator.live_graph else '❌'}")
+            logger.info(f"   - Semantic Detective: {'✅' if ultimate_orchestrator.semantic_detective else '❌'}")
+            logger.info(f"   - Mission Brain: {'✅' if ultimate_orchestrator.mission_brain else '❌'}")
+            logger.info("=" * 70)
+        else:
+            logger.info("ℹ️ ULTIMATE TARA disabled (set USE_ULTIMATE_TARA=true)")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize ULTIMATE TARA: {e}")
+        logger.warning("Continuing with legacy architecture...")
+        import traceback
+        traceback.print_exc()
     
     # CRITICAL: Health checks for all dependent services before accepting sessions
     logger.info("=" * 70)
@@ -363,6 +416,23 @@ app.add_middleware(MetricsMiddleware)
 # Mount static files to serve tara-widget.js
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
+    # Dedicated endpoint for widget JS with no-cache headers to prevent stale versions
+    from starlette.responses import FileResponse
+    
+    @app.get("/static/tara-widget.js")
+    async def serve_widget_js():
+        """Serve widget JS with cache-busting headers"""
+        widget_path = os.path.join(static_dir, "tara-widget.js")
+        return FileResponse(
+            widget_path,
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     logger.info(f"✅ Static files mounted from {static_dir}")
 else:
@@ -413,6 +483,77 @@ async def get_metrics():
     if ws_handler:
         current_metrics["active_sessions"] = len(ws_handler.sessions)
     return current_metrics
+
+
+@app.post("/api/phone/call")
+async def initiate_outgoing_call(request: Request):
+    """
+    Initiate an outgoing call to a phone number.
+    """
+    try:
+        data = await request.json()
+        to_number = data.get("to")
+        if not to_number:
+            raise HTTPException(status_code=400, detail="Missing 'to' phone number")
+
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_number = os.getenv("TWILIO_FROM_NUMBER")
+
+        if not all([account_sid, auth_token, from_number]):
+            logger.error("Missing Twilio credentials in environment variables")
+            raise HTTPException(status_code=500, detail="Twilio not properly configured")
+
+        client = Client(account_sid, auth_token)
+
+        # The URL that Twilio will hit when the call is answered
+        callback_url = f"https://{request.headers.get('host')}/phone/outgoing-twiml"
+        status_callback_url = f"https://{request.headers.get('host')}/phone/status"
+
+        logger.info(f"🚀 Initiating outgoing call to {to_number} from {from_number}")
+        
+        call = client.calls.create(
+            to=to_number,
+            from_=from_number,
+            url=callback_url,
+            status_callback=status_callback_url,
+            status_callback_event=['initiated', 'ringing', 'answered', 'completed']
+        )
+
+        return {"status": "success", "call_sid": call.sid}
+
+    except Exception as e:
+        logger.error(f"Failed to initiate outgoing call: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/phone/outgoing-twiml")
+@app.post("/phone/outgoing-twiml")
+async def handle_outgoing_twiml(request: Request):
+    """
+    Handle TwiML for outgoing calls.
+    Similar to handle_phone_call but for outbound.
+    """
+    # Accept both GET and POST because Twilio might use either depending on config
+    if request.method == "POST":
+        form_data = await request.form()
+    else:
+        form_data = request.query_params
+
+    call_sid = form_data.get("CallSid")
+    to_number = form_data.get("To")
+
+    logger.info(f"📞 Outgoing call answered by {to_number}, SID: {call_sid}")
+
+    response = VoiceResponse()
+    start = Start()
+    
+    websocket_url = f"wss://{request.headers.get('host', 'localhost:8004')}/phone-audio/{call_sid}"
+    stream = Stream(url=websocket_url)
+    start.append(stream)
+    response.append(start)
+
+    return Response(str(response), media_type="text/xml")
 
 
 @app.get("/api/metrics")

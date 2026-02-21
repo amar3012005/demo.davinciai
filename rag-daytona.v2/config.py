@@ -71,7 +71,7 @@ class RAGConfig:
     
     # Vector store settings
     vector_store_path: str = "/app/index"
-    embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_model_name: str = "Xenova/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dimension: int = 384
     
     # Retrieval settings
@@ -96,7 +96,7 @@ class RAGConfig:
     cache_ttl: int = 3600
     
     # Hybrid search settings
-    enable_hybrid_search: bool = True
+    enable_hybrid_search: bool = False
     
     # Web Search settings
     google_search_api_key: str = ""
@@ -110,10 +110,10 @@ class RAGConfig:
     enable_hive_mind: bool = True
     
     # Retrieval flags
-    enable_local_retrieval: bool = True
+    enable_local_retrieval: bool = False
     
     # Organization context
-    organization_name: str = "Daytona"
+    organization_name: str = "TASK"
     organization_location: str = "Global"
     
     # Fallback provider configuration (NEW)
@@ -329,8 +329,8 @@ class RAGConfig:
             ) or "/app/index",
             embedding_model_name=os.getenv(
                 "DAYTONA_RAG_EMBEDDING_MODEL",
-                "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-            ) or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                "Xenova/paraphrase-multilingual-MiniLM-L12-v2"
+            ) or "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
             embedding_dimension=get_env_int("DAYTONA_RAG_EMBEDDING_DIMENSION", 384),
             
             # Retrieval settings

@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS Sarvam - Real-time Testing</title>
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a25;
+            --text-primary: #ffffff;
+            --text-secondary: #8b8b9b;
+            --accent: #22c55e;
+            --accent-glow: rgba(34, 197, 94, 0.3);
+            --success: #22c55e;
+            --error: #ef4444;
+            --border: #2a2a35;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            transition: all 0.3s;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+        }
+
+        .status-dot.streaming {
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        textarea,
+        input,
+        select {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        textarea:focus,
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+
+        .metric {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .log-container {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .log-entry {
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+        }
+
+        .log-info {
+            color: #60a5fa;
+        }
+
+        .log-success {
+            color: var(--success);
+        }
+
+        .log-error {
+            color: var(--error);
+        }
+
+        .log-audio {
+            color: #a78bfa;
+        }
+
+        .audio-player-container {
+            margin-top: 1rem;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+
+        .waveform {
+            height: 60px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            overflow: hidden;
+            padding: 0 1rem;
+        }
+
+        .waveform-bar {
+            width: 3px;
+            background: linear-gradient(to top, #22c55e, #10b981);
+            border-radius: 2px;
+            transition: height 0.1s;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎤 TTS Sarvam</h1>
+        <p class="subtitle">Ultra-low latency real-time Text-to-Speech testing</p>
+
+        <!-- Connection Status -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <span class="status-dot" id="statusDot"></span>
+                    Connection Status
+                </span>
+                <span id="connectionInfo" style="color: var(--text-secondary); font-size: 0.875rem;">Disconnected</span>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="connectBtn" onclick="connect()">
+                    <span>⚡</span> Connect
+                </button>
+                <button class="btn btn-secondary" id="disconnectBtn" onclick="disconnect()" disabled>
+                    Disconnect
+                </button>
+            </div>
+        </div>
+
+        <!-- Text Input -->
+        <div class="card">
+            <div class="card-title" style="margin-bottom: 1rem;">⚙️ Configuration</div>
+            <div class="input-group">
+                <label for="voiceInput">Speaker ID</label>
+                <input type="text" id="voiceInput" placeholder="aditya" value="aditya">
+            </div>
+
+            <div class="card-title" style="margin-bottom: 1rem; margin-top: 1.5rem;">📝 Text Input</div>
+            <div class="input-group">
+                <label for="textInput">Enter text to synthesize</label>
+                <textarea id="textInput"
+                    placeholder="Hello, I am Sarvam, your ultra-fast text-to-speech assistant. I can synthesize speech with incredibly low latency, making real-time conversations feel natural and responsive."></textarea>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="synthesizeBtn" onclick="synthesize()" disabled>
+                    <span>🎵</span> Synthesize
+                </button>
+                <button class="btn btn-secondary" onclick="streamText()" disabled id="streamBtn">
+                    <span>🔄</span> Stream Chunks
+                </button>
+                <button class="btn btn-secondary" onclick="clearAll()">
+                    Clear
+                </button>
+            </div>
+        </div>
+
+        <!-- Audio Output -->
+        <div class="card">
+            <div class="card-title" style="margin-bottom: 1rem;">🔊 Audio Output</div>
+            <div class="waveform" id="waveform">
+                <!-- Waveform bars will be generated dynamically -->
+            </div>
+            <div class="audio-player-container">
+                <audio id="audioPlayer" controls></audio>
+            </div>
+        </div>
+
+        <!-- Metrics -->
+        <div class="card">
+            <div class="card-title" style="margin-bottom: 1rem;">📊 Performance Metrics</div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-value" id="firstChunkLatency">--</div>
+                    <div class="metric-label">First Chunk (ms)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value" id="chunksReceived">0</div>
+                    <div class="metric-label">Chunks</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value" id="totalBytes">0</div>
+                    <div class="metric-label">Bytes</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value" id="totalTime">--</div>
+                    <div class="metric-label">Total Time (ms)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">📋 Logs</span>
+                <button class="btn btn-secondary" onclick="clearLogs()"
+                    style="padding: 0.5rem 1rem; font-size: 0.875rem;">Clear</button>
+            </div>
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let ws = null;
+        let audioContext = null;
+        let isConnected = false;
+        let sessionId = null;
+        let contextId = null;
+
+        // Audio processing state
+        let audioQueue = [];
+        let isPlaying = false;
+        let nextPlayTime = 0;
+        let totalBytes = 0;
+        let chunkCount = 0;
+
+        // DOM elements
+        const statusDot = document.getElementById('statusDot');
+        const connectionInfo = document.getElementById('connectionInfo');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const synthesizeBtn = document.getElementById('synthesizeBtn');
+        const streamBtn = document.getElementById('streamBtn');
+        const textInput = document.getElementById('textInput');
+        const audioPlayer = document.getElementById('audioPlayer');
+
+        // Generate waveform bars
+        const waveform = document.getElementById('waveform');
+        for (let i = 0; i < 50; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'waveform-bar';
+            bar.style.height = '4px';
+            waveform.appendChild(bar);
+        }
+        const waveformBars = document.querySelectorAll('.waveform-bar');
+
+        function log(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${message}</span>`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+        }
+
+        function updateUI(connected) {
+            isConnected = connected;
+            statusDot.className = 'status-dot' + (connected ? ' connected' : '');
+            connectionInfo.textContent = connected ? `Connected (${sessionId?.substring(0, 8)}...)` : 'Disconnected';
+            connectBtn.disabled = connected;
+            disconnectBtn.disabled = !connected;
+            synthesizeBtn.disabled = !connected;
+            streamBtn.disabled = !connected;
+        }
+
+        function resetMetrics() {
+            document.getElementById('firstChunkLatency').textContent = '--';
+            document.getElementById('chunksReceived').textContent = '0';
+            document.getElementById('totalBytes').textContent = '0';
+            document.getElementById('totalTime').textContent = '--';
+
+            // Internal state reset
+            totalBytes = 0;
+            chunkCount = 0;
+            audioQueue = [];
+            nextPlayTime = 0;
+        }
+
+        async function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+            return audioContext;
+        }
+
+        function animateWaveform(active) {
+            if (active) {
+                statusDot.className = 'status-dot streaming';
+                waveformBars.forEach(bar => {
+                    const animate = () => {
+                        if (statusDot.classList.contains('streaming')) {
+                            bar.style.height = `${Math.random() * 50 + 5}px`;
+                            setTimeout(animate, 100);
+                        } else {
+                            bar.style.height = '4px';
+                        }
+                    };
+                    animate();
+                });
+            } else {
+                statusDot.className = 'status-dot connected';
+            }
+        }
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // Detect current prefix (e.g., /tts)
+            const pathPrefix = window.location.pathname.startsWith('/tts') ? '/tts' : '';
+            const wsUrl = `${protocol}//${window.location.host}${pathPrefix}/api/v1/stream`;
+
+            log(`Connecting to ${wsUrl}...`, 'info');
+
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = async () => {
+                    log('WebSocket connected', 'success');
+                    await initAudio();
+                };
+
+                ws.onmessage = async (event) => {
+                    if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
+                        // Handle Binary Audio Chunk (as requested)
+                        const arrayBuffer = event.data instanceof Blob ?
+                            await event.data.arrayBuffer() : event.data;
+
+                        // Process the binary chunk as raw PCM f32le
+                        await queueAudioChunkFromBuffer(arrayBuffer);
+
+                        chunkCount++;
+                        totalBytes += arrayBuffer.byteLength;
+                        document.getElementById('chunksReceived').textContent = chunkCount;
+                        document.getElementById('totalBytes').textContent = totalBytes;
+                    } else {
+                        // Handle JSON metadata
+                        const data = JSON.parse(event.data);
+                        handleMessage(data);
+                    }
+                };
+
+                ws.onclose = (event) => {
+                    log(`WebSocket closed: ${event.code}`, 'info');
+                    updateUI(false);
+                    animateWaveform(false);
+                };
+
+                ws.onerror = (error) => {
+                    log(`WebSocket error: ${error}`, 'error');
+                };
+
+            } catch (error) {
+                log(`Connection error: ${error}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            updateUI(false);
+            log('Disconnected', 'info');
+        }
+
+        function handleMessage(data) {
+            switch (data.type) {
+                case 'connected':
+                    sessionId = data.session_id;
+                    contextId = data.context_id;
+                    updateUI(true);
+                    log(`Session started: ${sessionId}`, 'success');
+                    log(`Model: ${data.model}, Voice: ${data.voice_id}`, 'info');
+                    break;
+
+                case 'prewarm_done':
+                    log('Prewarm complete', 'success');
+                    break;
+
+                case 'audio':
+                    const audioB64 = data.data;
+                    if (audioB64) {
+                        const binary = atob(audioB64);
+                        const bytes = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) {
+                            bytes[i] = binary.charCodeAt(i);
+                        }
+
+                        queueAudioChunk(bytes, data.sample_rate);
+
+                        chunkCount++;
+                        totalBytes += bytes.length;
+                        document.getElementById('chunksReceived').textContent = chunkCount;
+                        document.getElementById('totalBytes').textContent = totalBytes;
+
+                        log(`Audio chunk ${data.chunk_index}: ${bytes.length} bytes received`, 'audio');
+                    }
+                    break;
+
+                case 'complete':
+                    animateWaveform(false);
+
+                    if (data.first_chunk_latency_ms) {
+                        document.getElementById('firstChunkLatency').textContent = Math.round(data.first_chunk_latency_ms);
+                    }
+                    if (data.total_time_ms) {
+                        document.getElementById('totalTime').textContent = Math.round(data.total_time_ms);
+                    }
+
+                    log(`Synthesis complete: ${data.chunks} chunks, ${data.total_bytes} bytes`, 'success');
+                    break;
+
+                case 'error':
+                    log(`Error: ${data.message}`, 'error');
+                    animateWaveform(false);
+                    break;
+
+                case 'ping':
+                    ws.send(JSON.stringify({ type: 'pong' }));
+                    break;
+            }
+        }
+
+        async function queueAudioChunkFromBuffer(arrayBuffer) {
+            const context = await initAudio();
+            const sampleRate = 24000; // Sarvam returns 24000 for bulbul:v3-beta
+
+            // 1. HD Audio: 32-bit Float Support
+            // If the server is configured for pcm_f32le, we read the buffer directly as Float32.
+            const float32Array = new Float32Array(arrayBuffer);
+
+            // 2. Create Buffer and Source
+            const audioBuffer = context.createBuffer(1, float32Array.length, sampleRate);
+            audioBuffer.getChannelData(0).set(float32Array);
+
+            const source = context.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(context.destination);
+
+            // 3. Schedule playback back-to-back (Gapless Stitching)
+            const startTime = Math.max(context.currentTime, nextPlayTime);
+            source.start(startTime);
+
+            nextPlayTime = startTime + audioBuffer.duration;
+
+            if (chunkCount % 10 === 0) log(`Queued HD Chunk, next start: ${nextPlayTime.toFixed(2)}s`, 'audio');
+        }
+
+        async function synthesize() {
+            await initAudio();
+            const text = textInput.value.trim();
+            const voiceId = document.getElementById('voiceInput').value.trim();
+
+            if (!text) {
+                log('Please enter text to synthesize', 'error');
+                return;
+            }
+
+            resetMetrics();
+            animateWaveform(true);
+
+            log(`Synthesizing HD with voice: ${voiceId}`, 'info');
+
+            ws.send(JSON.stringify({
+                type: 'synthesize',
+                text: text,
+                voice: voiceId
+            }));
+        }
+
+        async function streamText() {
+            await initAudio();
+            const text = textInput.value.trim();
+            const voiceId = document.getElementById('voiceInput').value.trim();
+
+            if (!text) {
+                log('Please enter text to stream', 'error');
+                return;
+            }
+
+            resetMetrics();
+            animateWaveform(true);
+
+            const words = text.split(' ');
+            const chunkSize = 10;
+
+            log(`Streaming HD in chunks with voice: ${voiceId}...`, 'info');
+
+            let i = 0;
+            const sendChunk = () => {
+                if (i < words.length) {
+                    const chunk = words.slice(i, i + chunkSize).join(' ');
+                    ws.send(JSON.stringify({
+                        type: 'stream_chunk',
+                        text: chunk + ' ',
+                        voice: voiceId
+                    }));
+                    i += chunkSize;
+                    setTimeout(sendChunk, 100);
+                } else {
+                    ws.send(JSON.stringify({ type: 'stream_end' }));
+                }
+            };
+
+            sendChunk();
+        }
+
+        function clearAll() {
+            textInput.value = '';
+            resetMetrics();
+            animateWaveform(false);
+            log('Cleared', 'info');
+        }
+
+        // Initialize with default text
+        textInput.value = "Hello, I am Sarvam, your ultra-fast text-to-speech assistant. I can synthesize speech with incredibly low latency, making real-time conversations feel natural and responsive.";
+    </script>
+</body>
+
+</html>
