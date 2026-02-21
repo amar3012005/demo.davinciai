@@ -106,9 +106,9 @@ class SarvamConnection:
                 self.state = ConnectionState.CONNECTING
                 
                 # Add headers for API Key
-                extra_headers = {}
+                additional_headers = {}
                 if self.config.api_key:
-                    extra_headers["Api-Subscription-Key"] = self.config.api_key
+                    additional_headers["Api-Subscription-Key"] = self.config.api_key
                 
                 async with websockets.connect(
                     ws_url,
@@ -116,7 +116,7 @@ class SarvamConnection:
                     ping_timeout=self.config.ping_timeout_seconds,
                     max_size=10_000_000,
                     close_timeout=5,
-                    extra_headers=extra_headers
+                    additional_headers=additional_headers
                 ) as ws:
                     self.ws = ws
                     self.state = ConnectionState.CONNECTED
