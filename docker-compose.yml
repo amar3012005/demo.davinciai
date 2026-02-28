@@ -1,5 +1,5 @@
 # Coolify-compatible TARA Optimized Service
-# This file is designed to be used with Coolify deployment
+# Domain: demo.davinciai.eu | Orchestrator WSS exposed on port 8010
 # Place this in /data/coolify/services/<service-id>/docker-compose.yml
 
 services:
@@ -35,9 +35,11 @@ services:
       dockerfile: Dockerfile
     volumes:
       - tara_optimized_rag_index:/app/index
+      - /etc/letsencrypt/live/rag.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/rag.demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
       COOLIFY_CONTAINER_NAME: rag-tara-optimized
-    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 5001"
+    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 5001 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
     networks:
       tara-optimized: null
     restart: unless-stopped
@@ -58,11 +60,14 @@ services:
     build:
       context: ./stt_sarvam
       dockerfile: Dockerfile
+    volumes:
+      - /etc/letsencrypt/live/stt.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/stt.demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
       COOLIFY_CONTAINER_NAME: stt-tara-optimized
-    command: "uvicorn app:app --host 0.0.0.0 --port 5002"
+    command: "uvicorn app:app --host 0.0.0.0 --port 5002 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5002/health', timeout=5)" ]
+      test: [ "CMD", "python", "-c", "import urllib.request, ssl; ctx = ssl._create_unverified_context(); urllib.request.urlopen('https://localhost:5002/health', timeout=5, context=ctx)" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -103,16 +108,21 @@ services:
     env_file:
       - .env
 
-  # Orchestrator (Port 5004)
+  # Orchestrator (Port 5004 internal → 8010 external with SSL for WSS)
   orchestrator:
     build:
       context: ./orchestra_daytona.v2
       dockerfile: Dockerfile
     ports:
-      - "8010:5004" # Expose external port 8010 mapped to internal 5004
+      - "8010:5004" # External WSS port mapped to internal 5004
+    volumes:
+      - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
       COOLIFY_CONTAINER_NAME: orchestrator-tara-optimized
-    command: "uvicorn app:app --host 0.0.0.0 --port 5004 --ws-ping-interval 0"
+      PUBLIC_URL: "https://demo.davinciai.eu:8010"
+      ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8010/ws"
+    command: "uvicorn app:app --host 0.0.0.0 --port 5004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0"
     networks:
       tara-optimized: null
     restart: unless-stopped
@@ -123,8 +133,12 @@ services:
       - coolify.service.subType=application
       - coolify.service.subName=orchestrator
       - traefik.enable=true
-      - traefik.http.routers.orchestrator.rule=Host(`tara.daytona.io`)
-      - traefik.http.services.orchestrator.loadbalancer.server.port=5004
+      - traefik.http.middlewares.gzip.compress=true
+      - traefik.http.routers.orchestrator-https.entryPoints=https
+      - traefik.http.routers.orchestrator-https.rule=Host(`demo.davinciai.eu`)
+      - traefik.http.routers.orchestrator-https.tls=true
+      - traefik.http.services.orchestrator-https.loadbalancer.server.port=5004
+      - traefik.http.services.orchestrator-https.loadbalancer.server.scheme=https
     env_file:
       - .env
 
