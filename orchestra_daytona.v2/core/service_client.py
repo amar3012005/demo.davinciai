@@ -636,6 +636,10 @@ class RAGClient:
                                         yield token
                                     
                                     if is_final:
+                                        # Yield llm_usage metadata if present in the final chunk
+                                        llm_usage = data.get("llm_usage")
+                                        if llm_usage:
+                                            yield {"__llm_usage__": llm_usage}
                                         logger.debug(f"RAG streaming marked as final")
                                 except json.JSONDecodeError as e:
                                     logger.error(f"RAG JSON parse error: {e} for line: {line_str}")

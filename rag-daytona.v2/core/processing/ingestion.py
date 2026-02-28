@@ -62,7 +62,7 @@ class IngestionService:
                 vectors_config=models.VectorParams(size=dimension, distance=models.Distance.COSINE)
             )
 
-    async def ingest_file(self, file: UploadFile, doc_type: str = "General", topics: str = "", tenant_id: str = "demo") -> Dict[str, Any]:
+    async def ingest_file(self, file: UploadFile, doc_type: str = "General", topics: str = "", tenant_id: str = "tara") -> Dict[str, Any]:
         """
         Process an uploaded file and ingest into Qdrant using Universal Schema.
         """

@@ -239,7 +239,7 @@ class VisualOrchestrator:
 
         # Since orchestrate doesn't have current_url, let's assume it's explorer unless hints found
         if self.qdrant:
-            map_hints = await self.get_navigation_hints(query, "demo")
+            map_hints = await self.get_navigation_hints(query, "tara")
             if map_hints:
                 mission_mode = "MIND (Using pre-indexed site map)"
 
@@ -340,7 +340,7 @@ class VisualOrchestrator:
         except Exception as e:
             logger.error(f"Action stream failed: {e}")
 
-    async def plan_next_step(self, goal: str, dom_context: list, step_number: int, warning_message: str = "", current_url: str = "", last_action: str = "", map_hints: str = "", client_id: str = "demo", action_history: list = None, dom_diff: str = "", conversation_history: str = "") -> dict:
+    async def plan_next_step(self, goal: str, dom_context: list, step_number: int, warning_message: str = "", current_url: str = "", last_action: str = "", map_hints: str = "", client_id: str = "tara", action_history: list = None, dom_diff: str = "", conversation_history: str = "") -> dict:
         """Determines the next action in a mission loop with optional map hints."""
         # Optimized DOM representation for token savings
         dom_str = self._get_compact_dom(dom_context, limit=300)

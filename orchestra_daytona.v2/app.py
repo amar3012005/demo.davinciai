@@ -723,6 +723,13 @@ async def get_config():
             "name": config.organization.name,
             "full_name": config.organization.full_name
         },
+        "agent": {
+            "name": config.agent.name,
+            "id": config.agent.id,
+            "tenant_id": config.agent.tenant_id,
+            "wss_url": config.agent.wss_url,
+            "public_url": config.agent.public_url
+        },
         "languages": {
             "default": config.languages.default,
             "supported": config.languages.supported,
@@ -735,12 +742,10 @@ async def get_config():
             },
             "tts": {
                 "url": config.services.tts.url,
-                "type": config.services.tts.type,
-                "streaming_mode": config.services.tts.streaming_mode
+                "type": config.services.tts.type
             },
             "rag": {
-                "url": config.services.rag.url,
-                "top_k": config.services.rag.top_k
+                "url": config.services.rag.url
             }
         }
     }
@@ -857,7 +862,7 @@ async def proxy_rag_retrieve(request: Request):
 
 
 @app.delete("/api/v1/skills/{point_id}")
-async def proxy_rag_skill_delete(point_id: str, tenant_id: str = "demo"):
+async def proxy_rag_skill_delete(point_id: str, tenant_id: str = "tara"):
     """Proxy skill/rule deletions from the visualizer."""
     if not config:
         return JSONResponse({"error": "Configuration not loaded"}, status_code=503)

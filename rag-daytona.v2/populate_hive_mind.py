@@ -117,7 +117,7 @@ def parse_and_ingest(file_path):
                 url = parts[1].strip()
                 current_pillar_url = url
                 current_context = "Main Section"
-                upsert_point("demo", url, "Engel & Völkers - Main Section", "engelvoelkers.com")
+                upsert_point("tara", url, "Engel & Völkers - Main Section", "engelvoelkers.com")
                 count += 1
                 continue
         
@@ -136,7 +136,7 @@ def parse_and_ingest(file_path):
             if "immobilien" in url:
                  concept += " Real Estate Property Search."
             
-            success = upsert_point("demo", url, concept, "engelvoelkers.com")
+            success = upsert_point("tara", url, concept, "engelvoelkers.com")
             if success:
                 count += 1
                 

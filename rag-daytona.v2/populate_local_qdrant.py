@@ -191,7 +191,7 @@ async def populate():
             payload = case_memory_payload(
                 issue=case['issue'],
                 solution=case['solution'],
-                tenant_id="demo",
+                tenant_id="tara",
                 issue_type=case.get('issue_type', 'general'),
             )
             # Add extra legacy fields

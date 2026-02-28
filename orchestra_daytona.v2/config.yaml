@@ -11,6 +11,13 @@ organization:
   full_name: "TASK"
   knowledge_base_path: "/home/prometheus/daytona_agent/daytona_knowledge_base"
 
+agent:
+  name: "TARA"
+  id: "tara"
+  tenant_id: "tara"
+  wss_url: "ws://localhost:8004/ws"
+  public_url: "http://localhost:8004"
+
 languages:
   default: "en"
   supported:

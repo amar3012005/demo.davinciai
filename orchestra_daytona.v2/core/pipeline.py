@@ -113,6 +113,7 @@ class ProcessingPipeline:
             # Use streaming RAG if available
             token_count = 0
             full_answer = []
+            llm_usage = {}  # Capture LLM usage metadata
             async for token in self.rag_client.query_streaming(
                 query=query,
                 session_id=session_id,
@@ -123,6 +124,12 @@ class ProcessingPipeline:
                 base_url=rag_url,
                 tenant_id=tenant_id
             ):
+                # Check for llm_usage metadata dict from service_client
+                if isinstance(token, dict) and "__llm_usage__" in token:
+                    llm_usage = token["__llm_usage__"]
+                    logger.info(f"[{session_id}] 📊 LLM Usage: {llm_usage.get('prompt_tokens', 0)} prompt / {llm_usage.get('completion_tokens', 0)} completion ({llm_usage.get('model', 'unknown')})")
+                    continue
+                    
                 token_count += 1
                 full_answer.append(token)
                 logger.debug(f"[{session_id}] 📝 Pipeline received token {token_count}: '{token}'")
@@ -136,7 +143,7 @@ class ProcessingPipeline:
             complete_answer = "".join(full_answer)
             logger.info(f"[{session_id}] ✅ RAG streaming complete: {token_count} tokens | Response: {complete_answer[:100]}...")
             
-            # Signal completion
+            # Signal completion with usage metadata
             duration_ms = (time.time() - start_time) * 1000
             logger.info(f"[{session_id}] ✅ Pipeline complete | Language: {language} | Duration: {duration_ms:.0f}ms")
             
@@ -145,7 +152,8 @@ class ProcessingPipeline:
                 "language": language,
                 "is_final": True,
                 "timestamp": time.time(),
-                "duration_ms": duration_ms
+                "duration_ms": duration_ms,
+                "llm_usage": llm_usage
             }
         
         except Exception as e:

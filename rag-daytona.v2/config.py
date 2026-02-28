@@ -106,7 +106,7 @@ class RAGConfig:
     # Qdrant Memory (Hive Mind)
     qdrant_url: Optional[str] = None
     qdrant_api_key: Optional[str] = None
-    qdrant_collection: str = "tara_case_memory"
+    qdrant_collection: str = "tara_hive"
     enable_hive_mind: bool = True
     
     # Retrieval flags
@@ -114,7 +114,7 @@ class RAGConfig:
     
     # Organization context
     organization_name: str = "TASK"
-    organization_location: str = "Global"
+    organization_location: str = "Telangana"
     
     # Fallback provider configuration (NEW)
     enable_llm_fallback: bool = False
@@ -123,8 +123,8 @@ class RAGConfig:
     fallback_llm_model: Optional[str] = None
     
     # OpenRouter specific settings
-    openrouter_site_url: str = "https://tara.daytona.io"
-    openrouter_app_name: str = "TARA-Daytona"
+    openrouter_site_url: str = "https://tara.davinciai.eu"
+    openrouter_app_name: str = "TARA"
     openrouter_enable_reasoning: bool = False
     
     # Logging
@@ -365,7 +365,7 @@ class RAGConfig:
             # Qdrant settings (Hive Mind)
             qdrant_url=os.getenv("DAYTONA_RAG_QDRANT_URL") or os.getenv("QDRANT_URL", "").strip() or None,
             qdrant_api_key=os.getenv("DAYTONA_RAG_QDRANT_API_KEY") or os.getenv("QDRANT_API_KEY", "").strip() or None,
-            qdrant_collection=os.getenv("DAYTONA_RAG_QDRANT_COLLECTION") or os.getenv("QDRANT_COLLECTION", "tara_case_memory").strip(),
+            qdrant_collection=os.getenv("DAYTONA_RAG_QDRANT_COLLECTION") or os.getenv("QDRANT_COLLECTION", "tara_hive").strip(),
             enable_hive_mind=get_env_bool("DAYTONA_RAG_ENABLE_HIVE_MIND", get_env_bool("ENABLE_HIVE_MIND", True)),
             
             # Local retrieval flag

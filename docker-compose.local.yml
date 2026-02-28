@@ -24,7 +24,7 @@ services:
       # LLM Configuration
       LLM_PROVIDER: groq
       LLM_API_KEY: ${LLM_API_KEY:-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}
-      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
       ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
 
       # Ultimate TARA - Mind Reader
@@ -48,7 +48,9 @@ services:
 
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      TENANT_ID: ${TENANT_ID:-demo}
+      TENANT_ID: ${TENANT_ID:-tara}
+      DAYTONA_RAG_ENABLE_CACHE: "false"
+      DAYTONA_RAG_CACHE_TTL: "0"
       LIVE_GRAPH_SCAN_PATH: /app/daytona_agent/services/orchestra_daytona.v2/live_graph_scan.md
 
       # Model cache - use local files only (no HuggingFace network calls)
@@ -166,7 +168,7 @@ services:
       # Features
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
       FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-https://cal.com/amar-nadig-uy2g3b/30min}
-      TENANT_ID: ${TENANT_ID:-demo}
+      TENANT_ID: ${TENANT_ID:-tara}
 
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

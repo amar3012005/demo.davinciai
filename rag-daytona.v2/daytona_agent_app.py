@@ -47,7 +47,7 @@ class QueryRequest(BaseModel):
     enable_streaming: Optional[bool] = Field(None, description="Enable streaming response")
     history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history for context-aware responses")
     language: Optional[str] = Field("english", description="Response language: 'english' or 'german'")
-    tenant_id: Optional[str] = Field("demo", description="Tenant/Agent identifier for cache isolation")
+    tenant_id: Optional[str] = Field("tara", description="Tenant/Agent identifier for cache isolation")
 
 
 class QueryResponse(BaseModel):
@@ -87,7 +87,7 @@ class SaveCaseRequest(BaseModel):
     issue: Optional[str] = Field(None, description="The problem that was resolved")
     solution: Optional[str] = Field(None, description="How the problem was solved")
     history_context: Optional[str] = Field(None, description="Conversation history to distill")
-    tenant_id: str = Field("demo", description="Tenant identifier")
+    tenant_id: str = Field("tara", description="Tenant identifier")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
 
 
@@ -888,7 +888,7 @@ class HiveMindVisualizationResponse(BaseModel):
 
 
 @app.get("/api/v1/hive-mind/visualize", response_model=HiveMindVisualizationResponse)
-async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_id: str = "demo"):
+async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_id: str = "tara"):
     """
     Fetch Hive Mind vectors and reduce to 2D for visualization.
     

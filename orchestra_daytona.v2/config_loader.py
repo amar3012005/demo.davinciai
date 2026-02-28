@@ -103,15 +103,25 @@ class LanguageConfig:
 
 
 @dataclass
+class AgentConfig:
+    """Agent identity and ground truth configuration"""
+    name: str = "TARA"
+    id: str = "tara"
+    tenant_id: str = "tara"
+    wss_url: str = "ws://localhost:8004/ws"
+    public_url: str = "http://localhost:8004"
+
+
+@dataclass
 class OrganizationConfig:
     """Organization configuration"""
-    name: str = "General Agent"
-    full_name: str = "DaVinci AI Assistant"
+    name: str = "TASK"
+    full_name: str = "TASK"
     knowledge_base_path: str = ""
     # Identity (Env Var Overrides)
-    agent_id: str = "agent-demo-001"
-    agent_name: str = "demo"
-    tenant_id: str = "5fc3fa72-d15d-48dc-812c-5c845b5172eb"
+    agent_id: str = "tara"
+    agent_name: str = "tara"
+    tenant_id: str = "tara"
     # Integrations
     fsm_appointment_url: str = ""
     orchestrator_ws_url: str = ""
@@ -140,6 +150,7 @@ class OrchestratorConfig:
     """Complete configuration for the Orchestrator"""
     server: ServerConfig = field(default_factory=ServerConfig)
     organization: OrganizationConfig = field(default_factory=OrganizationConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)
     languages: LanguageConfig = field(default_factory=LanguageConfig)
     services: ServicesConfig = field(default_factory=ServicesConfig)
     dialogue: Dict[str, Dict[str, List[Dict[str, Any]]]] = field(default_factory=dict)
@@ -214,16 +225,27 @@ class ConfigLoader:
         if "organization" in data:
             org_data = data["organization"]
             config.organization = OrganizationConfig(
-                name=os.getenv("ORGANIZATION_NAME", org_data.get("name", "General Agent")),
-                full_name=os.getenv("ORGANIZATION_FULL_NAME", org_data.get("full_name", "DaVinci AI Assistant")),
+                name=os.getenv("ORGANIZATION_NAME", org_data.get("name", "TASK")),
+                full_name=os.getenv("ORGANIZATION_FULL_NAME", org_data.get("full_name", "TASK")),
                 knowledge_base_path=os.getenv("KNOWLEDGE_BASE_PATH", org_data.get("knowledge_base_path", "")),
                 # New identity fields with env overrides
-                agent_id=os.getenv("AGENT_ID", org_data.get("agent_id", "davinci-demo-agent-001")),
-                agent_name=os.getenv("AGENT_NAME", org_data.get("agent_name", "demo")),
-                tenant_id=os.getenv("TENANT_ID", org_data.get("tenant_id", "5fc3fa72-d15d-48dc-812c-5c845b5172eb")),
+                agent_id=os.getenv("AGENT_ID", org_data.get("agent_id", "tara")),
+                agent_name=os.getenv("AGENT_NAME", org_data.get("agent_name", "tara")),
+                tenant_id=os.getenv("TENANT_ID", org_data.get("tenant_id", "tara")),
                 # Integrations
                 fsm_appointment_url=os.getenv("FSM_APPOINTMENT_URL", org_data.get("fsm_appointment_url", "")),
                 orchestrator_ws_url=os.getenv("ORCHESTRATOR_WS_URL", org_data.get("orchestrator_ws_url", ""))
+            )
+
+        # Agent ground truth config (with env var overrides)
+        if "agent" in data:
+            agent_data = data["agent"]
+            config.agent = AgentConfig(
+                name=os.getenv("AGENT_NAME", agent_data.get("name", "TARA")),
+                id=os.getenv("AGENT_ID", agent_data.get("id", "tara")),
+                tenant_id=os.getenv("TENANT_ID", agent_data.get("tenant_id", "tara")),
+                wss_url=os.getenv("WIDGET_WS_URL", agent_data.get("wss_url", os.getenv("ORCHESTRATOR_WS_URL", ""))),
+                public_url=os.getenv("PUBLIC_URL", agent_data.get("public_url", ""))
             )
         
         # Language config (with env var overrides)

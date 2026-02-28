@@ -152,7 +152,7 @@ class QdrantAddon:
                     issue: str, 
                     solution: str, 
                     vector: List[float],
-                    tenant_id: str = "demo",
+                    tenant_id: str = "tara",
                     domain: Optional[str] = None,
                     metadata: Optional[Dict] = None):
         """
@@ -188,7 +188,7 @@ class QdrantAddon:
         except Exception as e:
             logger.error(f"Failed to upsert case: {e}")
 
-    async def search_hive_mind(self, query_vector: List[float], tenant_id: str = "demo", domain: Optional[str] = None, limit: int = 3, score_threshold: float = 0.4) -> List[Dict]:
+    async def search_hive_mind(self, query_vector: List[float], tenant_id: str = "tara", domain: Optional[str] = None, limit: int = 3, score_threshold: float = 0.4) -> List[Dict]:
         """
         Search GLOBAL memory (Hive Mind) for similar issues within the same tenant and domain.
         Returns list of solutions.
@@ -257,7 +257,7 @@ class QdrantAddon:
             logger.error(f"Hive Mind search failed: {e}")
             return []
     
-    async def check_domain_has_knowledge(self, domain: str, tenant_id: str = "demo") -> bool:
+    async def check_domain_has_knowledge(self, domain: str, tenant_id: str = "tara") -> bool:
         """
         Check if HiveMind has any knowledge for a specific domain.
         Used to determine MAPPED vs EXPLORER mode.
@@ -303,7 +303,7 @@ class QdrantAddon:
     async def search_skills_and_rules(
         self,
         query_vector: List[float],
-        tenant_id: str = "demo",
+        tenant_id: str = "tara",
         topic: Optional[str] = None,
         limit: int = 5,
         score_threshold: float = 0.35
@@ -394,7 +394,7 @@ class QdrantAddon:
             logger.error(f"Skills/rules search failed: {e}")
             return {"skills": [], "rules": []}
 
-    async def search_user_history(self, user_id: str, query_vector: List[float], tenant_id: str = "demo", limit: int = 3) -> List[Dict]:
+    async def search_user_history(self, user_id: str, query_vector: List[float], tenant_id: str = "tara", limit: int = 3) -> List[Dict]:
         """
         Search PERSONAL memory for recall within the same tenant.
         """
@@ -457,7 +457,7 @@ class QdrantAddon:
             pass
         return []
 
-    async def delete_user_memory(self, user_id: str, tenant_id: str = "demo"):
+    async def delete_user_memory(self, user_id: str, tenant_id: str = "tara"):
         """GDPR Compliance: Delete all vectors for a user within a tenant."""
         if not self.enabled: return
         
@@ -486,7 +486,7 @@ class QdrantAddon:
     async def search_unified_memory(
         self,
         query_vector: List[float],
-        tenant_id: str = "demo",
+        tenant_id: str = "tara",
         doc_types: Optional[List[str]] = None,
         limit: int = 10,
         score_threshold: float = 0.4

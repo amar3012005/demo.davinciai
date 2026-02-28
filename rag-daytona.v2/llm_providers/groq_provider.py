@@ -19,6 +19,10 @@ class GroqProvider(LLMProvider):
     
     _client_instance: Optional[AsyncGroq] = None
 
+    @staticmethod
+    def _is_gpt_oss(model_name: str) -> bool:
+        return "gpt-oss" in (model_name or "").lower()
+
     def initialize(self) -> bool:
         """Initialize Groq async client."""
         try:
@@ -76,14 +80,26 @@ class GroqProvider(LLMProvider):
                 extra_args["response_format"] = response_format
                 
             model = kwargs.pop("model", self.model_name)
-            chat_completion = await self._client.chat.completions.create(
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **extra_args,
-                **kwargs
-            )
+            if self._is_gpt_oss(model):
+                chat_completion = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_completion_tokens=max_tokens,
+                    reasoning_effort=kwargs.pop("reasoning_effort", "low"),
+                    include_reasoning=kwargs.pop("include_reasoning", False),
+                    **extra_args,
+                    **kwargs
+                )
+            else:
+                chat_completion = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **extra_args,
+                    **kwargs
+                )
             return chat_completion.choices[0].message.content
         except Exception as e:
             logger.error(f"Groq message generation error: {e}")
@@ -245,14 +261,33 @@ class GroqProvider(LLMProvider):
             model = kwargs.pop("model", self.model_name)
             
             # Intelligent splitting for Zoned XML Architecture
+            # Support both old <system_configuration> and new <zone_a_system_configuration> tags
             messages = []
-            if "<system_configuration>" in prompt:
+            if "<zone_a_system_configuration>" in prompt:
+                try:
+                    parts = prompt.split("</zone_a_system_configuration>")
+                    system_content = parts[0].replace("<zone_a_system_configuration>", "").strip()
+                    user_content = parts[1].strip()
+                    
+                    if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
+                        if "json" not in system_content.lower():
+                            system_content += "\nRespond in json format."
+                        if "json" not in user_content.lower():
+                            user_content += "\nRespond in json format."
+
+                    messages = [
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": user_content}
+                    ]
+                    logger.debug(f"Split prompt into system ({len(system_content)} chars) + user ({len(user_content)} chars)")
+                except Exception:
+                    messages = [{"role": "user", "content": prompt}]
+            elif "<system_configuration>" in prompt:
                 try:
                     parts = prompt.split("</system_configuration>")
                     system_content = parts[0].replace("<system_configuration>", "").strip()
                     user_content = parts[1].strip()
                     
-                    # Safety net for Groq's JSON mode requirement
                     if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
                         if "json" not in system_content.lower():
                             system_content += "\nRespond in json format."
@@ -268,23 +303,46 @@ class GroqProvider(LLMProvider):
             else:
                 messages = [{"role": "user", "content": prompt}]
 
-            stream = await self._client.chat.completions.create(
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-                **kwargs
-            )
+            if self._is_gpt_oss(model):
+                stream = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_completion_tokens=max_tokens,
+                    reasoning_effort=kwargs.pop("reasoning_effort", "low"),
+                    include_reasoning=kwargs.pop("include_reasoning", False),
+                    stream=True,
+                    **kwargs
+                )
+            else:
+                stream = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                    **kwargs
+                )
             
-            # Streaming usage is trickier, usually comes in the final chunk's validation
+            # Track usage from final chunk
+            usage_info = None
             async for chunk in stream:
                 if hasattr(chunk, 'usage') and chunk.usage:
-                     logger.info(f"🧬 Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.")
+                    usage_info = {
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                        "total_tokens": chunk.usage.total_tokens,
+                        "model": model
+                    }
+                    logger.info(f"🧬 Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.")
 
                 content = chunk.choices[0].delta.content
                 if content:
                     yield content
+            
+            # Yield usage metadata as a sentinel after all text chunks
+            if usage_info:
+                yield {"__usage__": usage_info}
         except Exception as e:
             logger.error(f"Groq streaming error: {e}")
             raise

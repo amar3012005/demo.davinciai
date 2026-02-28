@@ -2165,7 +2165,7 @@ class VisualOrchestrator:
         current_url: str = "",
         last_action: str = "",
         map_hints: str = "",
-        client_id: str = "demo",
+        client_id: str = "tara",
         action_history: list = None,
         dom_diff: str = "",
         conversation_history: str = "",

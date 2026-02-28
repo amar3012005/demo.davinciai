@@ -78,7 +78,7 @@ async def ultimate_plan_next_step(
             if 'visual_orchestrator' in dir(app.state):
                 hints = await app.state.visual_orchestrator.get_navigation_hints(
                     goal=goal,
-                    client_id="demo",
+                    client_id="tara",
                     current_url=current_url
                 )
                 logger.info(f"   ✅ GPS Hints: {hints[:100] if hints else 'None'}")

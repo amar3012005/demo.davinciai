@@ -246,6 +246,31 @@ class RAGEngine:
         
         return best_match
 
+    @staticmethod
+    def _apply_prompt_budget(prompt: str, llm_model_name: str) -> str:
+        """Reduce prompt size for latency-sensitive GPT-OSS calls."""
+        model = (llm_model_name or "").lower()
+        if "gpt-oss" not in model:
+            return prompt
+
+        reduced = prompt
+        # Highest-cost section in current architecture.
+        reduced = re.sub(
+            r"<golden_examples\b[^>]*>.*?</golden_examples>",
+            "<golden_examples>omitted_for_latency_budget</golden_examples>",
+            reduced,
+            flags=re.DOTALL
+        )
+        # Keep only the latest part of history block if present.
+        history_match = re.search(r"(<conversation_history>)(.*?)(</conversation_history>)", reduced, flags=re.DOTALL)
+        if history_match:
+            body = history_match.group(2)
+            if len(body) > 1200:
+                body = "...[history trimmed for latency]...\n" + body[-1200:]
+            reduced = reduced[:history_match.start(2)] + body + reduced[history_match.end(2):]
+
+        return reduced
+
     async def _do_local_rag(self, query: str, context: Dict, boost_categories: list, max_chars: int, precomputed_embedding: Optional[np.ndarray] = None) -> tuple:
         """Helper for parallel execution of FAISS retrieval."""
         return self._retrieve_with_boosting(query, context, boost_categories, max_chars, precomputed_embedding=precomputed_embedding)
@@ -366,7 +391,7 @@ class RAGEngine:
         query: str,
         context: Optional[Dict[str, Any]] = None,
         history_context: Optional[str] = None,
-        tenant_id: str = "demo"
+        tenant_id: str = "tara"
     ) -> Dict[str, Any]:
         """
         Retrieve all relevant context (Docs, Hive Mind, Web) without generating an answer.
@@ -647,7 +672,8 @@ class RAGEngine:
         context: Optional[Dict[str, Any]] = None,
         streaming_callback: Optional[Callable[[str, bool], None]] = None,
         history_context: Optional[str] = None,
-        tenant_id: str = "demo"
+        tenant_id: str = "tara",
+        force_non_stream: bool = False
     ) -> Dict[str, Any]:
         """High-performance RAG pipeline with parallel retrieval and FAST-PATH."""
         start_time = time.time()
@@ -749,14 +775,15 @@ class RAGEngine:
 
         prompt = ContextArchitect.assemble_prompt(
             query=query_english,
+            raw_query=query,
             retrieved_docs=relevant_docs,
             history=history_list,
             hive_mind=hive_mind_state,
             user_profile=user_profile,
-            language=original_language,
             agent_skills=skill_texts,
             agent_rules=rule_texts
         )
+        prompt = self._apply_prompt_budget(prompt, str(getattr(self.config, "llm_model", "")))
         
         # 5. Generation
         gen_start = time.time()
@@ -767,12 +794,26 @@ class RAGEngine:
             # Log the full prompt for debugging 0-token issues
             logger.debug(f"DEBUG PROMPT: {prompt}")
             
-            # Note: GroqProvider might return an AsyncGenerator or Coroutine
-            result = self.llm.generate(prompt=prompt, stream=True, temperature=0.7)
+            # Force non-stream for GPT-OSS to avoid empty delta-content behavior.
+            llm_model_name = str(getattr(self.config, "llm_model", "")).lower()
+            use_stream = (not force_non_stream) and ("gpt-oss" not in llm_model_name)
+            result = self.llm.generate(
+                prompt=prompt,
+                stream=use_stream,
+                temperature=0.65,
+                max_tokens=320,
+                include_reasoning=False,
+                reasoning_effort="low"
+            )
+            llm_usage = {}  # Capture token usage from LLM provider
             
             # Handle Async Generator (Groq Async Streaming)
             if hasattr(result, '__aiter__'):
                 async for chunk in result:
+                    # Check for usage sentinel (dict with __usage__ key)
+                    if isinstance(chunk, dict) and "__usage__" in chunk:
+                        llm_usage = chunk["__usage__"]
+                        continue
                     if first_chunk_at is None: first_chunk_at = time.time()
                     text = chunk if isinstance(chunk, str) else getattr(chunk, 'text', str(chunk))
                     accumulated += text
@@ -781,6 +822,9 @@ class RAGEngine:
             # Handle Sync Generator (Gemini/OpenAI Streaming)
             elif hasattr(result, '__iter__'):
                 for chunk in result:
+                    if isinstance(chunk, dict) and "__usage__" in chunk:
+                        llm_usage = chunk["__usage__"]
+                        continue
                     if first_chunk_at is None: first_chunk_at = time.time()
                     text = chunk if isinstance(chunk, str) else getattr(chunk, 'text', str(chunk))
                     accumulated += text
@@ -810,7 +854,14 @@ class RAGEngine:
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             # Fallback (handle both sync and async)
-            fallback_result = self.llm.generate(prompt=prompt, stream=False)
+            fallback_result = self.llm.generate(
+                prompt=prompt,
+                stream=False,
+                temperature=0.65,
+                max_tokens=320,
+                include_reasoning=False,
+                reasoning_effort="low"
+            )
             if asyncio.iscoroutine(fallback_result):
                 accumulated = await fallback_result
             else:
@@ -847,6 +898,7 @@ class RAGEngine:
             )),
             'confidence': 0.8,
             'timing_breakdown': timing,
+            'llm_usage': llm_usage,
             'metadata': {
                 'method': 'xml-rag',
                 'language': original_language,
@@ -855,6 +907,7 @@ class RAGEngine:
                 'web_search_used': bool(web_results),
                 'active_skills': len(skill_texts),
                 'active_rules': len(rule_texts),
+                'llm_usage': llm_usage,
                 'raw_chunks': [
                    {"id": d.get("id", "unknown"), "text": d.get("text", ""), "score": d.get("score", 0), "doc_type": d.get("doc_type", "Skill/Rule")} 
                    for d in (agent_skills + agent_rules + general_kb) if d.get("id")

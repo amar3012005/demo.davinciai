@@ -145,6 +145,13 @@ class OrchestratorSession:
     turn_metrics: List[Dict[str, Any]] = field(default_factory=list)
     current_turn_timers: Dict[str, float] = field(default_factory=dict)
     
+    # Cumulative LLM + TTS metrics (across all turns)
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    llm_model: str = ""
+    tts_streamed_chars: int = 0
+    tts_total_time_ms: float = 0.0
+    
     # Communication queues for background tasks
     tts_audio_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     
@@ -163,9 +170,9 @@ class OrchestratorSession:
     map_status_checked: bool = False
 
     # Host-based configuration overrides
-    agent_name: str = "demo"
-    agent_id: Optional[str] = None
-    tenant_id: Optional[str] = None
+    agent_name: str = "tara"
+    agent_id: Optional[str] = "tara"
+    tenant_id: Optional[str] = "tara"
     secondary_language: Optional[str] = None
     flow_config: Dict[str, Any] = field(default_factory=dict)
     rag_url: Optional[str] = None
@@ -359,7 +366,7 @@ class OrchestratorWSHandler:
         RAG Service: rag.<agent_name>.davinciai.eu
         """
         # User defined defaults
-        default_agent = "demo"
+        default_agent = self.config.agent.id
         # PRORITY: Use CARTESIA_VOICE_ID env var, then config.yaml, then hardcoded fallback
         default_voice = os.getenv("CARTESIA_VOICE_ID")
         
@@ -395,7 +402,7 @@ class OrchestratorWSHandler:
         
         # Specific Voice ID Mapping overrides
         VOICE_MAPPING = {
-            "demo": default_voice,
+            "tara": default_voice,
             "daytona": "pfQ98Pt886VAnX66yHAt", # Keep existing override if needed
         }
         
@@ -693,7 +700,7 @@ class OrchestratorWSHandler:
     async def _create_session(self, websocket: WebSocket, session_id: Optional[str] = None, user_id: Optional[str] = None) -> OrchestratorSession:
         """Create new session"""
         if session_id is None:
-            session_id = f"daytona_{uuid.uuid4().hex[:12]}"
+            session_id = f"tara_{uuid.uuid4().hex[:12]}"
         
         state_mgr = StateManager(session_id, self.redis_client)
         await state_mgr.initialize()
@@ -1916,6 +1923,13 @@ class OrchestratorWSHandler:
 
                 # Skip empty tokens (RAG sends empty token to signal completion)
                 if not token:
+                    # Capture LLM usage metadata from the final chunk
+                    llm_usage = token_data.get("llm_usage", {})
+                    if llm_usage:
+                        session.total_prompt_tokens += llm_usage.get("prompt_tokens", 0)
+                        session.total_completion_tokens += llm_usage.get("completion_tokens", 0)
+                        session.llm_model = llm_usage.get("model", session.llm_model)
+                        logger.info(f"[{session.session_id}] 📊 LLM usage this turn: {llm_usage.get('prompt_tokens', 0)}p/{llm_usage.get('completion_tokens', 0)}c | Cumulative: {session.total_prompt_tokens}p/{session.total_completion_tokens}c ({session.llm_model})")
                     logger.debug(f"[{session.session_id}] ⏸️ Skipping empty RAG token (is_final: {token_data.get('is_final', False)})")
                     continue
 
@@ -1959,9 +1973,13 @@ class OrchestratorWSHandler:
                     pass
                 logger.debug(f"[{session.session_id}] ⏸️ Cancelled latency filler - RAG response ready for TTS")
 
+            # Track TTS streamed chars for this turn
+            session.tts_streamed_chars += len(response_text)
+            tts_stream_start = time.time()
+
             # Signal end of text stream to TTS (triggers EOS to ElevenLabs)
             if not session.is_closed:
-                logger.info(f"[{session.session_id}] 🔚 Sending stream_end to TTS (response: {len(response_text)} chars)")
+                logger.info(f"[{session.session_id}] 🔚 Sending stream_end to TTS (response: {len(response_text)} chars | Cumulative TTS chars: {session.tts_streamed_chars})")
                 await session.tts_client.stream_end()
             else:
                 logger.info(f"[{session.session_id}] ⏸️ Session closed, skipping stream_end")
@@ -2112,6 +2130,14 @@ class OrchestratorWSHandler:
                         break
             except Exception as tts_err:
                 logger.error(f"[{session.session_id}] ❌ TTS streaming error: {tts_err}")
+            
+            # Track cumulative TTS time
+            try:
+                tts_elapsed = (time.time() - tts_stream_start) * 1000
+                session.tts_total_time_ms += tts_elapsed
+                logger.info(f"[{session.session_id}] 🔊 TTS streaming: {tts_elapsed:.0f}ms this turn | Cumulative: {session.tts_total_time_ms:.0f}ms")
+            except NameError:
+                pass
             
             # CRITICAL: Handle TTS failure - if no audio received, transition back to LISTENING
             if chunk_counter == 0 and not transitioned_to_speaking:
@@ -2376,7 +2402,7 @@ class OrchestratorWSHandler:
                     # 1. Check Domain Status
                     resp = await client.post(
                         f"{session.rag_url}/api/v1/check_domain_status",
-                        json={"url": session.current_url, "client_id": "demo"},
+                        json={"url": session.current_url, "client_id": "tara"},
                         timeout=3.0
                     )
                     if resp.status_code == 200:
@@ -2389,7 +2415,7 @@ class OrchestratorWSHandler:
                             # 2. Fetch Hints Immediately
                             hints_resp = await client.post(
                                 f"{session.rag_url}/api/v1/get_map_hints",
-                                json={"goal": "sitemap", "client_id": "demo"},
+                                json={"goal": "sitemap", "client_id": "tara"},
                                 timeout=3.0
                             )
                             if hints_resp.status_code == 200 and hints_resp.json().get("hints"):
@@ -4013,6 +4039,14 @@ class OrchestratorWSHandler:
             "total_turns": len(session.turn_metrics),
             "avg_ttft_ms": 0.0,
             "avg_ttfc_ms": 0.0,
+            # LLM cumulative metrics
+            "llm_model": session.llm_model or "unknown",
+            "total_prompt_tokens": session.total_prompt_tokens,
+            "total_completion_tokens": session.total_completion_tokens,
+            "total_llm_tokens": session.total_prompt_tokens + session.total_completion_tokens,
+            # TTS cumulative metrics
+            "tts_streamed_chars": session.tts_streamed_chars,
+            "tts_total_time_ms": round(session.tts_total_time_ms, 1),
             "status": "completed"
         }
 
@@ -4044,7 +4078,7 @@ class OrchestratorWSHandler:
                                 "session_id": session.session_id,
                                 "history_context": history_list,
                                 "user_id": session.user_id or "anonymous",
-                                "tenant_id": session.tenant_id or "demo",
+                                "tenant_id": session.tenant_id or "tara",
                                 "metadata": {
                                     "agent_name": session.agent_name,
                                     "agent_id": session.agent_id,
@@ -4149,7 +4183,7 @@ class OrchestratorWSHandler:
                 f"{base_rag_url}/api/v1/get_map_hints",
                 json={
                     "goal": goal,
-                    "client_id": session.tenant_id or "demo",
+                    "client_id": session.tenant_id or "tara",
                     "current_url": current_url
                 }
             )
@@ -4558,7 +4592,7 @@ class OrchestratorWSHandler:
                     "last_action": session.last_action,
                     "action_history": session.action_history,  # For loop detection
                     "map_hints": session.map_hints,  # Pre-fetched at mission start
-                    "client_id": session.tenant_id or "demo",
+                    "client_id": session.tenant_id or "tara",
                     "session_id": session.session_id,
                     "dom_diff": dom_diff, # Context awareness
                     "conversation_history": conversation_history,  # Recent user requests

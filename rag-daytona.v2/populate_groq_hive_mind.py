@@ -246,7 +246,7 @@ def main():
                     "url": url,
                     "page_type": "summary",
                     "text": summary,
-                    "tenant_id": "demo",
+                    "tenant_id": "tara",
                     "schema_version": 1,
                 }
             })
@@ -275,7 +275,7 @@ def main():
                     "page_type": "content",
                     "text": chunk,
                     "chunk_index": i,
-                    "tenant_id": "demo",
+                    "tenant_id": "tara",
                     "schema_version": 1,
                 }
             })

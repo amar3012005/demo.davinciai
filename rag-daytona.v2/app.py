@@ -53,7 +53,7 @@ class QueryRequest(BaseModel):
     enable_streaming: Optional[bool] = Field(None, description="Enable streaming response")
     history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history for context-aware responses")
     language: Optional[str] = Field("english", description="Response language: 'english' or 'german'")
-    tenant_id: Optional[str] = Field("demo", description="Tenant/Agent identifier for cache isolation")
+    tenant_id: Optional[str] = Field("tara", description="Tenant/Agent identifier for cache isolation")
 
 
 class QueryResponse(BaseModel):
@@ -93,7 +93,8 @@ class SaveCaseRequest(BaseModel):
     issue: Optional[str] = Field(None, description="The problem that was resolved")
     solution: Optional[str] = Field(None, description="How the problem was solved")
     history_context: Optional[str] = Field(None, description="Conversation history to distill")
-    tenant_id: str = Field("demo", description="Tenant identifier")
+    tenant_id: str = Field("tara", description="Tenant identifier")
+    tenant_id: str = Field("tara", description="Tenant identifier")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
 
 
@@ -105,13 +106,13 @@ class SaveCaseResponse(BaseModel):
 
 class CheckDomainRequest(BaseModel):
     url: str = Field(..., description="Current page URL")
-    client_id: str = Field("demo", description="Client/Tenant ID")
+    client_id: str = Field("tara", description="Client/Tenant ID")
 
 class AnalyzeSessionRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     history_context: List[Dict[str, Any]] = Field(..., description="Raw conversation logs")
     user_id: Optional[str] = Field(None, description="User identifier")
-    tenant_id: str = Field("demo", description="Tenant identifier")
+    tenant_id: str = Field("tara", description="Tenant identifier")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
     brief_context: Optional[str] = Field(None, description="Brief summary of what happened in the session (pre-computed)")
     backend_url: Optional[str] = Field(None, description="Optional backend URL to send the session report to")
@@ -128,7 +129,7 @@ class VisualOrchestrateRequest(BaseModel):
     dom_context: List[Dict[str, Any]] = Field(..., description="List of visible DOM elements")
     history_context: Optional[str] = Field(None, description="Conversation history")
     language: Optional[str] = Field("english", description="Response language")
-    tenant_id: Optional[str] = Field("demo", description="Tenant identifier")
+    tenant_id: Optional[str] = Field("tara", description="Tenant identifier")
     
 class PlanStepRequest(BaseModel):
     goal: str = Field(..., description="The user's overall mission goal")
@@ -139,7 +140,7 @@ class PlanStepRequest(BaseModel):
     last_action: Optional[str] = Field("", description="Summary of last action taken")
     action_history: Optional[List[str]] = Field(default_factory=list, description="List of recent actions for loop detection")
     map_hints: Optional[str] = Field("", description="Pre-fetched GPS navigation hints")
-    client_id: Optional[str] = Field("demo", description="Client/Tenant ID for map lookup")
+    client_id: Optional[str] = Field("tara", description="Client/Tenant ID for map lookup")
     session_id: str = Field(..., description="Session identifier")
     dom_diff: Optional[str] = Field("First Step", description="Diff summary of DOM changes")
     conversation_history: Optional[str] = Field("", description="Recent conversation context (last 4 user requests)")
@@ -153,7 +154,7 @@ class PlanStepRequest(BaseModel):
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
-    client_id: Optional[str] = Field("demo", description="Client/Tenant ID")
+    client_id: Optional[str] = Field("tara", description="Client/Tenant ID")
     current_url: Optional[str] = Field("", description="Current page URL for domain filtering")
 
 class FastSenseRequest(BaseModel):
@@ -180,7 +181,7 @@ class SkillRuleCreateRequest(BaseModel):
     type: str = Field(..., description="'agent_skill' or 'agent_rule'")
     topic: str = Field("general", description="Topic category (e.g. debugging, identity, format)")
     severity: Optional[str] = Field(None, description="For rules: 'critical' or 'standard'")
-    tenant_id: str = Field("demo", description="Tenant identifier")
+    tenant_id: str = Field("tara", description="Tenant identifier")
 
 class SkillRuleItem(BaseModel):
     id: str
@@ -936,7 +937,7 @@ async def create_skill_or_rule(request: SkillRuleCreateRequest):
 
 
 @app.get("/api/v1/skills", response_model=SkillRuleListResponse)
-async def list_skills_and_rules(tenant_id: str = "demo"):
+async def list_skills_and_rules(tenant_id: str = "tara"):
     """
     List all agent skills and rules stored in Qdrant for a given tenant.
     """
@@ -996,7 +997,7 @@ async def list_skills_and_rules(tenant_id: str = "demo"):
 
 
 @app.delete("/api/v1/skills/{point_id}")
-async def delete_skill_or_rule(point_id: str, tenant_id: str = "demo"):
+async def delete_skill_or_rule(point_id: str, tenant_id: str = "tara"):
     """
     Delete a specific agent skill or rule by its Qdrant point ID.
     """
@@ -1024,7 +1025,7 @@ async def upload_document(
     file: UploadFile = File(...),
     doc_type: str = Form("General"),
     topics: str = Form(""),
-    tenant_id: str = Form("demo")
+    tenant_id: str = Form("tara")
 ):
     """
     Upload and process a document into the Knowledge Base.
@@ -1110,7 +1111,8 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             context_data,
             streaming_callback=None,  # Streaming handled separately if needed
             history_context=request_data.history_context,
-            tenant_id=request_data.tenant_id
+            tenant_id=request_data.tenant_id,
+            force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower())
         )
         
         # Add cached flag
@@ -1269,7 +1271,8 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     query_context,
                     streaming_callback=callback,
                     history_context=request.history_context,
-                    tenant_id=request.tenant_id
+                    tenant_id=request.tenant_id,
+                    force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower())
                 )
                 
                 # Store result for caching
@@ -1314,13 +1317,18 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     buffer = ""
             
             if is_final:
+                # Extract llm_usage from result if available
+                llm_usage = {}
+                if 'data' in full_result_container:
+                    llm_usage = full_result_container['data'].get('llm_usage', {})
+                
                 # If the final flag is set from the engine, flush everything
                 if buffer:
                     accumulated_response += buffer
-                    yield json.dumps({"text": buffer, "is_final": True}) + "\n"
+                    yield json.dumps({"text": buffer, "is_final": True, "llm_usage": llm_usage}) + "\n"
                     buffer = ""
                 else:
-                    yield json.dumps({"text": "", "is_final": True}) + "\n"
+                    yield json.dumps({"text": "", "is_final": True, "llm_usage": llm_usage}) + "\n"
             
         # Log complete response after streaming finishes
         if accumulated_response:
@@ -1765,7 +1773,7 @@ class HiveMindVisualizationResponse(BaseModel):
 
 
 @app.get("/api/v1/hive-mind/visualize", response_model=HiveMindVisualizationResponse)
-async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_id: str = "demo"):
+async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_id: str = "tara"):
     """
     Fetch Hive Mind vectors and reduce to 2D for visualization.
     
