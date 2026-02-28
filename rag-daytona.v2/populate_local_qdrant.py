@@ -9,7 +9,7 @@ import random
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from optimized_embeddings import OptimizedEmbeddings
-from daytona_agent.services.rag.models.hivemind_schema import case_memory_payload
+from .models.hivemind_schema import case_memory_payload
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

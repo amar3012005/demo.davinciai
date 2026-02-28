@@ -14,14 +14,14 @@ except ImportError:
 
 # Universal Payload Schema
 try:
-    from daytona_agent.services.rag.models.hivemind_schema import (
+    from .models.hivemind_schema import (
         case_memory_payload, agent_skill_payload, agent_rule_payload,
         website_map_payload, element_context_payload, general_kb_payload,
         read_text, read_summary, read_doc_type, read_created_at,
         SCHEMA_VERSION,
     )
 except ImportError:
-    from daytona_agent.services.rag.models.hivemind_schema import (
+    from .models.hivemind_schema import (
         case_memory_payload, agent_skill_payload, agent_rule_payload,
         website_map_payload, element_context_payload, general_kb_payload,
         read_text, read_summary, read_doc_type, read_created_at,

@@ -18,7 +18,7 @@ import numpy as np
 
 # Ensure project root is on path for models import
 sys.path.insert(0, os.path.dirname(__file__))
-from daytona_agent.services.rag.models.hivemind_schema import agent_skill_payload, agent_rule_payload
+from .models.hivemind_schema import agent_skill_payload, agent_rule_payload
 
 # Configuration
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333")
