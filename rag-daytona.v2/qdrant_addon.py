@@ -372,6 +372,7 @@ class QdrantAddon:
             for hit in hits:
                 p = hit.payload
                 entry = {
+                    "id": hit.id,
                     "text": read_text(p),
                     "topic": p.get("topic", "general"),
                     "score": hit.score
@@ -554,6 +555,7 @@ class QdrantAddon:
                 p = hit.payload
                 # Normalize entry
                 entry = {
+                    "id": hit.id,
                     "text": read_text(p),
                     "summary": read_summary(p),
                     "doc_type": read_doc_type(p),

@@ -1,0 +1,55 @@
+{
+  "created_at": 1772214154.401684,
+  "files": [
+    {
+      "path": "visual_copilot/orchestrator.py",
+      "sha256": "1e71bdecc077b18c651c914829754ea7c998485913319f41a0a12c91eeb654ad",
+      "size": 200396
+    },
+    {
+      "path": "ultimate_api.py",
+      "sha256": "be2e03ddc5b18fc2406177b5404122b76cc9c0ad06cd3409abdfeec9ea69aa48",
+      "size": 317
+    },
+    {
+      "path": "visual_copilot/__init__.py",
+      "sha256": "86e8c4116abf1c89a29def084694aa4b5ca84911635dec538a86853c3b6f422b",
+      "size": 190
+    },
+    {
+      "path": "app.py",
+      "sha256": "f97dbde7dc29832578d24c440e43bf92ff38fc6affdbf377b812b7c3921983da",
+      "size": 120712
+    },
+    {
+      "path": "prompts/mission_end.py",
+      "sha256": "39d8ce6866a0bf5d23741f7f80a2fad039279b1ef83a8ce460a753e3637e5e6e",
+      "size": 5732
+    },
+    {
+      "path": "prompts/react_navigator.py",
+      "sha256": "4161ad87bab31f722998f48d63797a05be90f5779a762a06b3fd6351447ece59",
+      "size": 11742
+    },
+    {
+      "path": "mind_reader_domain_prompts/generic.py",
+      "sha256": "9b79dff25b160129cbb63f23e4ce6e50f07750927bd7deb5a8c3b37f2c31190a",
+      "size": 8067
+    },
+    {
+      "path": "mind_reader_domain_prompts/groq_com.py",
+      "sha256": "4ac7273c48090b050a66e0b32ab21fbcc15ed2da481442a23a79f9cccbe33dbb",
+      "size": 5180
+    },
+    {
+      "path": "mind_reader_domain_prompts/engelvoelkers_com.py",
+      "sha256": "92cb166f6b095c5db41c84efec949aa047f50d1ec9b2e9325747680454ead8c3",
+      "size": 3677
+    },
+    {
+      "path": "mind_reader_domain_prompts/pornpics_de.py",
+      "sha256": "e26b5ccd27bbc8d1b18c4cfcdbe713e2abebeb0903b9d65694598e342c96ffaa",
+      "size": 18453
+    }
+  ]
+}

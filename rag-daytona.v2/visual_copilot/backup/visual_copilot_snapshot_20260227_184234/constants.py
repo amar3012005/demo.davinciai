@@ -1,0 +1,45 @@
+"""Feature flags and constants for Visual CoPilot.
+
+Compatibility module: values are sourced from visual_copilot.orchestrator
+without behavior changes.
+"""
+
+from .orchestrator import (
+    TARA_ROUTER_V2_ENABLED,
+    TARA_ROUTER_V2_SHADOW,
+    DETECTIVE_MIN_SCORE,
+    DETECTIVE_AMBIGUOUS_BAND,
+    LEXICAL_DIRECT_ACCEPT,
+    LEXICAL_DIRECT_ACCEPT_CLICK,
+    LEXICAL_DIRECT_ACCEPT_TYPE,
+    ROUTER_V2_CANARY_DOMAINS,
+    MAX_DETECTIVE_RETRIES_PER_SUBGOAL,
+    ENABLE_LAST_MILE_REASONING,
+    LAST_MILE_MAX_ATTEMPTS,
+    LAST_MILE_CANARY_DOMAINS,
+    ENABLE_KEYWORD_DIRECT_V3,
+    ENABLE_SUBGOAL_HINT_QUERY,
+    ENABLE_VERIFIED_ADVANCE,
+    V3_CANARY_DOMAINS,
+    V3_ALWAYS_ON_ROOTS,
+    V3_AUTO_ROLLBACK_ENABLED,
+    V3_AUTO_ROLLBACK_MAX_PENDING_DROPS,
+    _NOISE_WORDS,
+    _DOMAIN_ALIASES,
+    _CLICK_TAGS,
+    _CLICK_ROLES,
+    _TYPE_TAGS,
+    _TYPE_ROLES,
+    _TEXT_HEAVY_TAGS,
+    _ZONE_HINTS,
+    _DOMAIN_LABEL_SYNONYMS,
+    _GALLERY_WORDS,
+    _env_bool,
+    _root_domain,
+    _domain_in_list,
+    _is_v3_feature_enabled,
+    _register_v3_pending_drop,
+    _register_v3_success,
+    _is_canary_domain,
+    _is_last_mile_enabled_for_domain,
+)

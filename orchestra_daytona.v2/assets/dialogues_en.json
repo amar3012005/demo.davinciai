@@ -3,19 +3,19 @@
   "dialogues": {
     "intro": [
       {
-        "text": "Hello, I am TARA, your TASK intelligent assistant built by Davinci AI. How can I help you manage your development environments today?",
+        "text": "హాయ్! నేను తారా, టాస్క్ (Telangana Academy for Skill and Knowledge) లో work chestanu. చెప్పండి ఏం help కావాలి ?",
         "emotion": "warm",
         "audio_file": "intro_en.wav"
       },
       {
-        "text": "Hi there! I'm TARA, built by Davinci AI. I'm here to help you with TASK. What would you like to build?",
+        "text": "హాయ్! నేను తారా, టాస్క్ (Telangana Academy for Skill and Knowledge) లో work chestanu. చెప్పండి ఏం help కావాలి ?",
         "emotion": "friendly",
         "audio_file": "intro_alt_en.wav"
       }
     ],
     "exit": [
       {
-        "text": "Thank you for using TASK. TARA signing off. Happy coding!",
+        "text": "Thank you for using TASK. TARA signing off!",
         "emotion": "grateful",
         "audio_file": "exit_en.wav",
         "keywords": [

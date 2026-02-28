@@ -35,6 +35,7 @@ services:
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_hive}
       ENABLE_HIVE_MIND: ${ENABLE_HIVE_MIND:-true}
+      ENABLE_LOCAL_RETRIEVAL: "false"
 
       # Ultimate TARA - Live Graph (Redis)
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -68,6 +69,7 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
+      - qdrant
 
   # ═══════════════════════════════════════════════════════════
   # STT Service
@@ -191,8 +193,6 @@ services:
     environment:
       QDRANT__SERVICE__GRPC_PORT: '6334'
     restart: unless-stopped
-    profiles:
-      - with-qdrant # Run with: docker-compose --profile with-qdrant up
 
 volumes:
   redis-data:

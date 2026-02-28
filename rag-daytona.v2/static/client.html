@@ -1355,6 +1355,31 @@
                             <div class="loading-placeholder">Loading...</div>
                         </div>
                     </div>
+
+                    <!-- Top-K Test -->
+                    <div class="viz-insights" style="margin-top: 16px;">
+                        <div class="viz-legend-title">
+                            <span class="material-icons-round"
+                                style="font-size: 14px; vertical-align: middle;">search</span>
+                            Test Retrieve (Top-K)
+                        </div>
+                        <div style="margin-top: 8px;">
+                            <input type="text" id="testQueryInput" placeholder="Test a query..."
+                                style="width:100%; padding: 6px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px;">
+                            <div
+                                style="display:flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                                <label style="font-size: 0.8rem; color: #888;">Top K:
+                                    <input type="number" id="testTopK" value="3" min="1" max="20"
+                                        style="width:40px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; padding: 2px;">
+                                </label>
+                                <button class="viz-btn" id="testRetrieveBtn"
+                                    style="padding: 4px 8px; flex:none; width:auto; height:auto; min-height:0; display:inline-block; margin:0;">Fetch</button>
+                            </div>
+                            <div id="testRetrieveResults"
+                                style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.8rem; max-height: 250px; overflow-y: auto;">
+                            </div>
+                        </div>
+                    </div>
                 </aside>
             </div>
         </div>
@@ -1453,7 +1478,7 @@
         // ═══════════════════════════════════════════════════════════════════════
         (function () {
             let basePath = window.location.pathname.replace(/\/+$/, '');
-            if (basePath.endsWith('index.html') || basePath.endsWith('client.html')) {
+            if (basePath.endsWith('index.html') || basePath.endsWith('client.html') || basePath.endsWith('hive-mind')) {
                 basePath = basePath.substring(0, basePath.lastIndexOf('/'));
             }
             // Expose globally
@@ -1497,6 +1522,7 @@
                 this.loading = document.getElementById('vizLoading');
                 this.points = [];
                 this.hoveredPoint = null;
+                this.highlightedChunkIds = [];
                 this.scale = 1;
                 this.offset = { x: 0, y: 0 };
 
@@ -1547,10 +1573,97 @@
 
             setupEvents() {
                 document.getElementById('loadVizBtn').addEventListener('click', () => this.loadData());
+                document.getElementById('testRetrieveBtn').addEventListener('click', () => this.testRetrieve());
 
                 this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
                 this.canvas.addEventListener('mouseleave', () => this.hideTooltip());
                 this.canvas.addEventListener('wheel', (e) => this.handleZoom(e));
+            }
+
+            async testRetrieve() {
+                const query = document.getElementById('testQueryInput').value.trim();
+                const limit = parseInt(document.getElementById('testTopK').value) || 3;
+                if (!query) return;
+
+                const container = document.getElementById('testRetrieveResults');
+                container.innerHTML = '<div style="color:#aaa;">Fetching...</div>';
+
+                try {
+                    const baseUrl = window.API_BASE || '';
+                    const payload = {
+                        query: query,
+                        history_context: "",
+                        context: { session_id: "test_" + Date.now() }
+                    };
+                    const res = await fetch(`${baseUrl}/api/v1/retrieve`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!res.ok) throw new Error(await res.text());
+                    const data = await res.json();
+
+                    let chunks = [];
+                    // Combine chunks from all possible injection arrays
+                    [
+                        ...(data.general_kb || []),
+                        ...(data.agent_skills || []),
+                        ...(data.agent_rules || []),
+                    ].forEach(d => {
+                        if (d.id) {
+                            chunks.push({ id: d.id, text: d.text, score: d.score, type: d.doc_type || 'Rule' });
+                        }
+                    });
+
+                    (data.relevant_docs || []).forEach(d => {
+                        if (d.metadata && d.metadata.id) {
+                            chunks.push({ id: d.metadata.id, text: d.text, score: d.boosted_similarity || d.similarity || 0, type: 'Static_Document' });
+                        }
+                    });
+
+                    chunks.sort((a, b) => b.score - a.score);
+                    chunks = chunks.slice(0, limit);
+
+                    if (chunks.length === 0) {
+                        this.highlightedChunkIds = [];
+                        container.innerHTML = '<div style="color:#aaa;">No chunks retrieved.</div>';
+                        return;
+                    }
+
+                    this.highlightedChunkIds = chunks.map(c => String(c.id));
+
+                    container.innerHTML = chunks.map(c => `
+                        <div style="background: rgba(255,255,255,0.05); padding: 8px; border-radius: 4px; border-left: 3px solid #ff7b00;">
+                            <div style="display:flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                                <div>
+                                    <span style="background: #333; padding: 2px 4px; border-radius: 2px; font-size: 0.65rem;">${c.type}</span>
+                                    <span style="color: #4ade80; font-size: 0.65rem; margin-left: 4px;">🎯 ${(c.score * 100).toFixed(0)}%</span>
+                                </div>
+                                <span class="material-icons-round" onclick="window.hiveMindViz.deleteChunk('${c.id}')" style="font-size: 14px; color: #dc2626; cursor: pointer;" title="Delete Chunk">close</span>
+                            </div>
+                            <div style="color: #d1d5db; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
+                                ${c.text}
+                            </div>
+                        </div>
+                    `).join('');
+                } catch (e) {
+                    console.error('Retrieve Test error:', e);
+                    container.innerHTML = `<div style="color:red;">Error: ${e.message}</div>`;
+                }
+            }
+
+            async deleteChunk(pointId) {
+                if (!confirm('Are you sure you want to delete this specific memory chunk directly from Qdrant?')) return;
+                try {
+                    const baseUrl = window.API_BASE || '';
+                    const res = await fetch(`${baseUrl}/api/v1/skills/${pointId}?tenant_id=demo`, { method: 'DELETE' });
+                    if (!res.ok) throw new Error(await res.text());
+                    alert('Chunk deleted! It is permanently erased from the Hive Mind.');
+                    this.testRetrieve(); // re-fetch to reflect changes
+                } catch (e) {
+                    alert('Error deleting: ' + e.message);
+                }
             }
 
             connectWebSocket() {
@@ -1577,11 +1690,12 @@
                             const data = JSON.parse(event.data);
                             if (data.type === 'new_knowledge') {
                                 console.log('✨ New knowledge received via WebSocket:', data.node);
-                                // Refresh to get the new projection
-                                this.loadData();
-                                // Also refresh insights
+                                // Invalidate cache and re-fetch
+                                localStorage.removeItem('hivemind_viz_cache');
+                                localStorage.removeItem('hivemind_insights_cache');
+                                this.loadData(true);
                                 if (typeof loadHiveMindInsights === 'function') {
-                                    loadHiveMindInsights();
+                                    loadHiveMindInsights(true);
                                 }
                             }
                         } catch (e) {
@@ -1602,14 +1716,34 @@
                 }
             }
 
-            async loadData() {
+            async loadData(forceRefresh = false) {
                 const algorithm = document.getElementById('algorithmSelect').value;
                 const limit = document.getElementById('limitSelect').value;
+                const CACHE_KEY = 'hivemind_viz_cache';
+                const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+                // Try localStorage cache first
+                if (!forceRefresh) {
+                    try {
+                        const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
+                        if (cached && (Date.now() - cached.ts < CACHE_TTL) && cached.algorithm === algorithm && cached.limit === limit) {
+                            console.log('⚡ Using cached Hive Mind visualization data');
+                            const data = cached.data;
+                            window.vizData = data;
+                            this.points = data.points;
+                            document.getElementById('statCollection').textContent = data.collection_name;
+                            document.getElementById('statPoints').textContent = data.total_points;
+                            document.getElementById('statDimension').textContent = data.dimension + '-D';
+                            document.getElementById('statAlgorithm').textContent = data.algorithm.toUpperCase();
+                            this.resizeCanvas();
+                            return;
+                        }
+                    } catch (e) { /* cache miss or corrupt */ }
+                }
 
                 this.loading.classList.remove('hidden');
 
                 try {
-                    // Use global API_BASE if available, otherwise relative path
                     const baseUrl = window.API_BASE || '';
                     const response = await fetch(
                         `${baseUrl}/api/v1/hive-mind/visualize?algorithm=${algorithm}&limit=${limit}`
@@ -1621,13 +1755,17 @@
                     window.vizData = data;
                     this.points = data.points;
 
-                    // Update stats
+                    // Save to localStorage cache
+                    try {
+                        localStorage.setItem(CACHE_KEY, JSON.stringify({ data, algorithm, limit, ts: Date.now() }));
+                        console.log('💾 Cached Hive Mind visualization data');
+                    } catch (e) { console.warn('Cache write failed:', e); }
+
                     document.getElementById('statCollection').textContent = data.collection_name;
                     document.getElementById('statPoints').textContent = data.total_points;
                     document.getElementById('statDimension').textContent = data.dimension + '-D';
                     document.getElementById('statAlgorithm').textContent = data.algorithm.toUpperCase();
 
-                    // Ensure canvas is properly sized before rendering
                     this.resizeCanvas();
                 } catch (err) {
                     console.error('Visualization load error:', err);
@@ -1668,6 +1806,12 @@
                     this.ctx.lineTo(w, y);
                     this.ctx.stroke();
                 }
+
+                const padding = 60;
+                const scaleX = (w - padding * 2) / 2 * this.scale;
+                const scaleY = (h - padding * 2) / 2 * this.scale;
+                const centerX = (w / 2) + this.offset.x;
+                const centerY = (h / 2) + this.offset.y;
 
                 if (!this.points.length) {
                     this.ctx.fillStyle = '#666';
@@ -1779,9 +1923,19 @@
                 this.points.forEach(point => {
                     const x = centerX + point.x * scaleX;
                     const y = centerY + point.y * scaleY;
-                    const color = this.colors[point.doc_type] || this.colors[point.customer_segment] || this.colors.default;
                     const isHovered = point === this.hoveredPoint;
-                    const radius = isHovered ? 14 : 10;
+                    const isHighlighted = this.highlightedChunkIds.includes(String(point.id));
+                    const color = isHighlighted ? '#ff7b00' : (this.colors[point.doc_type] || this.colors[point.customer_segment] || this.colors.default);
+                    const radius = isHovered || isHighlighted ? 15 : 9;
+
+                    if (isHighlighted) {
+                        // Special pulsing ring for highlighted nodes
+                        this.ctx.beginPath();
+                        this.ctx.strokeStyle = '#ff7b00';
+                        this.ctx.lineWidth = 2 + Math.abs(Math.sin(Date.now() / 200)) * 3; // quick pulse
+                        this.ctx.arc(x, y, radius + 8, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                    }
 
                     // Outer glow
                     const glowGradient = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
@@ -1843,10 +1997,10 @@
                 const w = rect.width;
                 const h = rect.height;
                 const padding = 60;
-                const scaleX = (w - padding * 2) / 2;
-                const scaleY = (h - padding * 2) / 2;
-                const centerX = w / 2;
-                const centerY = h / 2;
+                const scaleX = (w - padding * 2) / 2 * this.scale;
+                const scaleY = (h - padding * 2) / 2 * this.scale;
+                const centerX = (w / 2) + this.offset.x;
+                const centerY = (h / 2) + this.offset.y;
 
                 // Find closest point
                 let closest = null;
@@ -1938,59 +2092,84 @@
         // ═══════════════════════════════════════════════════════════════════════
         // Insights Loader
         // ═══════════════════════════════════════════════════════════════════════
-        async function loadHiveMindInsights() {
+        async function loadHiveMindInsights(forceRefresh = false) {
             const trendingEl = document.getElementById('trendingDomains');
             const recentEl = document.getElementById('recentKnowledge');
 
+            if (!trendingEl || !recentEl) {
+                console.warn('Insights elements not found in DOM yet.');
+                return;
+            }
+
+            const CACHE_KEY = 'hivemind_insights_cache';
+            const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+            // Try localStorage cache first
+            if (!forceRefresh) {
+                try {
+                    const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
+                    if (cached && (Date.now() - cached.ts < CACHE_TTL)) {
+                        console.log('⚡ Using cached Hive Mind insights data');
+                        renderInsights(cached.data, trendingEl, recentEl);
+                        return;
+                    }
+                } catch (e) { /* cache miss */ }
+            }
+
             try {
-                // Use global API_BASE if available
                 const baseUrl = window.API_BASE || '';
                 const response = await fetch(`${baseUrl}/api/v1/hive-mind/insights?limit=5`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 const data = await response.json();
 
-                // Render trending domains
-                if (data.trending_domains && data.trending_domains.length > 0) {
-                    trendingEl.innerHTML = data.trending_domains.map(domain => `
-                        <div class="trending-item">
-                            <span class="trending-item-name">${domain.domain || 'General'}</span>
-                            <span class="trending-item-count">${domain.count}</span>
-                        </div>
-                        <div class="trending-item-bar" style="width: ${domain.percentage}%"></div>
-                    `).join('');
-                } else {
-                    trendingEl.innerHTML = '<div class="loading-placeholder">No domains yet</div>';
-                }
+                // Save to localStorage cache
+                try {
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+                    console.log('💾 Cached Hive Mind insights data');
+                } catch (e) { console.warn('Insights cache write failed:', e); }
 
-                // Render recent knowledge
-                if (data.recent_knowledge && data.recent_knowledge.length > 0) {
-                    recentEl.innerHTML = data.recent_knowledge.slice(0, 5).map(item => {
-                        const summary = item.summary || item.solution || item.text || '';
-                        const truncated = summary.length > 80 ? summary.slice(0, 80) + '...' : summary;
-                        const type = item.doc_type || item.issue_type || 'KB';
-                        const domain = item.domain || item.customer_segment || 'System';
-
-                        return `
-                        <div class="recent-item" title="${summary}">
-                            <div class="recent-item-issue">${item.text || item.issue || 'No content'}</div>
-                            <div class="recent-item-meta">
-                                <span class="recent-item-tag">${type.replace(/_/g, ' ')}</span>
-                                <span class="recent-item-tag">${domain}</span>
-                            </div>
-                        </div>`;
-                    }).join('');
-                } else {
-                    recentEl.innerHTML = '<div class="loading-placeholder">No knowledge yet</div>';
-                }
-
-                console.log(`📊 Insights loaded: ${data.total_knowledge} nodes, ${data.unique_domains} domains`);
+                renderInsights(data, trendingEl, recentEl);
 
             } catch (err) {
                 console.error('Failed to load insights:', err);
                 trendingEl.innerHTML = '<div class="loading-placeholder">Failed to load</div>';
                 recentEl.innerHTML = '<div class="loading-placeholder">Failed to load</div>';
             }
+        }
+
+        function renderInsights(data, trendingEl, recentEl) {
+            if (data.trending_domains && data.trending_domains.length > 0) {
+                trendingEl.innerHTML = data.trending_domains.map(domain => `
+                    <div class="trending-item">
+                        <span class="trending-item-name">${domain.domain || 'General'}</span>
+                        <span class="trending-item-count">${domain.count}</span>
+                    </div>
+                    <div class="trending-item-bar" style="width: ${domain.percentage}%"></div>
+                `).join('');
+            } else {
+                trendingEl.innerHTML = '<div class="loading-placeholder">No domains yet</div>';
+            }
+
+            if (data.recent_knowledge && data.recent_knowledge.length > 0) {
+                recentEl.innerHTML = data.recent_knowledge.slice(0, 5).map(item => {
+                    const summary = item.summary || item.solution || item.text || '';
+                    const type = item.doc_type || item.issue_type || 'KB';
+                    const domain = item.domain || item.customer_segment || 'System';
+                    return `
+                    <div class="recent-item" title="${summary}">
+                        <div class="recent-item-issue">${item.text || item.issue || 'No content'}</div>
+                        <div class="recent-item-meta">
+                            <span class="recent-item-tag">${type.replace(/_/g, ' ')}</span>
+                            <span class="recent-item-tag">${domain}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            } else {
+                recentEl.innerHTML = '<div class="loading-placeholder">No knowledge yet</div>';
+            }
+
+            console.log(`📊 Insights loaded: ${data.total_knowledge} nodes, ${data.unique_domains} domains`);
         }
 
         // Load insights when switching to visualizer tab
@@ -2216,7 +2395,50 @@
                         text.textContent = cleanSources + (content.sources.length > 3 ? ` +${content.sources.length - 3}` : '');
                         sourcesEl.appendChild(text);
 
-                        metaDiv.appendChild(sourcesEl);
+                        // If raw_chunks available, add View More
+                        if (content.metadata && content.metadata.raw_chunks && content.metadata.raw_chunks.length > 0) {
+                            const viewMore = document.createElement('a');
+                            viewMore.textContent = '(View More)';
+                            viewMore.style.color = 'var(--color-orange)';
+                            viewMore.style.cursor = 'pointer';
+                            viewMore.style.marginLeft = '4px';
+                            viewMore.style.textDecoration = 'underline';
+                            sourcesEl.appendChild(viewMore);
+
+                            const chunksOverlay = document.createElement('div');
+                            chunksOverlay.style.display = 'none';
+                            chunksOverlay.style.marginTop = '8px';
+                            chunksOverlay.style.flexDirection = 'column';
+                            chunksOverlay.style.gap = '8px';
+                            chunksOverlay.innerHTML = content.metadata.raw_chunks.map(c => `
+                                <div style="background: rgba(0,0,0,0.05); padding: 8px; border-radius: 4px; border-left: 3px solid #ff7b00; position: relative;">
+                                    <div style="display:flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                                        <div>
+                                            <span style="background: rgba(0,0,0,0.1); padding: 2px 4px; border-radius: 2px; font-size: 0.65rem; color: var(--color-black);">${c.doc_type || 'Chunk'}</span>
+                                            <span style="color: #4ade80; font-size: 0.65rem; margin-left: 4px;">🎯 ${(c.score * 100).toFixed(0)}%</span>
+                                        </div>
+                                        <span class="material-icons-round" onclick="if(window.hiveMindViz) { window.hiveMindViz.deleteChunk('${c.id}'); } else if(window.confirm('Delete this chunk from Qdrant?')) { fetch((window.API_BASE||'')+'/api/v1/skills/${c.id}?tenant_id=demo', {method:'DELETE'}).then(()=>alert('Deleted!')) }" style="font-size: 14px; color: #dc2626; cursor: pointer;" title="Delete Chunk">close</span>
+                                    </div>
+                                    <div style="color: var(--color-black); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
+                                        ${c.text}
+                                    </div>
+                                </div>
+                            `).join('');
+
+                            viewMore.onclick = () => {
+                                if (chunksOverlay.style.display === 'none') {
+                                    chunksOverlay.style.display = 'flex';
+                                    viewMore.textContent = '(View Less)';
+                                } else {
+                                    chunksOverlay.style.display = 'none';
+                                    viewMore.textContent = '(View More)';
+                                }
+                            };
+                            metaDiv.appendChild(sourcesEl);
+                            metaDiv.appendChild(chunksOverlay);
+                        } else {
+                            metaDiv.appendChild(sourcesEl);
+                        }
                     }
 
                     // 3. Hive Mind Info (if available in metadata)

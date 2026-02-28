@@ -547,6 +547,9 @@ class RetrieveResponse(BaseModel):
     query_english: str
     original_language: str
     relevant_docs: List[Dict[str, Any]]
+    agent_skills: List[Dict[str, Any]] = []
+    agent_rules: List[Dict[str, Any]] = []
+    general_kb: List[Dict[str, Any]] = []
     hive_mind_context: str
     web_results: str
     timing: Dict[str, float]

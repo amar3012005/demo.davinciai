@@ -1,0 +1,1476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TARA URL Extractor - Deep Website Analysis</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        :root {
+            --color-black: #171717;
+            --color-orange: #F25623;
+            --color-orange-dark: #d94a1d;
+            --color-orange-light: #ff6b3d;
+            --color-dark-gray: #4D4D4D;
+            --color-light-gray: #DEDEDE;
+            --color-white: #FFFFFF;
+            --color-background: #F5F5F5;
+            --color-success: #22c55e;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --color-info: #3b82f6;
+            --color-purple: #8b5cf6;
+
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --border-radius: 12px;
+            --border-radius-sm: 8px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.12);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.16);
+            --transition: all 0.2s ease;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-family);
+            background: var(--color-background);
+            color: var(--color-black);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--color-black);
+            color: var(--color-white);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow-md);
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-brand .logo {
+            width: 40px;
+            height: 40px;
+            background: var(--color-orange);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-brand .logo .material-icons-round {
+            font-size: 24px;
+            color: var(--color-white);
+        }
+
+        .header-brand h1 {
+            font-size: 1.35rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .header-brand span {
+            color: var(--color-light-gray);
+            font-size: 0.9rem;
+            font-weight: 400;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+
+        .status-badge.ready { background: rgba(34, 197, 94, 0.2); color: var(--color-success); }
+        .status-badge.busy { background: rgba(245, 158, 11, 0.2); color: var(--color-warning); }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* URL Input Section */
+        .url-input-section {
+            background: var(--color-white);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .url-input-container {
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+        }
+
+        .url-input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        .url-input {
+            width: 100%;
+            padding: 14px 16px 14px 44px;
+            font-size: 1rem;
+            border: 2px solid var(--color-light-gray);
+            border-radius: var(--border-radius-sm);
+            font-family: var(--font-family);
+            transition: var(--transition);
+        }
+
+        .url-input:focus {
+            outline: none;
+            border-color: var(--color-orange);
+        }
+
+        .url-input-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--color-dark-gray);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            border: none;
+            border-radius: var(--border-radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            font-family: var(--font-family);
+        }
+
+        .btn-primary {
+            background: var(--color-orange);
+            color: var(--color-white);
+        }
+
+        .btn-primary:hover { background: var(--color-orange-dark); }
+        .btn-primary:disabled { background: var(--color-light-gray); cursor: not-allowed; }
+
+        .btn-secondary {
+            background: var(--color-white);
+            color: var(--color-black);
+            border: 1px solid var(--color-light-gray);
+        }
+
+        .btn-secondary:hover { background: var(--color-background); }
+
+        .btn-purple {
+            background: var(--color-purple);
+            color: var(--color-white);
+        }
+
+        .btn-purple:hover { background: #7c3aed; }
+
+        .btn-sm { padding: 8px 16px; font-size: 0.85rem; }
+        .btn-lg { padding: 14px 32px; font-size: 1rem; }
+
+        /* Crawl Options */
+        .crawl-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--color-light-gray);
+        }
+
+        .option-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .option-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--color-dark-gray);
+        }
+
+        .option-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .option-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            color: var(--color-dark-gray);
+        }
+
+        .option-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--color-orange);
+        }
+
+        .option-item input[type="number"] {
+            width: 70px;
+            padding: 6px 10px;
+            border: 1px solid var(--color-light-gray);
+            border-radius: var(--border-radius-sm);
+            font-family: var(--font-family);
+        }
+
+        /* Page Discovery Section */
+        .discovery-section {
+            background: var(--color-white);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+            display: none;
+        }
+
+        .discovery-section.active { display: block; }
+
+        .discovery-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .discovery-stats {
+            display: flex;
+            gap: 24px;
+            font-size: 0.9rem;
+            color: var(--color-dark-gray);
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: var(--color-orange);
+            font-size: 1.1rem;
+        }
+
+        /* Page List */
+        .page-list-container {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid var(--color-light-gray);
+            border-radius: var(--border-radius-sm);
+        }
+
+        .page-list-header {
+            display: grid;
+            grid-template-columns: 40px 2fr 1fr 100px 80px;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--color-background);
+            border-bottom: 1px solid var(--color-light-gray);
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--color-dark-gray);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .page-item {
+            display: grid;
+            grid-template-columns: 40px 2fr 1fr 100px 80px;
+            gap: 12px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--color-light-gray);
+            align-items: center;
+            transition: var(--transition);
+        }
+
+        .page-item:hover { background: rgba(242, 86, 35, 0.03); }
+        .page-item.selected { background: rgba(242, 86, 35, 0.08); }
+        .page-item:last-child { border-bottom: none; }
+
+        .page-checkbox {
+            width: 20px;
+            height: 20px;
+            accent-color: var(--color-orange);
+        }
+
+        .page-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .page-title {
+            font-weight: 500;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .page-url {
+            font-size: 0.8rem;
+            color: var(--color-dark-gray);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .page-type {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+        }
+
+        .type-icon {
+            font-size: 16px;
+            color: var(--color-orange);
+        }
+
+        .page-depth {
+            font-size: 0.85rem;
+            color: var(--color-dark-gray);
+        }
+
+        .page-words {
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .page-words.high { color: var(--color-success); }
+        .page-words.medium { color: var(--color-warning); }
+        .page-words.low { color: var(--color-dark-gray); }
+
+        /* Discovery Actions */
+        .discovery-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--color-light-gray);
+        }
+
+        .selection-controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Results Section */
+        .results-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            display: none;
+        }
+
+        .results-container.active { display: grid; }
+
+        .results-panel {
+            background: var(--color-white);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--color-light-gray);
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* Metadata Display */
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metadata-item {
+            background: var(--color-background);
+            padding: 16px;
+            border-radius: var(--border-radius-sm);
+        }
+
+        .metadata-label {
+            font-size: 0.8rem;
+            color: var(--color-dark-gray);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .metadata-value {
+            font-size: 1rem;
+            font-weight: 500;
+            word-break: break-word;
+        }
+
+        /* Element Categories */
+        .element-categories {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .category-card {
+            background: var(--color-background);
+            border-radius: var(--border-radius-sm);
+            padding: 16px;
+            cursor: pointer;
+            transition: var(--transition);
+            border: 2px solid transparent;
+        }
+
+        .category-card:hover { border-color: var(--color-orange); }
+        .category-card.active {
+            border-color: var(--color-orange);
+            background: rgba(242, 86, 35, 0.05);
+        }
+
+        .category-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .category-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .category-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--color-white);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-orange);
+        }
+
+        .category-name { font-weight: 500; font-size: 0.95rem; }
+
+        .category-count {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--color-orange);
+        }
+
+        .category-details {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--color-light-gray);
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .category-card.active .category-details { display: block; }
+
+        .detail-item {
+            padding: 8px 0;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            word-break: break-all;
+        }
+
+        .detail-item:last-child { border-bottom: none; }
+
+        /* Preview Panel */
+        .preview-container {
+            background: var(--color-black);
+            border-radius: var(--border-radius-sm);
+            overflow: hidden;
+            height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .preview-placeholder {
+            color: var(--color-light-gray);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .preview-placeholder .material-icons-round {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .preview-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--color-light-gray);
+        }
+
+        /* Console Output */
+        .console-output {
+            background: var(--color-black);
+            color: var(--color-white);
+            border-radius: var(--border-radius-sm);
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 16px;
+        }
+
+        .console-line {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .console-line:last-child { border-bottom: none; }
+        .console-line.info { color: #60a5fa; }
+        .console-line.success { color: #4ade80; }
+        .console-line.warning { color: #fbbf24; }
+        .console-line.error { color: #f87171; }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active { display: flex; }
+
+        .modal {
+            background: var(--color-white);
+            border-radius: var(--border-radius);
+            width: 90%;
+            max-width: 900px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--color-light-gray);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--color-dark-gray);
+        }
+
+        .modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            max-height: 70vh;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--color-light-gray);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--color-light-gray);
+            border-top-color: var(--color-orange);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .btn.loading .spinner { display: inline-block; }
+        .btn.loading .btn-text { display: none; }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            display: none;
+            margin-top: 16px;
+            padding: 16px;
+            background: var(--color-background);
+            border-radius: var(--border-radius-sm);
+        }
+
+        .progress-container.active { display: block; }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--color-light-gray);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--color-orange);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-text {
+            margin-top: 8px;
+            font-size: 0.85rem;
+            color: var(--color-dark-gray);
+            text-align: center;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 40px;
+            color: var(--color-dark-gray);
+        }
+
+        .empty-state .material-icons-round {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .results-container.active { grid-template-columns: 1fr; }
+            .metadata-grid { grid-template-columns: 1fr; }
+            .page-list-header,
+            .page-item {
+                grid-template-columns: 40px 2fr 1fr;
+            }
+            .page-depth,
+            .page-words {
+                display: none;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .url-input-container { flex-direction: column; }
+            .header-brand h1 { font-size: 1.1rem; }
+            .header-brand span { display: none; }
+            .discovery-stats { flex-direction: column; gap: 8px; }
+            .discovery-actions { flex-direction: column; gap: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <div class="logo">
+                    <span class="material-icons-round">travel_explore</span>
+                </div>
+                <div>
+                    <h1>TARA URL Extractor</h1>
+                    <span>Deep Website Analysis & README Generator</span>
+                </div>
+            </div>
+            <div class="header-status">
+                <div class="status-badge ready" id="statusBadge">
+                    <span class="material-icons-round" style="font-size: 16px;">check_circle</span>
+                    <span id="statusText">Ready</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- URL Input Section -->
+            <section class="url-input-section">
+                <h2 class="section-title">
+                    <span class="material-icons-round">link</span>
+                    Website URL
+                </h2>
+                <div class="url-input-container">
+                    <div class="url-input-wrapper">
+                        <span class="material-icons-round url-input-icon">language</span>
+                        <input type="url" class="url-input" id="urlInput" 
+                               placeholder="https://www.example.com" 
+                               value="https://groq.com">
+                    </div>
+                    <button class="btn btn-primary" id="crawlBtn" onclick="startCrawl()">
+                        <div class="spinner"></div>
+                        <span class="btn-text">
+                            <span class="material-icons-round">account_tree</span>
+                            Discover Pages
+                        </span>
+                    </button>
+                </div>
+                
+                <div class="crawl-options">
+                    <div class="option-group">
+                        <span class="option-label">Crawl Depth</span>
+                        <div class="option-row">
+                            <label class="option-item">
+                                <input type="number" id="maxDepth" value="2" min="1" max="5">
+                                <span>levels deep</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="option-group">
+                        <span class="option-label">Max Pages</span>
+                        <div class="option-row">
+                            <label class="option-item">
+                                <input type="number" id="maxPages" value="50" min="1" max="200">
+                                <span>pages to discover</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="option-group">
+                        <span class="option-label">Options</span>
+                        <div class="option-row">
+                            <label class="option-item">
+                                <input type="checkbox" id="sameDomain" checked>
+                                <span>Same domain only</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress -->
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">Discovering pages...</div>
+                </div>
+            </section>
+
+            <!-- Page Discovery Section -->
+            <section class="discovery-section" id="discoverySection">
+                <div class="discovery-header">
+                    <h2 class="section-title">
+                        <span class="material-icons-round">format_list_bulleted</span>
+                        Discovered Pages
+                    </h2>
+                    <div class="discovery-stats">
+                        <div class="stat-item">
+                            <span>Total:</span>
+                            <span class="stat-value" id="totalPages">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Selected:</span>
+                            <span class="stat-value" id="selectedPages">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Domain:</span>
+                            <span class="stat-value" id="domainName">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page-list-container" id="pageListContainer">
+                    <div class="empty-state" id="emptyState">
+                        <span class="material-icons-round">web</span>
+                        <p>Click "Discover Pages" to find all pages on this website</p>
+                    </div>
+                    <div class="page-list" id="pageList" style="display: none;">
+                        <div class="page-list-header">
+                            <div><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></div>
+                            <div>Page</div>
+                            <div>Type</div>
+                            <div>Depth</div>
+                            <div>Words</div>
+                        </div>
+                        <div id="pageListBody"></div>
+                    </div>
+                </div>
+
+                <div class="discovery-actions">
+                    <div class="selection-controls">
+                        <button class="btn btn-secondary btn-sm" onclick="selectAllVisible()">
+                            <span class="material-icons-round">check_box</span>
+                            Select All
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="deselectAll()">
+                            <span class="material-icons-round">check_box_outline_blank</span>
+                            Deselect All
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="selectByDepth()">
+                            <span class="material-icons-round">filter_list</span>
+                            Select by Depth
+                        </button>
+                    </div>
+                    <button class="btn btn-purple btn-lg" id="generateBtn" onclick="generateDeepReadme()" disabled>
+                        <div class="spinner"></div>
+                        <span class="btn-text">
+                            <span class="material-icons-round">description</span>
+                            Generate README
+                        </span>
+                    </button>
+                </div>
+
+                <!-- Console Output -->
+                <div class="console-output" id="consoleOutput"></div>
+            </section>
+
+            <!-- Results Container (for single page extraction) -->
+            <div class="results-container" id="resultsContainer">
+                <!-- Left Panel: Extraction Results -->
+                <div class="results-panel">
+                    <div class="panel-header">
+                        <h3 class="panel-title">
+                            <span class="material-icons-round">analytics</span>
+                            Page Analysis
+                        </h3>
+                        <div class="panel-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="copyResults()">
+                                <span class="material-icons-round">content_copy</span>
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="metadata-grid" id="metadataGrid">
+                        <div class="metadata-item">
+                            <div class="metadata-label">Title</div>
+                            <div class="metadata-value" id="metaTitle">-</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Description</div>
+                            <div class="metadata-value" id="metaDescription">-</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Domain</div>
+                            <div class="metadata-value" id="metaDomain">-</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Language</div>
+                            <div class="metadata-value" id="metaLanguage">-</div>
+                        </div>
+                    </div>
+
+                    <div class="element-categories" id="elementCategories"></div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-secondary" onclick="exportJson()">
+                            <span class="material-icons-round">code</span>
+                            Export JSON
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Preview -->
+                <div class="results-panel">
+                    <div class="panel-header">
+                        <h3 class="panel-title">
+                            <span class="material-icons-round">preview</span>
+                            Live Preview
+                        </h3>
+                        <div class="panel-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="refreshPreview()">
+                                <span class="material-icons-round">refresh</span>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="preview-container" id="previewContainer">
+                        <div class="preview-placeholder">
+                            <span class="material-icons-round">web</span>
+                            <p>Preview will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- README Modal -->
+    <div class="modal-overlay" id="readmeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <span class="material-icons-round">description</span>
+                    Generated README.md
+                </h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="readmeContent" style="width: 100%; height: 500px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; padding: 12px; border: 1px solid var(--color-light-gray); border-radius: var(--border-radius-sm); resize: vertical;"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                <button class="btn btn-secondary" onclick="saveToHivemind()">
+                    <span class="material-icons-round">cloud_upload</span>
+                    Save to Hivemind
+                </button>
+                <button class="btn btn-primary" onclick="downloadReadme()">
+                    <span class="material-icons-round">download</span>
+                    Download README.md
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let discoveredPages = [];
+        let selectedUrls = new Set();
+        let generatedReadme = '';
+        let currentDomain = '';
+        let consoleLines = [];
+
+        // Console logging
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const line = { message, type, timestamp };
+            consoleLines.push(line);
+            
+            const consoleOutput = document.getElementById('consoleOutput');
+            const lineEl = document.createElement('div');
+            lineEl.className = `console-line ${type}`;
+            lineEl.textContent = `[${timestamp}] ${message}`;
+            consoleOutput.appendChild(lineEl);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        // Update status
+        function setStatus(status, text) {
+            const badge = document.getElementById('statusBadge');
+            const statusText = document.getElementById('statusText');
+            badge.className = `status-badge ${status}`;
+            statusText.textContent = text;
+        }
+
+        // Update progress
+        function setProgress(percent, text) {
+            document.getElementById('progressFill').style.width = percent + '%';
+            if (text) {
+                document.getElementById('progressText').textContent = text;
+            }
+        }
+
+        // Show/hide progress
+        function showProgress(show) {
+            document.getElementById('progressContainer').classList.toggle('active', show);
+        }
+
+        // Start crawling
+        async function startCrawl() {
+            const urlInput = document.getElementById('urlInput');
+            const url = urlInput.value.trim();
+            
+            if (!url) {
+                alert('Please enter a URL');
+                return;
+            }
+
+            const btn = document.getElementById('crawlBtn');
+            btn.classList.add('loading');
+            btn.disabled = true;
+            setStatus('busy', 'Crawling...');
+            showProgress(true);
+            setProgress(10, 'Initializing crawler...');
+
+            log(`Starting deep crawl for: ${url}`, 'info');
+
+            try {
+                const options = {
+                    url: url,
+                    max_depth: parseInt(document.getElementById('maxDepth').value) || 2,
+                    max_pages: parseInt(document.getElementById('maxPages').value) || 50,
+                    same_domain_only: document.getElementById('sameDomain').checked
+                };
+
+                log(`Crawl settings: depth=${options.max_depth}, max_pages=${options.max_pages}`, 'info');
+                setProgress(30, 'Discovering pages...');
+
+                const response = await fetch('/api/v1/crawl-website', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(options)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                setProgress(100, 'Complete!');
+                
+                discoveredPages = data.pages || [];
+                currentDomain = data.domain;
+                
+                log(`Crawl complete! Found ${discoveredPages.length} pages`, 'success');
+                
+                displayDiscoveredPages();
+                updatePreview(url);
+                
+                document.getElementById('discoverySection').classList.add('active');
+                setStatus('ready', 'Ready');
+                
+                // Auto-select important pages (homepage and main sections)
+                autoSelectPages();
+                
+            } catch (error) {
+                log(`Crawl failed: ${error.message}`, 'error');
+                setStatus('busy', 'Error');
+                
+                // Use mock data for demo
+                log('Using mock data for demonstration', 'warning');
+                useMockCrawlData(url);
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+                setTimeout(() => showProgress(false), 1000);
+            }
+        }
+
+        // Display discovered pages
+        function displayDiscoveredPages() {
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('pageList').style.display = 'block';
+            
+            document.getElementById('totalPages').textContent = discoveredPages.length;
+            document.getElementById('domainName').textContent = currentDomain;
+            
+            const container = document.getElementById('pageListBody');
+            container.innerHTML = discoveredPages.map((page, idx) => {
+                const wordCount = page.word_count || 0;
+                const wordClass = wordCount > 500 ? 'high' : wordCount > 100 ? 'medium' : 'low';
+                const hasForms = page.has_forms ? 'form' : 'page';
+                
+                return `
+                    <div class="page-item" data-idx="${idx}">
+                        <div>
+                            <input type="checkbox" class="page-checkbox" 
+                                   data-url="${page.url}" 
+                                   onchange="togglePageSelection('${page.url}')">
+                        </div>
+                        <div class="page-info">
+                            <div class="page-title">${page.title || 'Untitled'}</div>
+                            <div class="page-url">${page.url}</div>
+                        </div>
+                        <div class="page-type">
+                            <span class="material-icons-round type-icon">${hasForms === 'form' ? 'dynamic_form' : 'article'}</span>
+                            <span>${hasForms === 'form' ? 'Form' : 'Page'}</span>
+                        </div>
+                        <div class="page-depth">Level ${page.depth}</div>
+                        <div class="page-words ${wordClass}">${wordCount.toLocaleString()}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            updateSelectionCount();
+        }
+
+        // Toggle page selection
+        function togglePageSelection(url) {
+            if (selectedUrls.has(url)) {
+                selectedUrls.delete(url);
+            } else {
+                selectedUrls.add(url);
+            }
+            updateSelectionCount();
+            updatePageItemHighlight(url);
+        }
+
+        // Update page item highlight
+        function updatePageItemHighlight(url) {
+            const checkbox = document.querySelector(`input[data-url="${url}"]`);
+            if (checkbox) {
+                const item = checkbox.closest('.page-item');
+                item.classList.toggle('selected', selectedUrls.has(url));
+            }
+        }
+
+        // Update selection count
+        function updateSelectionCount() {
+            document.getElementById('selectedPages').textContent = selectedUrls.size;
+            document.getElementById('generateBtn').disabled = selectedUrls.size === 0;
+        }
+
+        // Toggle select all
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll').checked;
+            document.querySelectorAll('.page-checkbox').forEach(cb => {
+                cb.checked = selectAll;
+                const url = cb.getAttribute('data-url');
+                if (selectAll) {
+                    selectedUrls.add(url);
+                } else {
+                    selectedUrls.delete(url);
+                }
+                updatePageItemHighlight(url);
+            });
+            updateSelectionCount();
+        }
+
+        // Select all visible
+        function selectAllVisible() {
+            document.getElementById('selectAll').checked = true;
+            toggleSelectAll();
+        }
+
+        // Deselect all
+        function deselectAll() {
+            document.getElementById('selectAll').checked = false;
+            toggleSelectAll();
+        }
+
+        // Auto-select important pages
+        function autoSelectPages() {
+            // Select homepage and main sections (lower depth, higher word count)
+            const importantPages = discoveredPages
+                .filter(p => p.depth <= 1 || p.word_count > 200)
+                .slice(0, 10);
+            
+            importantPages.forEach(p => {
+                selectedUrls.add(p.url);
+                const checkbox = document.querySelector(`input[data-url="${p.url}"]`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                    updatePageItemHighlight(p.url);
+                }
+            });
+            
+            updateSelectionCount();
+            log(`Auto-selected ${importantPages.length} important pages`, 'info');
+        }
+
+        // Select by depth
+        function selectByDepth() {
+            const depth = prompt('Select pages up to depth:', '1');
+            if (depth === null) return;
+            
+            const maxDepth = parseInt(depth);
+            discoveredPages.forEach(p => {
+                if (p.depth <= maxDepth) {
+                    selectedUrls.add(p.url);
+                    const checkbox = document.querySelector(`input[data-url="${p.url}"]`);
+                    if (checkbox) checkbox.checked = true;
+                    updatePageItemHighlight(p.url);
+                }
+            });
+            updateSelectionCount();
+        }
+
+        // Generate deep README
+        async function generateDeepReadme() {
+            if (selectedUrls.size === 0) {
+                alert('Please select at least one page');
+                return;
+            }
+
+            const btn = document.getElementById('generateBtn');
+            btn.classList.add('loading');
+            btn.disabled = true;
+            setStatus('busy', 'Generating README...');
+            log(`Extracting content from ${selectedUrls.size} pages...`, 'info');
+
+            try {
+                const response = await fetch('/api/v1/extract-pages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        urls: Array.from(selectedUrls),
+                        generate_readme: true
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                generatedReadme = data.readme;
+                
+                log(`README generated: ${generatedReadme.length} characters`, 'success');
+                
+                document.getElementById('readmeContent').value = generatedReadme;
+                document.getElementById('readmeModal').classList.add('active');
+                setStatus('ready', 'Ready');
+                
+            } catch (error) {
+                log(`Generation failed: ${error.message}`, 'error');
+                
+                // Generate mock README for demo
+                generatedReadme = generateMockReadme();
+                document.getElementById('readmeContent').value = generatedReadme;
+                document.getElementById('readmeModal').classList.add('active');
+                setStatus('ready', 'Ready');
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('readmeModal').classList.remove('active');
+        }
+
+        // Download README
+        function downloadReadme() {
+            const content = document.getElementById('readmeContent').value;
+            const blob = new Blob([content], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentDomain || 'website'}-guide.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+            log('README downloaded', 'success');
+        }
+
+        // Save to Hivemind
+        async function saveToHivemind() {
+            if (!generatedReadme) return;
+            
+            log('Saving to Hivemind...', 'info');
+            
+            try {
+                const response = await fetch('/api/v1/save-readme-to-hivemind', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        readme_content: generatedReadme,
+                        domain: currentDomain,
+                        tenant_id: 'demo'
+                    })
+                });
+                
+                if (response.ok) {
+                    log('Saved to Hivemind successfully', 'success');
+                    alert('README saved to Hivemind for TARA to use!');
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (error) {
+                log(`Failed to save: ${error.message}`, 'error');
+                alert('Failed to save to Hivemind. Check console for details.');
+            }
+        }
+
+        // Update preview
+        function updatePreview(url) {
+            const container = document.getElementById('previewContainer');
+            container.innerHTML = `<iframe class="preview-iframe" src="${url}" sandbox="allow-same-origin allow-scripts"></iframe>`;
+        }
+
+        // Refresh preview
+        function refreshPreview() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (url) {
+                updatePreview(url);
+                log('Preview refreshed', 'info');
+            }
+        }
+
+        // Export JSON
+        function exportJson() {
+            const data = {
+                domain: currentDomain,
+                pages: discoveredPages,
+                selected: Array.from(selectedUrls),
+                exported_at: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentDomain}-pages.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            log('JSON exported', 'success');
+        }
+
+        // Copy results
+        function copyResults() {
+            const data = {
+                domain: currentDomain,
+                pages: discoveredPages,
+                selected: Array.from(selectedUrls)
+            };
+            
+            navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+                .then(() => {
+                    log('Results copied to clipboard', 'success');
+                    alert('Results copied to clipboard!');
+                })
+                .catch(err => {
+                    log('Failed to copy: ' + err.message, 'error');
+                });
+        }
+
+        // Mock crawl data for demo
+        function useMockCrawlData(url) {
+            currentDomain = new URL(url).hostname;
+            
+            discoveredPages = [
+                { url: url, title: 'Homepage - ' + currentDomain, depth: 0, word_count: 1500, has_forms: false },
+                { url: url + '/about', title: 'About Us', depth: 1, word_count: 800, has_forms: false },
+                { url: url + '/products', title: 'Products & Services', depth: 1, word_count: 1200, has_forms: true },
+                { url: url + '/contact', title: 'Contact Us', depth: 1, word_count: 400, has_forms: true },
+                { url: url + '/pricing', title: 'Pricing Plans', depth: 1, word_count: 600, has_forms: false },
+                { url: url + '/blog', title: 'Blog & News', depth: 1, word_count: 2000, has_forms: false },
+                { url: url + '/products/item-1', title: 'Product Detail - Premium', depth: 2, word_count: 500, has_forms: true },
+                { url: url + '/products/item-2', title: 'Product Detail - Basic', depth: 2, word_count: 400, has_forms: true },
+                { url: url + '/blog/post-1', title: 'Latest Industry Trends', depth: 2, word_count: 1500, has_forms: false },
+                { url: url + '/careers', title: 'Careers & Jobs', depth: 1, word_count: 700, has_forms: true },
+            ];
+            
+            document.getElementById('discoverySection').classList.add('active');
+            displayDiscoveredPages();
+            updatePreview(url);
+            autoSelectPages();
+            setStatus('ready', 'Ready');
+        }
+
+        // Generate mock README
+        function generateMockReadme() {
+            const pages = discoveredPages.filter(p => selectedUrls.has(p.url));
+            
+            let readme = `# ${currentDomain}: Master Structural & Technical Guide\n\n`;
+            readme += `Generated: ${new Date().toISOString()}\n\n`;
+            readme += `Total Pages: ${pages.length}\n\n`;
+            readme += `---\n\n`;
+            readme += `## Table of Contents\n\n`;
+            
+            pages.forEach((p, i) => {
+                readme += `- [PILLAR ${i+1}: ${p.title}](#pillar-${i+1})\n`;
+            });
+            
+            readme += `\n---\n\n`;
+            
+            pages.forEach((p, i) => {
+                readme += `## PILLAR ${i+1}: ${p.url}\n\n`;
+                readme += `**Title:** ${p.title}\n\n`;
+                readme += `**URL:** ${p.url}\n\n`;
+                readme += `**Depth:** ${p.depth}\n\n`;
+                readme += `**Content Size:** ${p.word_count} words\n\n`;
+                readme += `**Has Forms:** ${p.has_forms ? 'Yes' : 'No'}\n\n`;
+                readme += `### Content Summary\n\n`;
+                readme += `This page contains important information about ${p.title.toLowerCase()}. `;
+                readme += `It is located at depth ${p.depth} in the site hierarchy. `;
+                if (p.has_forms) {
+                    readme += `This page includes interactive forms for user input.`;
+                }
+                readme += `\n\n`;
+                readme += `---\n\n`;
+            });
+            
+            readme += `*Generated by TARA URL Extractor*\n`;
+            
+            return readme;
+        }
+
+        // Handle Enter key
+        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                startCrawl();
+            }
+        });
+
+        // Initial log
+        log('TARA Deep URL Extractor ready', 'info');
+        log('Enter a URL and click "Discover Pages" to start crawling', 'info');
+    </script>
+</body>
+</html>

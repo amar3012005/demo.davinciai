@@ -576,12 +576,11 @@ class RAGEngine:
                             processed["hive_mind_text"] = "\n---\n".join(hm_entries)
                             
                         # Logging
-                        if processed["skills"]:
-                            logger.info(f"🎯 Unified Search found {len(processed['skills'])} skills")
-                        if processed["rules"]:
-                            logger.info(f"⚖️ Unified Search found {len(processed['rules'])} rules")
-                        if hm_entries:
-                            logger.info(f"🧠 Unified Search found {len(hm_entries)} memory/KB items")
+                        total_chunks = len(hm_entries) + len(processed["skills"]) + len(processed["rules"]) + len(processed.get("general_kb", []))
+                        if total_chunks > 0:
+                            total_chars = sum(len(e) for e in hm_entries) + sum(len(s["text"]) for s in processed["skills"]) + sum(len(r["text"]) for r in processed["rules"])
+                            logger.info(f"🧠 HiveMind retrieval: {total_chunks} chunks ({total_chars} chars)")
+
 
                         return processed, search_time
                         
@@ -636,6 +635,7 @@ class RAGEngine:
             "web_results": web_results,
             "agent_skills": skills_rules.get("skills", []),
             "agent_rules": skills_rules.get("rules", []),
+            "general_kb": unified_data.get("general_kb", []),
             "timing": timing,
             "fast_path_type": fast_path_type,
             "history_context": history_context
@@ -662,6 +662,7 @@ class RAGEngine:
         web_results = retrieval_data['web_results']
         agent_skills = retrieval_data.get('agent_skills', [])
         agent_rules = retrieval_data.get('agent_rules', [])
+        general_kb = retrieval_data.get('general_kb', [])
         timing = retrieval_data['timing']
         fast_path_type = retrieval_data['fast_path_type']
         
@@ -853,7 +854,14 @@ class RAGEngine:
                 'hive_mind_used': bool(hive_mind_context),
                 'web_search_used': bool(web_results),
                 'active_skills': len(skill_texts),
-                'active_rules': len(rule_texts)
+                'active_rules': len(rule_texts),
+                'raw_chunks': [
+                   {"id": d.get("id", "unknown"), "text": d.get("text", ""), "score": d.get("score", 0), "doc_type": d.get("doc_type", "Skill/Rule")} 
+                   for d in (agent_skills + agent_rules + general_kb) if d.get("id")
+                ] + [
+                   {"id": d.get("metadata", {}).get("id", "unknown"), "text": d.get("text", ""), "score": d.get("boosted_similarity", 0), "doc_type": "Static_Doc"}
+                   for d in relevant_docs if d.get("metadata", {}).get("id")
+                ]
             }
         }
 

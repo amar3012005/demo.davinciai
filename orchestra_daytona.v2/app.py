@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, WebSocket, Query
-from fastapi.responses import JSONResponse, FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import redis.asyncio as redis
 import os
@@ -798,6 +798,145 @@ async def proxy_rag_stream_query(request: Request):
             {"error": f"RAG proxy error: {str(e)}"},
             status_code=500
         )
+
+
+@app.get("/hive-mind")
+async def serve_hive_mind_dashboard():
+    """Proxy the dashboard HTML natively from the RAG service."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        rag_url = f"{config.services.rag.url}/client"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(rag_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    return JSONResponse({"error": f"Failed to load dashboard: {response.status}"}, status_code=response.status)
+                html_content = await response.text()
+                return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Failed to fetch hive-mind dashboard: {e}")
+        return JSONResponse({"error": "Dashboard unavailable"}, status_code=500)
+
+
+@app.post("/api/v1/query")
+async def proxy_rag_query(request: Request):
+    """Proxy manual LLM queries for the Hive Mind Dashboard."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        body = await request.json()
+        rag_url = f"{config.services.rag.url}/api/v1/query"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/retrieve")
+async def proxy_rag_retrieve(request: Request):
+    """Proxy manual retrieve tests for the Hive Mind Dashboard."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        body = await request.json()
+        rag_url = f"{config.services.rag.url}/api/v1/retrieve"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy retrieve error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/api/v1/skills/{point_id}")
+async def proxy_rag_skill_delete(point_id: str, tenant_id: str = "demo"):
+    """Proxy skill/rule deletions from the visualizer."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        rag_url = f"{config.services.rag.url}/api/v1/skills/{point_id}?tenant_id={tenant_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(rag_url, timeout=aiohttp.ClientTimeout(total=20)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy delete error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/v1/hive-mind/{endpoint:path}")
+async def proxy_rag_hive_mind_api(endpoint: str, request: Request):
+    """Proxy visualization and insight analytics endpoints."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        rag_url = f"{config.services.rag.url}/api/v1/hive-mind/{endpoint}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(rag_url, params=request.query_params, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.websocket("/ws/hive-mind")
+async def proxy_hive_mind_ws(websocket: WebSocket):
+    """Securely bridge live websocket events between the public dashboard and the RAG container natively."""
+    if not config:
+        await websocket.close(code=1013, reason="Configuration not loaded")
+        return
+        
+    await websocket.accept()
+    rag_ws_url = config.services.rag.url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/hive-mind"
+    
+    try:
+        async with websockets.connect(rag_ws_url) as rag_ws:
+            async def forward_to_client():
+                try:
+                    while True:
+                        msg = await rag_ws.recv()
+                        await websocket.send_text(msg)
+                except Exception as e:
+                    pass
+                    
+            async def forward_to_rag():
+                try:
+                    while True:
+                        msg = await websocket.receive_text()
+                        await rag_ws.send(msg)
+                except Exception as e:
+                    pass
+                    
+            client_task = asyncio.create_task(forward_to_client())
+            rag_task = asyncio.create_task(forward_to_rag())
+            
+            done, pending = await asyncio.wait(
+                [client_task, rag_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in pending:
+                task.cancel()
+                
+    except Exception as e:
+        logger.error(f"Hive-mind WS proxy error: {e}")
+        try:
+            await websocket.close(code=1011, reason="Upstream unavailable")
+        except:
+            pass
 
 
 @app.get("/client")
