@@ -35,11 +35,9 @@ services:
       dockerfile: Dockerfile
     volumes:
       - tara_optimized_rag_index:/app/index
-      - /etc/letsencrypt/live/rag.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
-      - /etc/letsencrypt/live/rag.demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
       COOLIFY_CONTAINER_NAME: rag-tara-optimized
-    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 5001 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
+    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 5001"
     networks:
       tara-optimized: null
     restart: unless-stopped
@@ -55,19 +53,16 @@ services:
     env_file:
       - .env
 
-  # STT Service (Port 5002)
+  # STT Service (Port 5002) — Internal only, no SSL needed
   stt:
     build:
       context: ./stt_sarvam
       dockerfile: Dockerfile
-    volumes:
-      - /etc/letsencrypt/live/stt.demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
-      - /etc/letsencrypt/live/stt.demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
       COOLIFY_CONTAINER_NAME: stt-tara-optimized
-    command: "uvicorn app:app --host 0.0.0.0 --port 5002 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
+    command: "uvicorn app:app --host 0.0.0.0 --port 5002"
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request, ssl; ctx = ssl._create_unverified_context(); urllib.request.urlopen('https://localhost:5002/health', timeout=5, context=ctx)" ]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5002/health', timeout=5)" ]
       interval: 30s
       timeout: 10s
       retries: 3

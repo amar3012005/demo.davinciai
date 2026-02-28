@@ -396,9 +396,11 @@ class OrchestratorWSHandler:
             if len(parts) >= 3:
                 agent_name = parts[0]
             
-            # Construct RAG URL based on inferred agent name
+            # Use the internal Docker RAG URL from config (not external hostname)
+            # External: https://rag.demo.davinciai.eu:8444 is NOT reachable from inside Docker
+            # Internal: http://rag:5001 (from config.services.rag.url / RAG_SERVICE_URL env)
             config["agent_name"] = agent_name
-            config["rag_url"] = f"https://rag.{agent_name}.davinciai.eu:8444"
+            # Keep using the configured internal RAG URL — do NOT override with external hostname
         
         # Specific Voice ID Mapping overrides
         VOICE_MAPPING = {
