@@ -16,7 +16,7 @@ from datetime import datetime
 
 # Ensure project root on path
 sys.path.insert(0, os.path.dirname(__file__))
-from .models.hivemind_schema import website_map_payload
+from daytona_agent.services.rag.models.hivemind_schema import website_map_payload
 
 # Configuration
 QDRANT_URL = "http://qdrant-n80wo80os08gswko4040wo8g.116.202.24.69.sslip.io:6333"

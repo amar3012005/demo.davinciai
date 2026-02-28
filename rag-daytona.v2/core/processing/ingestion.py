@@ -67,7 +67,7 @@ class IngestionService:
         Process an uploaded file and ingest into Qdrant using Universal Schema.
         """
         # Import schema factories
-        from .models.hivemind_schema import general_kb_payload, website_map_payload, agent_skill_payload
+        from daytona_agent.services.rag.models.hivemind_schema import general_kb_payload, website_map_payload, agent_skill_payload
         
         file_id = str(uuid.uuid4())
         filename = file.filename
