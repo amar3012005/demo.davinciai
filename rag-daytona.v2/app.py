@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from daytona_agent.services.shared.redis_client import get_redis_client, close_redis_client, ping_redis
 from daytona_agent.services.rag.config import RAGConfig
 from daytona_agent.services.rag.rag_engine import RAGEngine
-from models.hivemind_schema import (
+from .models.hivemind_schema import (
     agent_skill_payload, agent_rule_payload,
     read_text, read_summary, read_doc_type, read_created_at,
     SCHEMA_VERSION,
