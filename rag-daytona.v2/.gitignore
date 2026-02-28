@@ -1,5 +1,4 @@
-# Models and Data
-models/
+# Binary model files (NOT the models/ source directory)
 *.onnx
 *.bin
 *.pt
