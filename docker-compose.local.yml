@@ -67,7 +67,7 @@ services:
       - rag-index:/app/index
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
       - ./orchestra_daytona.v2:/app/daytona_agent/services/orchestra_daytona.v2
-    command: "uvicorn app:app --host 0.0.0.0 --port 8003"
+    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 8003"
     restart: unless-stopped
     depends_on:
       - redis

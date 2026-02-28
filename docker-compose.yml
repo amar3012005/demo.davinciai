@@ -37,7 +37,7 @@ services:
       - tara_optimized_rag_index:/app/index
     environment:
       COOLIFY_CONTAINER_NAME: rag-tara-optimized
-    command: "uvicorn app:app --host 0.0.0.0 --port 5001"
+    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 5001"
     networks:
       tara-optimized: null
     restart: unless-stopped
