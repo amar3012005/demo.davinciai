@@ -1,9 +1,11 @@
 # Coolify-compatible TARA Optimized Service
 # Domain: demo.davinciai.eu | Orchestrator WSS exposed on port 8010
-# Place this in /data/coolify/services/<service-id>/docker-compose.yml
+# All env vars are inline to match local behavior exactly
 
 services:
-  # Redis Cache (Required for optimizations)
+  # ═══════════════════════════════════════════════════════════
+  # Redis Cache
+  # ═══════════════════════════════════════════════════════════
   redis:
     image: redis:7-alpine
     volumes:
@@ -28,7 +30,9 @@ services:
     env_file:
       - .env
 
-  # RAG Service (Port 5001)
+  # ═══════════════════════════════════════════════════════════
+  # RAG Service (Port 5001) — Uses Groq LLM
+  # ═══════════════════════════════════════════════════════════
   rag:
     build:
       context: ./rag-daytona.v2
@@ -36,7 +40,41 @@ services:
     volumes:
       - tara_optimized_rag_index:/app/index
     environment:
+      # LLM Configuration — MUST be groq, NOT gemini
+      LLM_PROVIDER: groq
+      LLM_API_KEY: ${LLM_API_KEY:-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}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+
+      # Mind Reader
+      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
+
+      # Qdrant (Hive Mind)
+      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_hive}
+      ENABLE_HIVE_MIND: "true"
+      ENABLE_LOCAL_RETRIEVAL: "false"
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+
+      # Feature Flags
+      USE_NEW_DETECTIVE: "true"
+      USE_MISSION_BRAIN: "true"
+      USE_LIVE_GRAPH: "true"
+      USE_HIVE_INTERFACE: "true"
+
+      # Logging & Identity
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TENANT_ID: tara
+      DAYTONA_RAG_ENABLE_CACHE: "false"
+      DAYTONA_RAG_CACHE_TTL: "0"
+
       COOLIFY_CONTAINER_NAME: rag-tara-optimized
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 5001"
     networks:
       tara-optimized: null
@@ -53,12 +91,26 @@ services:
     env_file:
       - .env
 
-  # STT Service (Port 5002) — Internal only, no SSL needed
+  # ═══════════════════════════════════════════════════════════
+  # STT Service (Port 5002) — Sarvam Translate Mode
+  # ═══════════════════════════════════════════════════════════
   stt:
     build:
       context: ./stt_sarvam
       dockerfile: Dockerfile
     environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: INFO
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI}
+      SARVAM_MODEL: ${SARVAM_MODEL:-saaras:v2.5}
+      SARVAM_VAD_SIGNALS: "true"
+      SARVAM_HIGH_VAD: "true"
+      SARVAM_FLUSH_SIGNAL: "true"
+      SARVAM_MODE: "translate"
+      STT_HOST: 0.0.0.0
+      STT_PORT: 5002
+      ORCHESTRATOR_WS_URL: "ws://orchestrator:5004/ws"
+      ORCHESTRATOR_SKIP_SSL_VERIFY: "true"
       COOLIFY_CONTAINER_NAME: stt-tara-optimized
     command: "uvicorn app:app --host 0.0.0.0 --port 5002"
     healthcheck:
@@ -78,12 +130,20 @@ services:
     env_file:
       - .env
 
-  # TTS Service (Port 5003)
+  # ═══════════════════════════════════════════════════════════
+  # TTS Service (Port 5003) — Cartesia
+  # ═══════════════════════════════════════════════════════════
   tts:
     build:
       context: ./tts_cartesia
       dockerfile: Dockerfile
     environment:
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-sk_car_k6RiuJVp2gEzAP6ozyCrdp}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-95d51f79-c397-46f9-b49a-23763d3eaa2d}
+      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
+      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+      TTS_CARTESIA_PORT: 5003
       COOLIFY_CONTAINER_NAME: tts-tara-optimized
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 5003"
     healthcheck:
@@ -103,20 +163,39 @@ services:
     env_file:
       - .env
 
-  # Orchestrator (Port 5004 internal → 8010 external with SSL for WSS)
+  # ═══════════════════════════════════════════════════════════
+  # Orchestrator (Port 5004 → External 8010 with SSL for WSS)
+  # ═══════════════════════════════════════════════════════════
   orchestrator:
     build:
       context: ./orchestra_daytona.v2
       dockerfile: Dockerfile
     ports:
-      - "8010:5004" # External WSS port mapped to internal 5004
+      - "8010:5004"
     volumes:
       - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
       - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
-      COOLIFY_CONTAINER_NAME: orchestrator-tara-optimized
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+
+      # Internal service URLs (plain HTTP inside Docker network)
+      RAG_SERVICE_URL: http://rag:5001
+      STT_SERVICE_URL: http://stt:5002
+      TTS_SERVICE_URL: http://tts:5003
+
+      # External-facing URLs (SSL via certs)
       PUBLIC_URL: "https://demo.davinciai.eu:8010"
       ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8010/ws"
+      WIDGET_WS_URL: "wss://demo.davinciai.eu:8010/ws"
+
+      # Features
+      ENABLE_FILLERS: "false"
+      FSM_APPOINTMENT_URL: "https://cal.com/amar-nadig-uy2g3b/30min"
+      TENANT_ID: tara
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      COOLIFY_CONTAINER_NAME: orchestrator-tara-optimized
     command: "uvicorn app:app --host 0.0.0.0 --port 5004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0"
     networks:
       tara-optimized: null
