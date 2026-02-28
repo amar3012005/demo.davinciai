@@ -36,17 +36,7 @@ services:
     volumes:
       - tara_optimized_rag_index:/app/index
     environment:
-      LLM_PROVIDER: groq
-      LLM_API_KEY: ${LLM_API_KEY}
-      LLM_MODEL: openai/gpt-oss-20b
-      ANALYTICS_MODEL: qwen/qwen3-32b
-      LOG_LEVEL: DEBUG
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: ${QDRANT_URL}
-      QDRANT_API_KEY: ${QDRANT_API_KEY}
-      ENABLE_HIVE_MIND: 'true'
       COOLIFY_CONTAINER_NAME: rag-tara-optimized
-      TENANT_ID: tara
     command: "uvicorn app:app --host 0.0.0.0 --port 5001"
     networks:
       tara-optimized: null
@@ -69,19 +59,8 @@ services:
       context: ./stt_sarvam
       dockerfile: Dockerfile
     environment:
-      PYTHONUNBUFFERED: 1
-      LOG_LEVEL: DEBUG
-      SARVAM_API_KEY: ${SARVAM_API_KEY}
-      SARVAM_MODEL: saaras:v2.5
-      SARVAM_VAD_SIGNALS: 'true'
-      SARVAM_HIGH_VAD: 'true'
-      SARVAM_FLUSH_SIGNAL: 'true'
-      STT_HOST: 0.0.0.0
-      STT_PORT: 5002
-      ORCHESTRATOR_WS_URL: ws://orchestrator:5004/ws # Internal connection
-      ORCHESTRATOR_SKIP_SSL_VERIFY: 'true'
       COOLIFY_CONTAINER_NAME: stt-tara-optimized
-    command: 'uvicorn app:app --host 0.0.0.0 --port 5002'
+    command: "uvicorn app:app --host 0.0.0.0 --port 5002"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5002/health', timeout=5)" ]
       interval: 30s
@@ -105,11 +84,6 @@ services:
       context: ./tts_cartesia
       dockerfile: Dockerfile
     environment:
-      CARTESIA_API_KEY: ${CARTESIA_API_KEY}
-      CARTESIA_VOICE_ID: f786b574-daa5-4673-aa0c-cbe3e8534c02
-      CARTESIA_OUTPUT_FORMAT: pcm_s16le
-      CARTESIA_SAMPLE_RATE: 44100
-      TTS_CARTESIA_PORT: 5003
       COOLIFY_CONTAINER_NAME: tts-tara-optimized
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 5003"
     healthcheck:
@@ -137,15 +111,7 @@ services:
     ports:
       - "8010:5004" # Expose external port 8010 mapped to internal 5004
     environment:
-      SERVER_PORT: 5004
-      REDIS_URL: redis://redis:6379/0
-      RAG_SERVICE_URL: http://rag:5001
-      STT_SERVICE_URL: http://stt:5002
-      TTS_SERVICE_URL: http://tts:5003
       COOLIFY_CONTAINER_NAME: orchestrator-tara-optimized
-      ENABLE_FILLERS: 'false'
-      FSM_APPOINTMENT_URL: https://cal.com/amar-nadig-uy2g3b/30min
-      TENANT_ID: tara
     command: "uvicorn app:app --host 0.0.0.0 --port 5004 --ws-ping-interval 0"
     networks:
       tara-optimized: null
@@ -156,7 +122,6 @@ services:
       - coolify.name=orchestrator-tara-optimized
       - coolify.service.subType=application
       - coolify.service.subName=orchestrator
-      # Configure for Traefik routing in Coolify using Port 8010 mappings
       - traefik.enable=true
       - traefik.http.routers.orchestrator.rule=Host(`tara.daytona.io`)
       - traefik.http.services.orchestrator.loadbalancer.server.port=5004
