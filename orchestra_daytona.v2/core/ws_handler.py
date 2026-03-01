@@ -3679,14 +3679,21 @@ class OrchestratorWSHandler:
                 logger.info(f"[{session.session_id}] 🔊 Playing exit via TTS: {exit_text[:50]}...")
                 await self._stream_tts_to_browser(session, exit_text, output_language)
             
-            # Wait for exit audio to finish playing before closing
+            # Wait for exit audio to finish generating/streaming
             if session.tts_task and not session.tts_task.done():
                 try:
                     await session.tts_task
                 except asyncio.CancelledError:
                     pass
-            # Small delay to ensure audio completes
-            await asyncio.sleep(0.5)
+
+            # Wait for actual playback to finish on the client side
+            # The server playback timer or client playback_done event will transition state to LISTENING
+            wait_cycles = 0
+            while session.state_manager.state == State.SPEAKING and not session.is_closed and wait_cycles < 200: # 20 seconds max
+                await asyncio.sleep(0.1)
+                wait_cycles += 1
+                
+            # If we exited the loop and are still in SPEAKING, force the transition
 
             # Transition to LISTENING after exit audio completes (fallback if browser doesn't send playback_done)
             if session.state_manager.state == State.SPEAKING:
