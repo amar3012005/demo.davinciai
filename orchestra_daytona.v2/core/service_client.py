@@ -12,6 +12,7 @@ import aiohttp
 import ssl
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from dataclasses import dataclass
+import re
 
 from config_loader import STTConfig, TTSConfig, RAGConfig, IntentConfig
 
@@ -321,8 +322,12 @@ class TTSClient:
         # CRITICAL FIX: Batch small chunks to prevent rate limiting
         self._chunk_buffer += text
         
+        # Strip XML tags to see how much actual text we have
+        text_no_tags = re.sub(r'<[^>]+>', '', self._chunk_buffer).strip()
+        str_no_tags = re.sub(r'<[^>]+>', '', text).strip()
+        
         # If buffer is large enough OR chunk is already large, send immediately
-        if len(self._chunk_buffer) >= self._min_chunk_size or len(text) >= self._max_chunk_size:
+        if len(text_no_tags) >= self._min_chunk_size or len(str_no_tags) >= self._max_chunk_size:
             await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
         else:
             # Schedule delayed flush (small chunks accumulate)

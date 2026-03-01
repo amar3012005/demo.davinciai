@@ -339,8 +339,10 @@ class CartesiaManager:
                             "continue": stream_start_time is not None,
                         }
                         
-                        if "multilingual" in target_model.lower():
-                            message["language"] = language or self.config.language
+                        if "multilingual" in target_model.lower() or "sonic-3" in target_model.lower() or "sonic-4" in target_model.lower():
+                            raw_lang = language or self.config.language
+                            if raw_lang:
+                                message["language"] = raw_lang.split("-")[0].split("_")[0]
                         
                         if pronunciation_dict_id:
                             message["pronunciation_dict_id"] = pronunciation_dict_id
