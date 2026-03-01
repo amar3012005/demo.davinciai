@@ -1892,6 +1892,14 @@ class OrchestratorWSHandler:
             session.audio_playback_server_timer.cancel()
             logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new RAG stream")
 
+        # CRITICAL FIX: Clear any stale data from tts_audio_queue BEFORE RAG streaming starts!
+        # Do NOT clear it after RAG streaming finishes, otherwise we delete fresh chunks from Cartesia!
+        while not session.tts_audio_queue.empty():
+            try:
+                session.tts_audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
         try:
             # Connect to TTS service for streaming (avoid double connection)
             # TTS connection is handled by _stt_receive_loop or on-demand, don't reconnect here
@@ -2038,13 +2046,6 @@ class OrchestratorWSHandler:
             tts_receive_timeout = 25.0  # Increased timeout
             tts_start_time = time.time()
             
-            # Clear any stale data from tts_audio_queue before starting fresh
-            while not session.tts_audio_queue.empty():
-                try:
-                    session.tts_audio_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-
             try:
                 # Consume from the background-filled queue
                 while not session.is_closed:
