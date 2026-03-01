@@ -434,11 +434,14 @@ async def websocket_stream(
                     def audio_callback(audio_bytes: bytes, sample_rate: int, metadata: Dict[str, Any]):
                         session.audio_queue.put_nowait((audio_bytes, metadata))
                     
+                    # Renew Context ID for every single synthesis request since Cartesia closes them instantly upon completion
+                    turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
+                    
                     # Run synthesis
                     stats = await manager.stream_text_to_audio(
                         text,
                         audio_callback,
-                        context_id=session.context_id,
+                        context_id=turn_ctx_id,
                         voice_id=voice_id,
                         model_id=model_id,
                         language=language,
@@ -497,10 +500,13 @@ async def websocket_stream(
                         def audio_callback(audio_bytes: bytes, sample_rate: int, metadata: Dict[str, Any]):
                             session.audio_queue.put_nowait((audio_bytes, metadata))
                         
+                        # Renew context
+                        turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
+                        
                         stats = await manager.stream_text_to_audio(
                             full_text,
                             audio_callback,
-                            context_id=session.context_id,
+                            context_id=turn_ctx_id,
                             voice_id=session.current_voice,
                             model_id=session.current_model or config.model,
                             language=session.current_language,
