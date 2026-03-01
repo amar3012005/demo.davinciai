@@ -154,6 +154,16 @@ services:
       # Redis Connection
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
 
+      # Organization
+      ORGANIZATION_NAME: "TASK"
+      ORGANIZATION_FULL_NAME: "TASK"
+      KNOWLEDGE_BASE_PATH: "/app/daytona_knowledge_base"
+
+      # Agent
+      AGENT_NAME: "TARA"
+      AGENT_ID: "tara"
+      TENANT_ID: ${TENANT_ID:-tara}
+
       # Service URLs
       RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag:8003}
       STT_SERVICE_URL: ${STT_SERVICE_URL:-http://stt:8002}
@@ -162,14 +172,11 @@ services:
       # WebSocket Configuration (LOCAL - no SSL)
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8004}
       ORCHESTRATOR_WS_URL: ${ORCHESTRATOR_WS_URL:-ws://localhost:8004/ws}
-
-      # Ultimate TARA - Widget Configuration
       WIDGET_WS_URL: ${WIDGET_WS_URL:-ws://localhost:8004/ws}
 
       # Features
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
       FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-https://cal.com/amar-nadig-uy2g3b/30min}
-      TENANT_ID: ${TENANT_ID:-tara}
 
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

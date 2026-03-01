@@ -181,6 +181,16 @@ services:
       # Redis
       REDIS_URL: redis://redis:6379/0
 
+      # Organization
+      ORGANIZATION_NAME: "TASK"
+      ORGANIZATION_FULL_NAME: "TASK"
+      KNOWLEDGE_BASE_PATH: "/app/daytona_knowledge_base"
+
+      # Agent
+      AGENT_NAME: "TARA"
+      AGENT_ID: "tara"
+      TENANT_ID: tara
+
       # Internal service URLs (plain HTTP inside Docker network)
       RAG_SERVICE_URL: http://rag:5001
       STT_SERVICE_URL: http://stt:5002
@@ -194,7 +204,6 @@ services:
       # Features
       ENABLE_FILLERS: "false"
       FSM_APPOINTMENT_URL: "https://cal.com/amar-nadig-uy2g3b/30min"
-      TENANT_ID: tara
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
       COOLIFY_CONTAINER_NAME: orchestrator-tara-optimized
