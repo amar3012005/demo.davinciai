@@ -329,11 +329,13 @@ class CartesiaManager:
                         if not text_chunk or not text_chunk.strip():
                             continue
                         
+                        # Cartesia Sonic 3 strictly rejects newlines paired with XML tags
+                        clean_text = text_chunk.replace('\n', ' ').replace('\r', ' ')
                         target_model = model_id or self.config.model
                         message = {
                             "context_id": ctx_id,
                             "model_id": target_model,
-                            "transcript": text_chunk,
+                            "transcript": clean_text,
                             "voice": (voice_id and len(voice_id.strip()) > 0) and {"mode": "id", "id": voice_id} or self.config.get_voice_config(),
                             "output_format": self.config.get_output_format_config(),
                             "continue": stream_start_time is not None,
