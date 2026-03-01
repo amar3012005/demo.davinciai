@@ -102,15 +102,17 @@ services:
       PYTHONUNBUFFERED: 1
       LOG_LEVEL: INFO
       SARVAM_API_KEY: ${SARVAM_API_KEY:-sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI}
-      SARVAM_MODEL: ${SARVAM_MODEL:-saaras:v2.5}
+      SARVAM_MODEL: saaras:v2.5
       SARVAM_VAD_SIGNALS: "true"
       SARVAM_HIGH_VAD: "true"
       SARVAM_FLUSH_SIGNAL: "true"
-      SARVAM_MODE: "translate"
-      STT_HOST: 0.0.0.0
-      STT_PORT: 5002
-      ORCHESTRATOR_WS_URL: "ws://orchestrator:5004/ws"
-      ORCHESTRATOR_SKIP_SSL_VERIFY: "true"
+      SARVAM_MODE: translate
+      # config.py reads HOST and PORT (not STT_HOST / STT_PORT)
+      HOST: 0.0.0.0
+      PORT: 5002
+      # Orchestrator has SSL, must use wss://
+      ORCHESTRATOR_WS_URL: "wss://orchestrator:5004/ws"
+      SKIP_SSL_VERIFY: "true"
       COOLIFY_CONTAINER_NAME: stt-tara-optimized
     command: "uvicorn app:app --host 0.0.0.0 --port 5002"
     healthcheck:
@@ -127,12 +129,11 @@ services:
       - coolify.name=stt-tara-optimized
       - coolify.service.subType=application
       - coolify.service.subName=stt
-    env_file:
-      - .env
+    # NOTE: No env_file here — Coolify's .env overrides SARVAM_MODE and ORCHESTRATOR_WS_URL with wrong values
 
-  # ═══════════════════════════════════════════════════════════
-  # TTS Service (Port 5003) — Cartesia
-  # ═══════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
+    # TTS Service (Port 5003) — Cartesia
+    # ═══════════════════════════════════════════════════════════
   tts:
     build:
       context: ./tts_cartesia
