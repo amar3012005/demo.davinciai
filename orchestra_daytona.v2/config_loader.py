@@ -110,6 +110,7 @@ class AgentConfig:
     tenant_id: str = "tara"
     wss_url: str = "ws://localhost:8004/ws"
     public_url: str = "http://localhost:8004"
+    pronunciation_dict_id: str = ""
 
 
 @dataclass
@@ -245,7 +246,8 @@ class ConfigLoader:
                 id=os.getenv("AGENT_ID", agent_data.get("id", "tara")),
                 tenant_id=os.getenv("TENANT_ID", agent_data.get("tenant_id", "tara")),
                 wss_url=os.getenv("WIDGET_WS_URL", agent_data.get("wss_url", os.getenv("ORCHESTRATOR_WS_URL", ""))),
-                public_url=os.getenv("PUBLIC_URL", agent_data.get("public_url", ""))
+                public_url=os.getenv("PUBLIC_URL", agent_data.get("public_url", "")),
+                pronunciation_dict_id=os.getenv("CARTESIA_PRONUNCIATION_DICT_ID", agent_data.get("pronunciation_dict_id", ""))
             )
         
         # Language config (with env var overrides)

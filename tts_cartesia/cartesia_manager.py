@@ -264,6 +264,7 @@ class CartesiaManager:
         voice_id: Optional[str] = None,
         language: Optional[str] = None,
         model_id: Optional[str] = None,
+        pronunciation_dict_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Stream text to audio using multiplexed persistent connections.
@@ -340,6 +341,9 @@ class CartesiaManager:
                         
                         if "multilingual" in target_model.lower():
                             message["language"] = language or self.config.language
+                        
+                        if pronunciation_dict_id:
+                            message["pronunciation_dict_id"] = pronunciation_dict_id
                         
                         if stream_start_time is None:
                             logger.info(f"[{ctx_id[:8]}] Sending first chunk: {text_chunk[:30]}...")

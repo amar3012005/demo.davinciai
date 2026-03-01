@@ -1964,7 +1964,7 @@ class OrchestratorWSHandler:
                         session.filler_task.cancel()
                         logger.debug(f"[{session.session_id}] ⏸️ Cancelled filler task on first text token")
                 
-                await session.tts_client.stream_chunk(token, output_language, emotion="helpful", voice_id=session.voice_id_override)
+                await session.tts_client.stream_chunk(token, output_language, emotion="helpful", voice_id=session.voice_id_override, pronunciation_dict_id=self.config.agent.pronunciation_dict_id)
 
             # Cancel latency fillers since RAG response is complete and TTS is about to start
             if session.filler_task and not session.filler_task.done():
@@ -2756,7 +2756,7 @@ class OrchestratorWSHandler:
                             await self._broadcast_state(session, State.SPEAKING)
 
                         # Stream text to TTS service (audio results will be picked up by forward_audio task)
-                        await session.tts_client.stream_chunk(content, language=output_language, voice_id=session.voice_id_override)
+                        await session.tts_client.stream_chunk(content, language=output_language, voice_id=session.voice_id_override, pronunciation_dict_id=self.config.agent.pronunciation_dict_id)
                 
                 elif msg_type == "action":
                     payload = chunk.get("payload")

@@ -256,6 +256,7 @@ class SynthesizeRequest(BaseModel):
     text: str
     voice_id: Optional[str] = None
     language: Optional[str] = None
+    pronunciation_dict_id: Optional[str] = None
 
 
 @app.post("/api/v1/synthesize")
@@ -274,6 +275,7 @@ async def synthesize(request: SynthesizeRequest):
         text=request.text,
         voice_id=request.voice_id,
         language=request.language,
+        pronunciation_dict_id=request.pronunciation_dict_id,
     )
     
     if not audio_bytes:
@@ -416,6 +418,7 @@ async def websocket_stream(
                     raw_voice = message.get("voice")
                     raw_model = message.get("model")
                     language = message.get("language")
+                    pron_dict = message.get("pronunciation_dict_id")
                     
                     # Sanitize inputs
                     voice_id, model_id = sanitize_config(raw_voice, raw_model)
@@ -439,6 +442,7 @@ async def websocket_stream(
                         voice_id=voice_id,
                         model_id=model_id,
                         language=language,
+                        pronunciation_dict_id=pron_dict,
                     )
                     
                     session.is_streaming = False
@@ -474,6 +478,8 @@ async def websocket_stream(
                         session.current_model = message.get("model")
                     if message.get("language"):
                         session.current_language = message.get("language")
+                    if message.get("pronunciation_dict_id"):
+                        session.current_dict = message.get("pronunciation_dict_id")
                         
                     if text_chunk:
                         text_buffer.append(text_chunk)
@@ -498,6 +504,7 @@ async def websocket_stream(
                             voice_id=session.current_voice,
                             model_id=session.current_model or config.model,
                             language=session.current_language,
+                            pronunciation_dict_id=getattr(session, "current_dict", None),
                         )
                         
                         session.is_streaming = False

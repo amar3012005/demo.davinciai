@@ -239,7 +239,7 @@ class TTSClient:
         
         return False
     
-    async def synthesize(self, text: str, language: str = "en", emotion: str = "helpful", voice_id: Optional[str] = None):
+    async def synthesize(self, text: str, language: str = "en", emotion: str = "helpful", voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
         """
         Send synthesis request to TTS service
         
@@ -273,7 +273,8 @@ class TTSClient:
                 "text": text,
                 "emotion": emotion,
                 "voice": voice_id,
-                "language": voice_lang
+                "language": voice_lang,
+                "pronunciation_dict_id": pronunciation_dict_id
             })
         except Exception as e:
             logger.error(f"TTS send failed: {e}, attempting reconnection...")
@@ -286,14 +287,15 @@ class TTSClient:
                         "text": text,
                         "emotion": emotion,
                         "voice": voice_id,
-                        "language": voice_lang
+                        "language": voice_lang,
+                        "pronunciation_dict_id": pronunciation_dict_id
                     })
                 else:
                     logger.error("Failed to reconnect TTS WebSocket after send error")
             else:
                 logger.error("Cannot reconnect: no session_id available")
     
-    async def stream_chunk(self, text: str, language: str = "en", emotion: str = "helpful", voice_id: Optional[str] = None):
+    async def stream_chunk(self, text: str, language: str = "en", emotion: str = "helpful", voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
         """
         Send streaming text chunk to TTS service with intelligent batching.
         
@@ -321,19 +323,24 @@ class TTSClient:
         
         # If buffer is large enough OR chunk is already large, send immediately
         if len(self._chunk_buffer) >= self._min_chunk_size or len(text) >= self._max_chunk_size:
-            await self._flush_chunks(language, emotion, voice_id)
+            await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
         else:
             # Schedule delayed flush (small chunks accumulate)
             if self._flush_task and not self._flush_task.done():
                 self._flush_task.cancel()
-            self._flush_task = asyncio.create_task(self._delayed_flush(language, emotion, voice_id))
+            # Schedule a flush or flush immediately
+            self._schedule_flush(language, emotion, voice_id, pronunciation_dict_id)
     
-    async def _delayed_flush(self, language: str, emotion: str, voice_id: Optional[str] = None, delay_ms: float = 50.0):
+    def _schedule_flush(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, delay_ms: float = 50.0):
+        """Schedule buffered chunks to be flushed after a short delay."""
+        self._flush_task = asyncio.create_task(self._delayed_flush(language, emotion, voice_id, pronunciation_dict_id, delay_ms))
+
+    async def _delayed_flush(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, delay_ms: float = 50.0):
         """Flush buffered chunks after a short delay."""
         await asyncio.sleep(delay_ms / 1000.0)
-        await self._flush_chunks(language, emotion, voice_id)
+        await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
     
-    async def _flush_chunks(self, language: str, emotion: str, voice_id: Optional[str] = None):
+    async def _flush_chunks(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
         """Send buffered chunks to TTS service."""
         if not self._chunk_buffer:
             return
@@ -378,7 +385,8 @@ class TTSClient:
                     "text": chunk,
                     "emotion": emotion,
                     "voice": voice_id,
-                    "language": voice_lang
+                    "language": voice_lang,
+                    "pronunciation_dict_id": pronunciation_dict_id
                 })
             except Exception as e:
                 logger.error(f"TTS stream_chunk send failed: {e}, attempting reconnection...")
@@ -391,7 +399,8 @@ class TTSClient:
                             "text": chunk,
                             "emotion": emotion,
                             "voice": voice_id,
-                            "language": voice_lang
+                            "language": voice_lang,
+                            "pronunciation_dict_id": pronunciation_dict_id
                         })
                     else:
                         logger.error("Failed to reconnect TTS WebSocket after stream_chunk error")
