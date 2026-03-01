@@ -106,7 +106,7 @@ services:
       SARVAM_VAD_SIGNALS: "true"
       SARVAM_HIGH_VAD: "true"
       SARVAM_FLUSH_SIGNAL: "true"
-      SARVAM_MODE: translate
+      SARVAM_MODE: transcribe
       # config.py reads HOST and PORT (not STT_HOST / STT_PORT)
       HOST: 0.0.0.0
       PORT: 5002
