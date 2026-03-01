@@ -711,7 +711,10 @@ class OrchestratorWSHandler:
             session_id=session_id,
             websocket=websocket,
             state_manager=state_mgr,
-            user_id=user_id
+            user_id=user_id,
+            agent_name=self.config.agent.name,
+            agent_id=self.config.agent.id,
+            tenant_id=self.config.agent.tenant_id
         )
         
         self.sessions[session_id] = session
