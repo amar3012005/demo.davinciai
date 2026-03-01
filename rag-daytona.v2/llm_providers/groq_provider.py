@@ -31,6 +31,7 @@ class GroqProvider(LLMProvider):
                     api_key=self.api_key
                 )
             self._client = GroqProvider._client_instance
+            self._last_usage: Dict[str, Any] = {}
             logger.info(f"✅ Groq initialized (AsyncGroq): {self.model_name}")
             return True
         except Exception as e:
@@ -140,19 +141,50 @@ class GroqProvider(LLMProvider):
             else:
                 messages = [{"role": "user", "content": prompt}]
 
-            chat_completion = await self._client.chat.completions.create(
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **extra_args,
-                **kwargs
-            )
+            if self._is_gpt_oss(model):
+                reasoning_effort = (kwargs.pop("reasoning_effort", "low") or "low").strip().lower()
+                # Groq GPT-OSS supports only: low | medium | high
+                if reasoning_effort == "none":
+                    reasoning_effort = "low"
+                if reasoning_effort not in {"low", "medium", "high"}:
+                    reasoning_effort = "low"
+                include_reasoning = bool(kwargs.pop("include_reasoning", False))
+
+                chat_completion = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_completion_tokens=max_tokens,
+                    include_reasoning=include_reasoning,
+                    reasoning_effort=reasoning_effort,
+                    **extra_args,
+                    **kwargs
+                )
+            else:
+                chat_completion = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **extra_args,
+                    **kwargs
+                )
             
             # Log Usage for Caching Verification
             if hasattr(chat_completion, 'usage'):
                 u = chat_completion.usage
-                logger.info(f"🧬 Groq Usage: {u.prompt_tokens} prompt / {u.completion_tokens} completion. Total: {u.total_tokens}")
+                cached_tokens = self._extract_cached_tokens(u)
+                self._last_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                    "cached_tokens": cached_tokens,
+                    "model": model,
+                }
+                cache_suffix = f" | cached={cached_tokens}" if cached_tokens else ""
+                logger.info(f"🧬 Groq Usage: {u.prompt_tokens} prompt / {u.completion_tokens} completion. Total: {u.total_tokens}{cache_suffix}")
+            else:
+                self._last_usage = {}
 
             return chat_completion.choices[0].message.content
         except Exception as e:
@@ -330,13 +362,17 @@ class GroqProvider(LLMProvider):
             usage_info = None
             async for chunk in stream:
                 if hasattr(chunk, 'usage') and chunk.usage:
+                    cached_tokens = self._extract_cached_tokens(chunk.usage)
                     usage_info = {
                         "prompt_tokens": chunk.usage.prompt_tokens,
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens,
+                        "cached_tokens": cached_tokens,
                         "model": model
                     }
-                    logger.info(f"🧬 Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.")
+                    self._last_usage = usage_info
+                    cache_suffix = f" | cached={cached_tokens}" if cached_tokens else ""
+                    logger.info(f"🧬 Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.{cache_suffix}")
 
                 content = chunk.choices[0].delta.content
                 if content:
@@ -345,6 +381,8 @@ class GroqProvider(LLMProvider):
             # Yield usage metadata as a sentinel after all text chunks
             if usage_info:
                 yield {"__usage__": usage_info}
+            else:
+                self._last_usage = {}
         except Exception as e:
             logger.error(f"Groq streaming error: {e}")
             raise
@@ -352,3 +390,23 @@ class GroqProvider(LLMProvider):
     def is_available(self) -> bool:
         """Check if Groq client is ready."""
         return self._client is not None
+
+    @staticmethod
+    def _extract_cached_tokens(usage: Any) -> int:
+        """Best-effort extraction of prompt cached tokens from Groq usage object."""
+        try:
+            details = getattr(usage, "prompt_tokens_details", None)
+            if details is None and isinstance(usage, dict):
+                details = usage.get("prompt_tokens_details")
+            if details is None:
+                return 0
+
+            if isinstance(details, dict):
+                return int(details.get("cached_tokens", 0) or 0)
+            return int(getattr(details, "cached_tokens", 0) or 0)
+        except Exception:
+            return 0
+
+    def get_last_usage(self) -> Dict[str, Any]:
+        """Return usage metadata from most recent Groq request."""
+        return dict(getattr(self, "_last_usage", {}) or {})

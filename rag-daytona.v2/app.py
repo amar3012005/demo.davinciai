@@ -1112,7 +1112,12 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             streaming_callback=None,  # Streaming handled separately if needed
             history_context=request_data.history_context,
             tenant_id=request_data.tenant_id,
-            force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower())
+            force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
+            generation_config={
+                "max_tokens": 1024,
+                "temperature": 0.55,
+                "stop": ["</resp>", "</turn>", "</ctxt>"]
+            }
         )
         
         # Add cached flag
@@ -1272,7 +1277,12 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     streaming_callback=callback,
                     history_context=request.history_context,
                     tenant_id=request.tenant_id,
-                    force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower())
+                    force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
+                    generation_config={
+                        "max_tokens": 1024,
+                        "temperature": 0.6,
+                        "stop": ["</resp>", "</turn>", "</ctxt>"]
+                    }
                 )
                 
                 # Store result for caching

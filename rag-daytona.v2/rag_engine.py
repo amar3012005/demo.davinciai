@@ -673,7 +673,8 @@ class RAGEngine:
         streaming_callback: Optional[Callable[[str, bool], None]] = None,
         history_context: Optional[str] = None,
         tenant_id: str = "tara",
-        force_non_stream: bool = False
+        force_non_stream: bool = False,
+        generation_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """High-performance RAG pipeline with parallel retrieval and FAST-PATH."""
         start_time = time.time()
@@ -784,6 +785,16 @@ class RAGEngine:
             agent_rules=rule_texts
         )
         prompt = self._apply_prompt_budget(prompt, str(getattr(self.config, "llm_model", "")))
+
+        # 4.5 Generation controls (endpoint-tunable)
+        gen_cfg = generation_config or {}
+        generation_temperature = float(gen_cfg.get("temperature", 0.65))
+        generation_max_tokens = int(gen_cfg.get("max_tokens", 320))
+        generation_stop = gen_cfg.get("stop")
+        if isinstance(generation_stop, str):
+            generation_stop = [generation_stop]
+        if not isinstance(generation_stop, list):
+            generation_stop = None
         
         # 5. Generation
         gen_start = time.time()
@@ -800,10 +811,11 @@ class RAGEngine:
             result = self.llm.generate(
                 prompt=prompt,
                 stream=use_stream,
-                temperature=0.65,
-                max_tokens=320,
+                temperature=generation_temperature,
+                max_tokens=generation_max_tokens,
                 include_reasoning=False,
-                reasoning_effort="low"
+                reasoning_effort="low",
+                stop=generation_stop
             )
             llm_usage = {}  # Capture token usage from LLM provider
             
@@ -849,6 +861,13 @@ class RAGEngine:
                 accumulated = "I'm sorry, I couldn't process that. Could you please repeat or rephrase your question?"
                 if streaming_callback: streaming_callback(accumulated, False)
 
+            # Non-streaming providers may store usage out-of-band.
+            if not llm_usage and hasattr(self.llm, "get_last_usage"):
+                try:
+                    llm_usage = self.llm.get_last_usage() or {}
+                except Exception:
+                    llm_usage = {}
+
             if streaming_callback: streaming_callback("", True)
             
         except Exception as e:
@@ -857,15 +876,22 @@ class RAGEngine:
             fallback_result = self.llm.generate(
                 prompt=prompt,
                 stream=False,
-                temperature=0.65,
-                max_tokens=320,
+                temperature=generation_temperature,
+                max_tokens=generation_max_tokens,
                 include_reasoning=False,
-                reasoning_effort="low"
+                reasoning_effort="low",
+                stop=generation_stop
             )
             if asyncio.iscoroutine(fallback_result):
                 accumulated = await fallback_result
             else:
                 accumulated = str(fallback_result)
+
+            if not llm_usage and hasattr(self.llm, "get_last_usage"):
+                try:
+                    llm_usage = self.llm.get_last_usage() or {}
+                except Exception:
+                    llm_usage = {}
                 
             if streaming_callback: streaming_callback(accumulated, True)
             
@@ -888,6 +914,12 @@ class RAGEngine:
         logger.info(f"   Answer: {answer[:200]}{'...' if len(answer) > 200 else ''}")
         logger.info(f"   Timing: {timing['total_ms']:.1f}ms (TTFC: {timing.get('ttfc_ms', 0):.1f}ms)")
         logger.info(f"   Language: {original_language} | Sources: {len(relevant_docs)} docs")
+        if llm_usage:
+            prompt_tokens = llm_usage.get("prompt_tokens", 0) or 0
+            cached_tokens = llm_usage.get("cached_tokens", 0) or 0
+            if prompt_tokens > 0:
+                cache_hit_pct = (cached_tokens / prompt_tokens) * 100.0
+                logger.info(f"   Prompt Cache: {cached_tokens}/{prompt_tokens} ({cache_hit_pct:.1f}%)")
         
         return {
             'answer': answer,
