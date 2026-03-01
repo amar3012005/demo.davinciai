@@ -312,6 +312,7 @@ class GroqProvider(LLMProvider):
                     reasoning_effort=kwargs.pop("reasoning_effort", "low"),
                     include_reasoning=kwargs.pop("include_reasoning", False),
                     stream=True,
+                    stream_options={"include_usage": True},
                     **kwargs
                 )
             else:
@@ -321,6 +322,7 @@ class GroqProvider(LLMProvider):
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,
+                    stream_options={"include_usage": True},
                     **kwargs
                 )
             

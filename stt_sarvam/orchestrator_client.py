@@ -89,8 +89,10 @@ class OrchestratorWSClient:
                     websockets.connect(
                         url,
                         ssl=ssl_ctx,
-                        ping_interval=20,
-                        ping_timeout=10,
+                        # Disable protocol-level pings to avoid ping/drain contention
+                        # under heavy audio streaming; monitor loop handles liveness.
+                        ping_interval=None,
+                        ping_timeout=None,
                         close_timeout=5,
                     ),
                     timeout=10,
@@ -143,11 +145,12 @@ class OrchestratorWSClient:
         latency_ms: Optional[float] = None,
     ):
         """Send transcript matching stt_groq_whisper's contract."""
+        language = (language_code or "").strip()
         payload = {
             "type": "stt_transcript",
             "text": text,
             "is_final": is_final,
-            "language": "en",
+            "language": language,
             "timestamp": time.time(),
             "session_id": self.session_id,
             "source": "sarvam_stt",

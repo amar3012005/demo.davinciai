@@ -512,14 +512,22 @@ async def websocket_stream(
                             language=session.current_language,
                             pronunciation_dict_id=getattr(session, "current_dict", None),
                         )
-                        
+
                         session.is_streaming = False
-                        
+
                         # Signal turn end and WAIT for audio_sender
                         session.turn_done_event.clear()
                         await session.audio_queue.put(None)
                         await session.turn_done_event.wait()
-                        
+
+                        # Log and propagate errors from Cartesia
+                        if stats.get("error"):
+                            logger.error(f"[{session_id}] Cartesia stream error: {stats['error']}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": f"TTS synthesis failed: {stats['error']}"
+                            })
+
                         await websocket.send_json({
                             "type": "complete",
                             "chunks": stats.get("chunks_received", 0),

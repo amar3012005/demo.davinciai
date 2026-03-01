@@ -52,6 +52,7 @@ class SarvamSTTSession:
         self.accumulated_segments: list[str] = []
         self.flush_pending = False
         self.last_transcript_time: Optional[float] = None
+        self.last_language_code: Optional[str] = None
 
         # ── Local VAD state ─────────────────────────────────────
         self.consecutive_silent_chunks = 0
@@ -212,6 +213,9 @@ class SarvamSTTSession:
         metrics = data.get("metrics", {})
         processing_latency = metrics.get("processing_latency", 0)
 
+        if language_code:
+            self.last_language_code = language_code
+
         self.last_transcript_time = time.time()
 
         # Determine if this is a final transcript
@@ -240,7 +244,7 @@ class SarvamSTTSession:
                 text=transcript,
                 is_final=False,
                 request_id=request_id,
-                language_code=language_code,
+                language_code=language_code or self.last_language_code,
                 latency_ms=processing_latency * 1000 if processing_latency else None,
             )
 
@@ -254,6 +258,7 @@ class SarvamSTTSession:
             self.speech_start_time = time.time()
             self.current_transcript = ""
             self.accumulated_segments.clear()
+            self.last_language_code = None
             self.consecutive_silent_chunks = 0
             logger.info(f"[{self.session_id}] Sarvam VAD: SPEECH_START")
             await self._emit_vad_event("SPEECH_START")
@@ -338,20 +343,23 @@ class SarvamSTTSession:
 
     async def _flush_timeout_guard(self):
         """
-        If no final transcript arrives within 2s after flush,
+        If no final transcript arrives within configured timeout after flush,
         emit whatever we have as the final.
         """
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(self.config.flush_timeout_ms / 1000.0)
         if self.flush_pending:
             logger.warning(f"[{self.session_id}] Flush timeout — emitting accumulated as final")
             self.flush_pending = False
             text = self.current_transcript or " ".join(self.accumulated_segments)
+            fallback_language = self.last_language_code
+            if not fallback_language and self.config.language_code.lower() != "unknown":
+                fallback_language = self.config.language_code
             if text.strip():
                 await self._emit_transcript(
                     text=text.strip(),
                     is_final=True,
                     request_id="flush_timeout",
-                    language_code=None,
+                    language_code=fallback_language,
                     latency_ms=None,
                 )
                 self.finals_emitted += 1

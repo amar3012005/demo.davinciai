@@ -107,7 +107,11 @@ services:
       SARVAM_HIGH_VAD: "false"
       SARVAM_FLUSH_SIGNAL: "true"
       SARVAM_MODE: codemix
+      SARVAM_ENDPOINT_MODE: stt
       SARVAM_LANGUAGE_CODE: "te-IN"
+      SARVAM_FORWARD_INTERVAL_MS: "80"
+      SARVAM_FLUSH_TIMEOUT_MS: "1200"
+      SARVAM_VAD_SILENCE_MS: "900"
       # config.py reads HOST and PORT (not STT_HOST / STT_PORT)
       HOST: 0.0.0.0
       PORT: 5002
@@ -190,7 +194,7 @@ services:
       AGENT_NAME: "TARA"
       AGENT_ID: "tara"
       TENANT_ID: tara
-      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-""}
+      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-"pdict_19NTe4RAAHgG8UbibcAcLG"}
 
       # Internal service URLs (plain HTTP inside Docker network)
       RAG_SERVICE_URL: http://rag:5001
@@ -204,6 +208,8 @@ services:
 
       # Features
       ENABLE_FILLERS: "false"
+      STREAM_OUT: "auto"
+      SUPPORTED_LANGUAGES: "en,de,te-IN,hi-IN,ta-IN,kn-IN"
       FSM_APPOINTMENT_URL: "https://cal.com/amar-nadig-uy2g3b/30min"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 

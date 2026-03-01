@@ -905,6 +905,7 @@
                 this.currentSource = null;
                 this.activeSources = new Set();  // Track all scheduled audio sources for cleanup
                 this.playbackStartTime = null;
+                this.currentPlaybackTurnId = null;
                 this.audioStreamComplete = false;  // Track when server finished sending audio
                 this.playbackFallbackTimer = null;  // Fallback timer for audio_complete timeout
                 this.chunkCount = 0;
@@ -1308,6 +1309,9 @@
                         break;
 
                     case 'audio_chunk':
+                        if (data.playback_turn_id !== undefined && data.playback_turn_id !== null) {
+                            this.currentPlaybackTurnId = data.playback_turn_id;
+                        }
                         if (data.is_final) {
                             this.addLog('Audio stream complete from server', 'info');
                             this.audioStreamComplete = true;
@@ -1806,6 +1810,7 @@
                 this.nextPlayTime = 0;
                 this.binaryQueue.length = 0;  // Drain stale binary frames
                 this.audioStreamComplete = false;
+                this.currentPlaybackTurnId = null;
             }
 
             // ───────────────────────────────────────────────────────────────────
@@ -1944,8 +1949,11 @@
                 this.send({
                     type: 'playback_done',
                     duration_ms: duration,
+                    playback_turn_id: this.currentPlaybackTurnId,
                     timestamp: Date.now() / 1000
                 });
+
+                this.currentPlaybackTurnId = null;
             }
 
             playAudioBuffer(buffer) {
@@ -1968,7 +1976,11 @@
 
             notifyPlaybackDone() {
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.send({ type: 'playback_done', timestamp: Date.now() / 1000 });
+                    this.send({
+                        type: 'playback_done',
+                        playback_turn_id: this.currentPlaybackTurnId,
+                        timestamp: Date.now() / 1000
+                    });
                 }
             }
 

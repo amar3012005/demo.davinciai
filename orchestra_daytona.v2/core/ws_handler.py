@@ -126,6 +126,7 @@ class OrchestratorSession:
     audio_playback_duration: Optional[float] = None  # Expected duration in seconds
     audio_playback_predicted_end: Optional[float] = None  # Predicted end timestamp (from client)
     audio_playback_server_timer: Optional[asyncio.Task] = None  # Server-side timer task
+    audio_playback_turn_id: int = 0  # Monotonic playback id for stale-event rejection
     
     # Filler coordination
     immediate_filler_played: bool = False  # Track if immediate filler was played to prevent double filling
@@ -289,18 +290,25 @@ class OrchestratorWSHandler:
             logger.debug(f"Using session language override: {session.stream_out_override}")
             return session.stream_out_override
 
-        stream_out = self.config.languages.stream_out.lower()
+        stream_out_raw = self.config.languages.stream_out
+        stream_out = stream_out_raw.lower()
 
         if stream_out == "auto":
             # Use detected language, fallback to default
             return detected_language or self.config.languages.default
-        elif stream_out in ["en", "de"]:
-            # Force specific language regardless of input
-            return stream_out
+        elif stream_out_raw:
+            # Force specific language regardless of input (supports BCP-47 codes)
+            return stream_out_raw
         else:
-            # Invalid value, fallback to auto behavior
-            logger.warning(f"Invalid stream_out value '{stream_out}', using auto mode")
+            # Empty value, fallback to auto behavior
+            logger.warning("Empty stream_out value, using auto mode")
             return detected_language or self.config.languages.default
+
+    def _clear_playback_tracking(self, session: OrchestratorSession) -> None:
+        """Reset playback timing metadata for the current turn."""
+        session.audio_playback_start_time = None
+        session.audio_playback_duration = None
+        session.audio_playback_predicted_end = None
 
     def _detect_language_switch_command(self, text_lower: str) -> Optional[str]:
         """
@@ -1429,7 +1437,7 @@ class OrchestratorWSHandler:
                 # Play post-response prompt after a delay (e.g., "Do you need anything else?")
                 # Only play for transitions from SPEAKING to LISTENING (completed responses), not error recovery
                 transition_trigger = getattr(session.state_manager, 'last_transition_trigger', None)
-                if transition_trigger in ["playback_done_server_timer", "playback_done_auto"]:
+                if transition_trigger in ["playback_done", "playback_done_server_timer", "playback_watchdog_timeout", "playback_done_auto"]:
                     async def play_post_response_prompt():
                         try:
                             # Wait 2 seconds before playing the prompt
@@ -1877,8 +1885,7 @@ class OrchestratorWSHandler:
         
         # CRITICAL: Reset audio duration tracking for this new response
         session.tts_total_bytes = 0
-        session.audio_playback_duration = None
-        session.audio_playback_start_time = None
+        self._clear_playback_tracking(session)
         
         # Also cancel any existing playback timer that might cut off this stream
         if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
@@ -2092,6 +2099,7 @@ class OrchestratorWSHandler:
                                 await self._broadcast_state(session, State.SPEAKING)
                                 transitioned_to_speaking = True
                                 
+                                session.audio_playback_turn_id += 1
                                 session.audio_playback_start_time = time.time()
                                 if not hasattr(session, 'tts_total_bytes'):
                                     session.tts_total_bytes = 0
@@ -2206,6 +2214,7 @@ class OrchestratorWSHandler:
                     "type": "audio_chunk",
                     "chunk_id": f"{session.session_id}_chunk_{chunk_counter}",
                     "is_final": True,
+                    "playback_turn_id": session.audio_playback_turn_id,
                     "timestamp": time.time()
                 }, session):
                     logger.info(f"[{session.session_id}] ⏸️ Failed to send final audio chunk - client disconnected")
@@ -2866,6 +2875,7 @@ class OrchestratorWSHandler:
             # CRITICAL: Reset tracking for THIS specific stream to ensure accurate duration
             # Also cancel any existing playback timer that might cut off this stream
             session.tts_total_bytes = 0
+            self._clear_playback_tracking(session)
             if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
                 session.audio_playback_server_timer.cancel()
                 logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new TTS stream")
@@ -2928,6 +2938,7 @@ class OrchestratorWSHandler:
                             # CRITICAL: Flush any existing filler audio from buffer
                             await self._enqueue_foreground_audio(session, b"", flush=True, sample_rate=chunk_sample_rate, encoding=chunk_encoding)
                             
+                            session.audio_playback_turn_id += 1
                             session.audio_playback_start_time = time.time()
                             logger.debug(f"[{session.session_id}] 📊 Tracking TTS playback start")
                         
@@ -2965,6 +2976,7 @@ class OrchestratorWSHandler:
                     "type": "audio_chunk",
                     "chunk_id": f"{session.session_id}_chunk_{chunk_counter}",
                     "is_final": True,
+                    "playback_turn_id": session.audio_playback_turn_id,
                     "timestamp": time.time()
                 }, session)
                 
@@ -3052,6 +3064,8 @@ class OrchestratorWSHandler:
             if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
                 session.audio_playback_server_timer.cancel()
                 logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new audio file stream")
+            if not cancellation_task:
+                self._clear_playback_tracking(session)
 
             audio_file = Path(audio_path)
             if not audio_file.exists():
@@ -3078,6 +3092,7 @@ class OrchestratorWSHandler:
                 # Track playback start time and duration (for accurate playback_done validation)
                 # Skip tracking for fillers in THINKING state (they have cancellation_task)
                 if not cancellation_task:
+                    session.audio_playback_turn_id += 1
                     session.audio_playback_start_time = time.time()
                     session.audio_playback_duration = duration_sec
                     logger.debug(f"[{session.session_id}] 📊 Tracking audio playback: start_time={session.audio_playback_start_time}, duration={duration_sec:.2f}s")
@@ -3168,6 +3183,7 @@ class OrchestratorWSHandler:
                     "format": encoding,
                     "chunk_id": f"{session.session_id}_filler_{chunk_counter}",
                     "is_final": False,  # Not final yet
+                    "playback_turn_id": session.audio_playback_turn_id,
                     "timestamp": time.time(),
                     "duration_ms": chunk_duration_ms
                 }, session):
@@ -3183,6 +3199,7 @@ class OrchestratorWSHandler:
                     "type": "audio_chunk",
                     "chunk_id": f"{session.session_id}_file_chunk_{chunk_counter}",
                     "is_final": True,
+                    "playback_turn_id": session.audio_playback_turn_id,
                     "timestamp": time.time()
                 }, session)
 
@@ -3212,8 +3229,22 @@ class OrchestratorWSHandler:
         Handle browser playback_start message with predicted duration.
         
         Client sends this when audio starts playing, providing predictedEndMs.
-        Server uses this for accurate timing instead of relying on browser 'ended' events.
+        Server keeps a watchdog timer as fallback in case playback_done is missed.
         """
+        msg_turn_id = msg.get("playback_turn_id") or msg.get("turn_id")
+        if msg_turn_id is not None:
+            try:
+                msg_turn_id = int(msg_turn_id)
+            except (TypeError, ValueError):
+                msg_turn_id = None
+
+        if msg_turn_id and msg_turn_id != session.audio_playback_turn_id:
+            logger.debug(
+                f"[{session.session_id}] ⏸️ Ignoring stale playback_start "
+                f"(msg turn={msg_turn_id}, active turn={session.audio_playback_turn_id})"
+            )
+            return
+
         duration_ms = msg.get("durationMs", 0)
         predicted_end_ms = msg.get("predictedEndMs", 0)
         
@@ -3237,7 +3268,7 @@ class OrchestratorWSHandler:
                 f"predicted_end={session.audio_playback_predicted_end:.2f}"
             )
             
-            # Start server-side timer (PRIMARY mechanism)
+            # Start server-side watchdog timer (fallback mechanism)
             await self._start_server_side_playback_timer(session, duration_sec)
     
     async def _handle_playback_heartbeat(self, session: OrchestratorSession, msg: Dict[str, Any]):
@@ -3255,11 +3286,13 @@ class OrchestratorWSHandler:
     
     async def _start_server_side_playback_timer(self, session: OrchestratorSession, duration_sec: float):
         """
-        Start server-side timer for accurate playback completion.
+        Start watchdog timer for playback completion.
         
-        This is the PRIMARY mechanism - transitions to LISTENING based on server-side timing.
-        Browser playback_done is only used as a safety net if timer fails.
+        Browser playback_done remains the primary signal.
+        This timer only recovers state if playback_done is not received.
         """
+        playback_turn_id = session.audio_playback_turn_id
+
         # Cancel any existing timer
         if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
             session.audio_playback_server_timer.cancel()
@@ -3270,25 +3303,31 @@ class OrchestratorWSHandler:
         
         async def server_timer():
             try:
-                # Wait for actual duration + 500ms buffer
-                await asyncio.sleep(duration_sec + 0.5)
+                # Watchdog delay: stay conservative to avoid premature LISTENING.
+                watchdog_delay = max(duration_sec + 1.2, (duration_sec * 1.15) + 0.35)
+                await asyncio.sleep(watchdog_delay)
                 
-                # Check if still in SPEAKING and session not closed
+                # Check if still the same playback turn, still in SPEAKING, and session not closed
                 state_mgr = session.state_manager
-                if state_mgr.state == State.SPEAKING and not session.is_closed:
+                if (
+                    playback_turn_id == session.audio_playback_turn_id
+                    and state_mgr.state == State.SPEAKING
+                    and not session.is_closed
+                ):
                     # Reset activity timer so we don't timeout immediately after speaking
                     session.last_activity = time.time()
                     
-                    logger.debug(f"[{session.session_id}] ⏰ Server-side timer: Transitioning to LISTENING (duration: {duration_sec:.2f}s)")
+                    logger.warning(
+                        f"[{session.session_id}] ⏰ Playback watchdog fired after {watchdog_delay:.2f}s "
+                        f"(turn={playback_turn_id}) — recovering to LISTENING"
+                    )
                     output_language = self._get_output_language(session.current_language, session)
-                    listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="playback_done_server_timer")
+                    listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="playback_watchdog_timeout")
                     await self._execute_side_effects(session, listening_side_effects, output_language)
                     await self._broadcast_state(session, State.LISTENING)
                     
                     # Clear playback tracking
-                    session.audio_playback_start_time = None
-                    session.audio_playback_duration = None
-                    session.audio_playback_predicted_end = None
+                    self._clear_playback_tracking(session)
             except asyncio.CancelledError:
                 logger.debug(f"[{session.session_id}] Server-side playback timer cancelled")
             except Exception as e:
@@ -3298,11 +3337,7 @@ class OrchestratorWSHandler:
     
     async def _handle_playback_done(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """
-        Handle browser confirming playback completion (SECONDARY mechanism).
-        
-        Server-side timing is PRIMARY. Browser playback_done is only accepted if:
-        1. Server timer hasn't fired yet (safety net)
-        2. Enough time has passed (not premature)
+        Handle browser confirming playback completion (PRIMARY mechanism).
         
         This handles both 'playback_done' and 'playback_confirmed_end' messages.
         """
@@ -3313,11 +3348,41 @@ class OrchestratorWSHandler:
             logger.debug(f"[{session.session_id}] Playback done in non-SPEAKING state (ignored)")
             return
 
+        msg_turn_id = msg.get("playback_turn_id") or msg.get("turn_id")
+        if msg_turn_id is not None:
+            try:
+                msg_turn_id = int(msg_turn_id)
+            except (TypeError, ValueError):
+                msg_turn_id = None
+
+        if msg_turn_id and msg_turn_id != session.audio_playback_turn_id:
+            logger.debug(
+                f"[{session.session_id}] ⏸️ Ignoring stale playback_done "
+                f"(msg turn={msg_turn_id}, active turn={session.audio_playback_turn_id})"
+            )
+            return
+
+        client_ts = msg.get("timestamp")
+        if session.audio_playback_start_time and client_ts:
+            try:
+                client_ts_f = float(client_ts)
+                # If client-reported completion predates current playback start,
+                # this is from an older stream.
+                if client_ts_f + 0.15 < session.audio_playback_start_time:
+                    logger.debug(
+                        f"[{session.session_id}] ⏸️ Ignoring stale playback_done by timestamp "
+                        f"(client_ts={client_ts_f:.3f}, start={session.audio_playback_start_time:.3f})"
+                    )
+                    return
+            except (TypeError, ValueError):
+                pass
+
         # Validate playback_done timing - ignore premature messages
         if session.audio_playback_start_time and session.audio_playback_duration:
             elapsed = time.time() - session.audio_playback_start_time
-            if elapsed < session.audio_playback_duration:
-                # Premature playback_done - ignore it (server-side timer will handle it)
+            # Keep a small margin for browser clock drift.
+            if elapsed + 0.08 < session.audio_playback_duration:
+                # Premature playback_done - ignore it (watchdog will handle it)
                 logger.debug(
                     f"[{session.session_id}] ⏸️ Ignoring premature playback_done "
                     f"(elapsed: {elapsed:.2f}s < duration: {session.audio_playback_duration:.2f}s)"
@@ -3331,14 +3396,12 @@ class OrchestratorWSHandler:
                 await asyncio.wait_for(session.audio_playback_server_timer, timeout=0.1)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-            logger.debug(f"[{session.session_id}] ⏸️ Cancelled server-side timer - browser confirmed playback done")
+            logger.debug(f"[{session.session_id}] ⏸️ Cancelled playback watchdog timer - browser confirmed playback done")
         
-        logger.info(f"[{session.session_id}] ✅ Playback DONE (browser confirmed - secondary mechanism)")
+        logger.info(f"[{session.session_id}] ✅ Playback DONE (browser confirmed)")
 
         # Clear playback tracking
-        session.audio_playback_start_time = None
-        session.audio_playback_duration = None
-        session.audio_playback_predicted_end = None
+        self._clear_playback_tracking(session)
 
         # Transition back to LISTENING
         logger.info(f"[{session.session_id}] 🔄 LISTENING: Response complete, ready for next input")
@@ -3383,6 +3446,7 @@ class OrchestratorWSHandler:
         if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
             session.audio_playback_server_timer.cancel()
             logger.debug(f"[{session.session_id}] ⏸️ Cancelled playback timer due to interrupt")
+        self._clear_playback_tracking(session)
         
         # Notify browser
         await self._send_json(session.websocket, {
@@ -3411,8 +3475,13 @@ class OrchestratorWSHandler:
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
             
-            listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="interrupt_complete")
-            await self._execute_side_effects(session, listening_side_effects, output_language)
+            # Guard against concurrent recovery paths that already moved to LISTENING.
+            if state_mgr.state == State.INTERRUPT:
+                listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="interrupt_complete")
+                await self._execute_side_effects(session, listening_side_effects, output_language)
+            elif state_mgr.state != State.LISTENING:
+                listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="interrupt_recover")
+                await self._execute_side_effects(session, listening_side_effects, output_language)
         
         await self._broadcast_state(session, State.LISTENING)
     
@@ -3917,6 +3986,7 @@ class OrchestratorWSHandler:
             "format": encoding,
             "chunk_id": f"{session.session_id}_chunk_{chunk_counter}",
             "is_final": is_final,
+            "playback_turn_id": session.audio_playback_turn_id,
             "timestamp": time.time(),
             "binary_sent": True
         }, session)
@@ -4667,4 +4737,3 @@ class PhoneOrchestratorSession(OrchestratorSession):
         # For now, just pass through (Twilio sends PCM)
         logger.debug(f"Phone audio received: {len(g711_bytes)} bytes")
         return g711_bytes
-

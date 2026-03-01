@@ -13,6 +13,7 @@ import asyncio
 import json
 import base64
 import logging
+import re
 import time
 import uuid
 from typing import Optional, Callable, Dict, Any, AsyncGenerator, Union, List
@@ -321,6 +322,30 @@ class CartesiaManager:
             receive_complete = asyncio.Event()
             receive_error: Optional[str] = None
             
+            # Cartesia Sonic 3 only supports 5 SSML emotion values.
+            # Map LLM-generated emotion names to valid Cartesia values.
+            CARTESIA_EMOTION_MAP = {
+                # Direct matches
+                "angry": "angry",
+                "sad": "sad",
+                "curious": "curious",
+                "surprised": "surprised",
+                "positive": "positive",
+                # LLM emotion → closest Cartesia emotion
+                "content": "positive",
+                "enthusiastic": "positive",
+                "excited": "surprised",
+                "sympathetic": "sad",
+                "determined": "positive",
+                "calm": None,           # no Cartesia equivalent — strip tag
+                "joking/comedic": "positive",
+                "neutral": None,        # no Cartesia equivalent — strip tag
+                "anxious": "sad",
+                "proud": "positive",
+                "nostalgic": "sad",
+                "confused": "curious",
+            }
+
             async def send_text():
                 """Send text chunks to Cartesia via multiplexed connection"""
                 nonlocal stream_start_time
@@ -328,9 +353,35 @@ class CartesiaManager:
                     async for text_chunk in text_iter:
                         if not text_chunk or not text_chunk.strip():
                             continue
-                        
+
                         # Cartesia Sonic 3 strictly rejects newlines paired with XML tags
                         clean_text = text_chunk.replace('\n', ' ').replace('\r', ' ')
+
+                        # Map LLM emotion tags to valid Cartesia SSML emotion values.
+                        # Invalid values cause Cartesia to silently return 0 audio chunks.
+                        emotion_match = re.search(r'<emotion\s+value="([^"]+)"\s*/>', clean_text)
+                        if emotion_match:
+                            raw_emotion = emotion_match.group(1).lower().strip()
+                            mapped = CARTESIA_EMOTION_MAP.get(raw_emotion)
+                            if mapped:
+                                # Replace with valid Cartesia emotion tag
+                                clean_text = re.sub(
+                                    r'<emotion\s+value="[^"]+"\s*/>',
+                                    f'<emotion value="{mapped}" />',
+                                    clean_text
+                                )
+                                logger.info(f"[{ctx_id[:8]}] Mapped emotion '{raw_emotion}' → '{mapped}'")
+                            else:
+                                # No valid mapping — strip the tag entirely
+                                clean_text = re.sub(r'<emotion\s+value="[^"]+"\s*/>', '', clean_text).strip()
+                                logger.info(f"[{ctx_id[:8]}] Stripped unsupported emotion '{raw_emotion}'")
+
+                        # Skip if only whitespace/tags remain after processing
+                        text_without_tags = re.sub(r'<[^>]+/?>', '', clean_text).strip()
+                        if not text_without_tags:
+                            logger.debug(f"[{ctx_id[:8]}] Skipping chunk with no speakable text")
+                            continue
+
                         target_model = model_id or self.config.model
                         message = {
                             "context_id": ctx_id,
@@ -346,8 +397,12 @@ class CartesiaManager:
                             if raw_lang:
                                 message["language"] = raw_lang.split("-")[0].split("_")[0]
                         
-                        if pronunciation_dict_id:
-                            message["pronunciation_dict_id"] = pronunciation_dict_id
+                        if pronunciation_dict_id and pronunciation_dict_id.strip().strip('"').strip("'"):
+                            clean_dict_id = pronunciation_dict_id.strip().strip('"').strip("'")
+                            if clean_dict_id.startswith("pdict_"):
+                                message["pronunciation_dict_id"] = clean_dict_id
+                            else:
+                                logger.warning(f"[{ctx_id[:8]}] Ignoring invalid pronunciation_dict_id: '{pronunciation_dict_id}'")
                         
                         if stream_start_time is None:
                             logger.info(f"[{ctx_id[:8]}] Sending first chunk: {text_chunk[:30]}...")

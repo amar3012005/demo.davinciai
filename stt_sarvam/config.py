@@ -46,6 +46,7 @@ class SarvamSTTConfig:
     # How often we batch-forward PCM to Sarvam. Smaller = lower latency.
     forward_interval_ms: int = 100  # 100 ms chunks → 3200 bytes at 16 kHz
     min_audio_bytes: int = 640      # Minimum bytes to bother sending (20 ms)
+    flush_timeout_ms: int = 1200    # Wait this long for final after flush before fallback-final
 
     @property
     def forward_chunk_bytes(self) -> int:
@@ -115,6 +116,7 @@ class SarvamSTTConfig:
             high_vad_sensitivity=os.getenv("SARVAM_HIGH_VAD", "true").lower() == "true",
             enable_flush_signal=os.getenv("SARVAM_FLUSH_SIGNAL", "true").lower() == "true",
             forward_interval_ms=int(os.getenv("SARVAM_FORWARD_INTERVAL_MS", "100")),
+            flush_timeout_ms=int(os.getenv("SARVAM_FLUSH_TIMEOUT_MS", "1200")),
             local_vad_energy_threshold=int(os.getenv("SARVAM_VAD_ENERGY", "500")),
             local_vad_silence_ms=int(os.getenv("SARVAM_VAD_SILENCE_MS", "800")),
             orchestrator_ws_url=os.getenv("ORCHESTRATOR_WS_URL", ""),
@@ -175,6 +177,7 @@ class SarvamSTTConfig:
         logger.info(f"    Sample   : {self.sample_rate} Hz, codec={self.input_audio_codec}")
         logger.info(f"    VAD      : server={self.enable_vad_signals}, high_sens={self.high_vad_sensitivity}")
         logger.info(f"    Flush    : {self.enable_flush_signal}")
+        logger.info(f"    Flush TO : {self.flush_timeout_ms}ms")
         logger.info(f"    Forward  : {self.forward_interval_ms}ms chunks ({self.forward_chunk_bytes} bytes)")
         logger.info(f"    Local VAD: energy>{self.local_vad_energy_threshold}, silence={self.local_vad_silence_ms}ms")
         logger.info(f"    Service  : {self.host}:{self.port}")
