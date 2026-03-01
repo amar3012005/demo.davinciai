@@ -80,8 +80,8 @@ class RAGEngine:
                     fallback_provider=config.fallback_llm_provider,
                     fallback_api_key=config.fallback_llm_api_key,
                     fallback_model=config.fallback_llm_model,
-                    site_url=getattr(config, 'openrouter_site_url', 'https://tara.daytona.io'),
-                    app_name=getattr(config, 'openrouter_app_name', 'TARA-Daytona'),
+                    site_url=getattr(config, 'openrouter_site_url', 'https://tara.task.gov.in'),
+                    app_name=getattr(config, 'openrouter_app_name', 'TARA'),
                     enable_reasoning=getattr(config, 'openrouter_enable_reasoning', True)
                 )
             except Exception as e:
@@ -91,8 +91,8 @@ class RAGEngine:
             try:
                 kwargs = {}
                 if config.llm_provider == "openrouter":
-                    kwargs['site_url'] = getattr(config, 'openrouter_site_url', 'https://tara.daytona.io')
-                    kwargs['app_name'] = getattr(config, 'openrouter_app_name', 'TARA-Daytona')
+                    kwargs['site_url'] = getattr(config, 'openrouter_site_url', 'https://tara.task.gov.in')
+                    kwargs['app_name'] = getattr(config, 'openrouter_app_name', 'TARA')
                 
                 self.llm = create_provider(
                     provider_name=config.llm_provider,
@@ -147,21 +147,21 @@ class RAGEngine:
         self.patterns = {
             "installation": {
                 "keywords": ["install", "setup", "how to install", "getting started", "deploy", "download", "run", "start"],
-                "response_template": "You can install Daytona with pip... or if you prefer npm...",
+                "response_template": "Here's how to get started...",
                 "faiss_boost": ["installation", "setup", "getting_started"],
                 "max_context_chars": 1500,
                 "priority": 3
             },
             "pricing": {
                 "keywords": ["price", "cost", "free", "open source", "license", "payment", "subscription", "enterprise"],
-                "response_template": "Daytona is open source and available for free. For enterprise support...",
+                "response_template": "Here are the pricing details...",
                 "faiss_boost": ["pricing", "license", "open_source"],
                 "max_context_chars": 1000,
                 "priority": 3
             },
             "features": {
                 "keywords": ["feature", "capability", "what can it do", "support", "language", "provider", "backend"],
-                "response_template": "Daytona supports various backends and languages...",
+                "response_template": "Here are the available features and capabilities...",
                 "faiss_boost": ["features", "capabilities", "providers"],
                 "max_context_chars": 2000,
                 "priority": 2
@@ -419,7 +419,7 @@ class RAGEngine:
         if original_language in ['de', 'german', 'deutsch'] and self.groq_client:
             try:
                 # Only translate if it doesn't look like English
-                if not any(e in query.lower() for e in ['what', 'how', 'who', 'pricing', 'install', 'daytona']):
+                if not any(e in query.lower() for e in ['what', 'how', 'who', 'pricing', 'install', 'tara']):
                     t_start = time.time()
                     loop = asyncio.get_event_loop()
                     chat = await loop.run_in_executor(None, lambda: self.groq_client.chat.completions.create(
@@ -443,7 +443,7 @@ class RAGEngine:
             fast_path_type = "identity"
         elif "pricing" in query_clean or "cost" in query_clean:
             fast_path_type = "pricing"
-        elif re.match(r'^(hi|hello|hey|thanks|thank you|bye|goodbye|ok|yes|no|morning|evening|greetings)', query_clean):
+        elif re.match(r'^(hi|hello|hey|thanks|thank you|morning|evening|greetings)', query_clean):
             fast_path_type = "conversational"
 
         # 2.5 Context-dependent query detection

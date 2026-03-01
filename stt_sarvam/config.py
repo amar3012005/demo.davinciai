@@ -1,6 +1,6 @@
 
 """
-Configuration for Sarvam AI Speech-to-Text-Translate service.
+Configuration for Sarvam AI Speech-to-Text service.
 
 Key advantage over Groq STT: Sarvam provides native WebSocket streaming
 with server-side VAD, eliminating the need for micro-chunking.
@@ -17,11 +17,20 @@ logger = logging.getLogger(__name__)
 class SarvamSTTConfig:
     # ── Sarvam API ──────────────────────────────────────────────
     api_key: str = ""
-    base_ws_url: str = "wss://api.sarvam.ai/speech-to-text-translate/ws"
+    base_ws_url: str = ""
     model: str = "saaras:v2.5"
     
-    # ── Sarvam Mode (transcribe, translate, etc.) ───────────────
+    # ── Sarvam Mode (transcribe, translate, verbatim, translit, codemix) ─
     mode: str = "transcribe"
+    # Endpoint routing mode:
+    # - auto: /speech-to-text/ws for transcribe/verbatim/translit/codemix, /speech-to-text-translate/ws for translate
+    # - stt: force /speech-to-text/ws
+    # - stt_translate: force /speech-to-text-translate/ws
+    endpoint_mode: str = "auto"
+    
+    # ── Language code (BCP-47) ──────────────────────────────────
+    # unknown = auto-detect, te-IN = Telugu, hi-IN = Hindi, etc.
+    language_code: str = "unknown"
 
     # ── Audio format ────────────────────────────────────────────
     sample_rate: int = 16000
@@ -74,12 +83,32 @@ class SarvamSTTConfig:
     # ── Context / prompt ────────────────────────────────────────
     context_prompt: str = ""  # Optional prompt to improve ASR accuracy
 
+    def endpoint_path(self) -> str:
+        em = (self.endpoint_mode or "auto").strip().lower()
+        mode = (self.mode or "transcribe").strip().lower()
+        if em == "stt":
+            return "/speech-to-text/ws"
+        if em in {"stt_translate", "translate"}:
+            return "/speech-to-text-translate/ws"
+        # auto mode
+        if mode == "translate":
+            return "/speech-to-text-translate/ws"
+        return "/speech-to-text/ws"
+
+    def resolved_ws_url(self) -> str:
+        if self.base_ws_url:
+            return self.base_ws_url
+        return f"wss://api.sarvam.ai{self.endpoint_path()}"
+
     @classmethod
     def from_env(cls) -> "SarvamSTTConfig":
         cfg = cls(
             api_key=os.getenv("SARVAM_API_KEY", ""),
+            base_ws_url=os.getenv("SARVAM_BASE_WS_URL", ""),  # Auto-selected based on mode if empty
             model=os.getenv("SARVAM_MODEL", "saaras:v2.5"),
             mode=os.getenv("SARVAM_MODE", "transcribe"),
+            endpoint_mode=os.getenv("SARVAM_ENDPOINT_MODE", "auto"),
+            language_code=os.getenv("SARVAM_LANGUAGE_CODE", "unknown"),
             sample_rate=int(os.getenv("SARVAM_SAMPLE_RATE", "16000")),
             input_audio_codec=os.getenv("SARVAM_AUDIO_CODEC", "pcm_s16le"),
             enable_vad_signals=os.getenv("SARVAM_VAD_SIGNALS", "true").lower() == "true",
@@ -105,12 +134,27 @@ class SarvamSTTConfig:
         if self.sample_rate not in (8000, 16000):
             logger.warning(f"Sample rate {self.sample_rate} may not be supported; prefer 16000 or 8000")
 
+        # Normalize/validate mode.
+        valid_modes = {"transcribe", "translate", "verbatim", "translit", "codemix"}
+        if self.mode not in valid_modes:
+            logger.warning(f"Invalid SARVAM_MODE='{self.mode}', defaulting to 'transcribe'")
+            self.mode = "transcribe"
+
+        # Translate endpoint can only output translated English reliably; warn if misconfigured.
+        resolved_path = self.endpoint_path()
+        if resolved_path.endswith("/speech-to-text-translate/ws") and self.mode != "translate":
+            logger.warning(
+                "Endpoint/mode mismatch: using speech-to-text-translate/ws with non-translate mode. "
+                "This may still produce English translation on some keys."
+            )
+
     def build_ws_url(self) -> str:
         params = [
             f"model={self.model}",
             f"sample_rate={self.sample_rate}",
             f"input_audio_codec={self.input_audio_codec}",
             f"mode={self.mode}",
+            f"language-code={self.language_code}",
         ]
         if self.enable_vad_signals:
             params.append("vad_signals=true")
@@ -118,7 +162,7 @@ class SarvamSTTConfig:
             params.append("high_vad_sensitivity=true")
         if self.enable_flush_signal:
             params.append("flush_signal=true")
-        return f"{self.base_ws_url}?{'&'.join(params)}"
+        return f"{self.resolved_ws_url()}?{'&'.join(params)}"
 
     def log_config(self):
         masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
@@ -126,6 +170,8 @@ class SarvamSTTConfig:
         logger.info(f"    API key  : {masked_key}")
         logger.info(f"    Model    : {self.model}")
         logger.info(f"    Mode     : {self.mode}")
+        logger.info(f"    Endpoint : {self.endpoint_path()} ({self.endpoint_mode})")
+        logger.info(f"    Language : {self.language_code}")
         logger.info(f"    Sample   : {self.sample_rate} Hz, codec={self.input_audio_codec}")
         logger.info(f"    VAD      : server={self.enable_vad_signals}, high_sens={self.high_vad_sensitivity}")
         logger.info(f"    Flush    : {self.enable_flush_signal}")

@@ -80,7 +80,7 @@ class SarvamWebSocketClient:
             headers = {"Api-Subscription-Key": self.config.api_key}
 
             try:
-                logger.info(f"  Connecting to Sarvam: {url.split('?')[0]}...")
+                logger.info(f"  Connecting to Sarvam: {url}...")
                 self._ws = await asyncio.wait_for(
                     websockets.connect(
                         url,

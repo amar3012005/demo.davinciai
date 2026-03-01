@@ -1867,15 +1867,20 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
         vectors_np = np.array(vectors)
         
         # Dimensionality reduction
-        if algorithm.lower() == "pca":
+        if algorithm.lower() == "pca" or len(vectors) < 3:
+            # Use PCA for small datasets (t-SNE needs perplexity < n_samples)
             from sklearn.decomposition import PCA
-            reducer = PCA(n_components=2)
+            reducer = PCA(n_components=min(2, len(vectors)))
             coords_2d = reducer.fit_transform(vectors_np)
+            if coords_2d.shape[1] == 1:
+                import numpy as np
+                coords_2d = np.column_stack([coords_2d, np.zeros(len(coords_2d))])
         else:
             # Default: t-SNE
             from sklearn.manifold import TSNE
-            # Adjust perplexity based on number of samples
-            perplexity = min(30, max(5, len(vectors) // 3))
+            # Perplexity must be < n_samples
+            perplexity = min(30, max(2, len(vectors) // 3))
+            perplexity = min(perplexity, len(vectors) - 1)
             reducer = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=500)
             coords_2d = reducer.fit_transform(vectors_np)
         

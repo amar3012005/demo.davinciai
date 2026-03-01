@@ -85,15 +85,16 @@ services:
       PYTHONUNBUFFERED: 1
       LOG_LEVEL: INFO
       SARVAM_API_KEY: ${SARVAM_API_KEY:-sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI}
-      SARVAM_MODEL: ${SARVAM_MODEL:-saaras:v2.5}
+      SARVAM_MODEL: ${SARVAM_MODEL:-saaras:v3}
       SARVAM_VAD_SIGNALS: 'true'
-      SARVAM_HIGH_VAD: 'true'
+      SARVAM_HIGH_VAD: 'false'
       SARVAM_FLUSH_SIGNAL: 'true'
-      SARVAM_MODE: 'translate'
-      STT_HOST: 0.0.0.0
-      STT_PORT: 8002
+      SARVAM_MODE: 'codemix'
+      SARVAM_LANGUAGE_CODE: "te-IN"
+      HOST: 0.0.0.0
+      PORT: 8002
       ORCHESTRATOR_WS_URL: 'ws://orchestrator:8004/ws'
-      ORCHESTRATOR_SKIP_SSL_VERIFY: 'true'
+      SKIP_SSL_VERIFY: 'true'
     ports:
       - '8002:8002'
     command: 'uvicorn app:app --host 0.0.0.0 --port 8002'

@@ -92,7 +92,7 @@ services:
       - .env
 
   # ═══════════════════════════════════════════════════════════
-  # STT Service (Port 5002) — Sarvam Translate Mode
+  # STT Service (Port 5002) — Sarvam Codemix Mode
   # ═══════════════════════════════════════════════════════════
   stt:
     build:
@@ -102,11 +102,12 @@ services:
       PYTHONUNBUFFERED: 1
       LOG_LEVEL: INFO
       SARVAM_API_KEY: ${SARVAM_API_KEY:-sk_estz3g3w_AEzxGTk7OV6lmQyE69cIceBI}
-      SARVAM_MODEL: saaras:v2.5
+      SARVAM_MODEL: saaras:v3
       SARVAM_VAD_SIGNALS: "true"
-      SARVAM_HIGH_VAD: "true"
+      SARVAM_HIGH_VAD: "false"
       SARVAM_FLUSH_SIGNAL: "true"
-      SARVAM_MODE: transcribe
+      SARVAM_MODE: codemix
+      SARVAM_LANGUAGE_CODE: "te-IN"
       # config.py reads HOST and PORT (not STT_HOST / STT_PORT)
       HOST: 0.0.0.0
       PORT: 5002
@@ -140,7 +141,7 @@ services:
       dockerfile: Dockerfile
     environment:
       CARTESIA_API_KEY: ${CARTESIA_API_KEY:-sk_car_k6RiuJVp2gEzAP6ozyCrdp}
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-95d51f79-c397-46f9-b49a-23763d3eaa2d}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-07bc462a-c644-49f1-baf7-82d5599131be}
       CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
       CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
       CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
