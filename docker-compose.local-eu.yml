@@ -1,0 +1,190 @@
+name: tara-eu
+
+services:
+  redis-eu-local:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --bind 0.0.0.0
+    volumes:
+      - redis_eu_local_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - eu-local
+
+  rag-eu-local:
+    build:
+      context: ../rag-eu
+      dockerfile: Dockerfile
+    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001"
+    ports:
+      - "5001:4001"
+    volumes:
+      - rag_eu_local_index:/app/index
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+
+      REDIS_URL: redis://redis-eu-local:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_LOCATION: ${ORGANIZATION_LOCATION:-Global}
+      TENANT_ID: ${TENANT_ID:-tara}
+
+      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
+      ENABLE_HIVE_MIND: "true"
+      ENABLE_LOCAL_RETRIEVAL: "false"
+      ENABLE_INGESTION_SERVICE: "false"
+      USE_ULTIMATE_TARA: "true"
+      HIVEMIND_IN_VISUAL_COPILOT: "true"
+
+      USE_NEW_DETECTIVE: "true"
+      USE_MISSION_BRAIN: "true"
+      USE_LIVE_GRAPH: "true"
+      USE_HIVE_INTERFACE: "true"
+    restart: unless-stopped
+    depends_on:
+      redis-eu-local:
+        condition: service_healthy
+    networks:
+      - eu-local
+    env_file:
+      - ../.env
+      - .env
+
+  orchestrator-eu-local:
+    build:
+      context: ../Orchestrator-eu
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app:app
+      --host 0.0.0.0
+      --port 4004
+      --ws-ping-interval 0
+    ports:
+      - "5004:4004"
+    environment:
+      REDIS_URL: redis://redis-eu-local:6379/0
+
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_FULL_NAME: ${ORGANIZATION_FULL_NAME:-Davinci AI}
+      AGENT_NAME: ${AGENT_NAME:-Tara}
+      AGENT_ID: ${AGENT_ID:-tara}
+      TENANT_ID: ${TENANT_ID:-tara}
+
+      RAG_SERVICE_URL: http://rag-eu-local:4001
+      STT_SERVICE_URL: http://stt-eu-local:4002
+      TTS_SERVICE_URL: http://tts-eu-local:4003
+
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:5004}
+      ORCHESTRATOR_WS_URL: ${ORCHESTRATOR_WS_URL:-ws://localhost:5004/ws}
+      WIDGET_WS_URL: ${WIDGET_WS_URL:-ws://localhost:5004/ws}
+
+      STREAM_OUT: ${STREAM_OUT:-auto}
+      SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
+      ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-}
+      AGENT_HOST_SUFFIX: ${AGENT_HOST_SUFFIX:-}
+      GLOBAL_CLIENT_URL: ${GLOBAL_CLIENT_URL:-}
+      FORCE_GLOBAL_DOMAIN: ${FORCE_GLOBAL_DOMAIN:-false}
+      USE_ULTIMATE_TARA: "false"
+    restart: unless-stopped
+    depends_on:
+      redis-eu-local:
+        condition: service_healthy
+      rag-eu-local:
+        condition: service_started
+      tts-eu-local:
+        condition: service_started
+    networks:
+      - eu-local
+    env_file:
+      - ../.env
+      - .env
+
+  stt-eu-local:
+    build:
+      context: ../stt_groq_whisper
+      dockerfile: Dockerfile
+    command: >
+      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}";
+      uvicorn app:app --host 0.0.0.0 --port 4002'
+    ports:
+      - "5002:4002"
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3-turbo}
+      ENABLE_MICRO_CHUNKING: ${ENABLE_MICRO_CHUNKING:-false}
+      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-700}
+      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-400}
+      GROQ_LANGUAGE: ${GROQ_LANGUAGE:-en}
+
+      STT_GROQ_HOST: 0.0.0.0
+      STT_GROQ_PORT: 4002
+
+      ORCHESTRATOR_WS_URL: ws://orchestrator-eu-local:4004/ws
+      STT_SKIP_SSL_VERIFY: "true"
+      ORCHESTRATOR_SKIP_SSL_VERIFY: "true"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:4002/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - orchestrator-eu-local
+    networks:
+      - eu-local
+    env_file:
+      - ../.env
+      - .env
+
+  tts-eu-local:
+    build:
+      context: ../tts_cartesia
+      dockerfile: Dockerfile
+    command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
+    ports:
+      - "5003:4003"
+    environment:
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-07bc462a-c644-49f1-baf7-82d5599131be}
+      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
+      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+
+      TTS_CARTESIA_HOST: 0.0.0.0
+      TTS_CARTESIA_PORT: 4003
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - eu-local
+    env_file:
+      - ../.env
+      - .env
+
+volumes:
+  redis_eu_local_data:
+  rag_eu_local_index:
+
+networks:
+  eu-local:
