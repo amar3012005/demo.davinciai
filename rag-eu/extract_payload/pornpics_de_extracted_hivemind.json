@@ -1,0 +1,3192 @@
+[
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "pornpics.de",
+    "action": "search",
+    "sequence": [
+      "Open homepage",
+      "Use search or category links",
+      "Open gallery"
+    ],
+    "constraints_order": [
+      "entity",
+      "tag",
+      "sort"
+    ],
+    "blocking_rules": {
+      "open_gallery": [
+        "entity"
+      ]
+    },
+    "example_url": "https://www.pornpics.de/",
+    "text": "Strategy for search on pornpics.de: Search or browse categories from homepage. URL: https://www.pornpics.de/",
+    "concept": "Search or browse categories from homepage"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "pornpics.de",
+    "url": "https://www.pornpics.de/",
+    "concept": "Search or browse categories from homepage",
+    "sequence": [
+      "Open homepage",
+      "Use search or category links",
+      "Open gallery"
+    ],
+    "blocking_rules": [
+      "wait_for_results_render"
+    ],
+    "action_script": "await page.goto('<url>'); // search/filter and open gallery"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/email-verification/']",
+    "keyword_match": "verify email",
+    "element_type": "a",
+    "text_pattern": "Verify email",
+    "zone": "main",
+    "description": "Navigate to 'Verify email' (https://www.pornpics.de/email-verification/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/password/']",
+    "keyword_match": "forgot password?",
+    "element_type": "a",
+    "text_pattern": "Forgot Password?",
+    "zone": "main",
+    "description": "Navigate to 'Forgot Password?' (https://www.pornpics.de/password/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/signup/']",
+    "keyword_match": "sign up",
+    "element_type": "a",
+    "text_pattern": "Sign Up",
+    "zone": "nav",
+    "description": "Navigate to 'Sign Up' (https://www.pornpics.de/signup/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/favorites/']",
+    "keyword_match": "favorites",
+    "element_type": "a",
+    "text_pattern": "Favorites",
+    "zone": "nav",
+    "description": "Navigate to 'Favorites' (https://www.pornpics.de/favorites/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/members/']",
+    "keyword_match": "profile",
+    "element_type": "a",
+    "text_pattern": "Profile",
+    "zone": "main",
+    "description": "Navigate to 'Profile' (https://www.pornpics.de/members/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href='/']",
+    "keyword_match": "upload",
+    "element_type": "a",
+    "text_pattern": "Upload",
+    "zone": "main",
+    "description": "Navigate to 'Upload' (https://www.pornpics.de/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href='/']",
+    "keyword_match": "my galleries",
+    "element_type": "a",
+    "text_pattern": "My Galleries",
+    "zone": "main",
+    "description": "Navigate to 'My Galleries' (https://www.pornpics.de/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href='/']",
+    "keyword_match": "my channels",
+    "element_type": "a",
+    "text_pattern": "My Channels",
+    "zone": "main",
+    "description": "Navigate to 'My Channels' (https://www.pornpics.de/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/login/']",
+    "keyword_match": "login",
+    "element_type": "a",
+    "text_pattern": "Login",
+    "zone": "nav",
+    "description": "Navigate to 'Login' (https://www.pornpics.de/login/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/popular/']",
+    "keyword_match": "most popular",
+    "element_type": "a",
+    "text_pattern": "Most Popular",
+    "zone": "nav",
+    "description": "Navigate to 'Most Popular' (https://www.pornpics.de/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/recent/']",
+    "keyword_match": "most recent",
+    "element_type": "a",
+    "text_pattern": "Most Recent",
+    "zone": "nav",
+    "description": "Navigate to 'Most Recent' (https://www.pornpics.de/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/rating/']",
+    "keyword_match": "top rated",
+    "element_type": "a",
+    "text_pattern": "Top Rated",
+    "zone": "nav",
+    "description": "Navigate to 'Top Rated' (https://www.pornpics.de/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/likes/']",
+    "keyword_match": "most liked",
+    "element_type": "a",
+    "text_pattern": "Most Liked",
+    "zone": "main",
+    "description": "Navigate to 'Most Liked' (https://www.pornpics.de/likes/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/views/']",
+    "keyword_match": "most viewed",
+    "element_type": "a",
+    "text_pattern": "Most Viewed",
+    "zone": "main",
+    "description": "Navigate to 'Most Viewed' (https://www.pornpics.de/views/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/comments/']",
+    "keyword_match": "most commented",
+    "element_type": "a",
+    "text_pattern": "Most Commented",
+    "zone": "main",
+    "description": "Navigate to 'Most Commented' (https://www.pornpics.de/comments/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/']",
+    "keyword_match": "tags",
+    "element_type": "a",
+    "text_pattern": "Tags",
+    "zone": "nav",
+    "description": "Navigate to 'Tags' (https://www.pornpics.de/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/pornstars/']",
+    "keyword_match": "pornstars",
+    "element_type": "a",
+    "text_pattern": "Pornstars",
+    "zone": "nav",
+    "description": "Navigate to 'Pornstars' (https://www.pornpics.de/pornstars/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/creators/']",
+    "keyword_match": "creators",
+    "element_type": "a",
+    "text_pattern": "Creators",
+    "zone": "main",
+    "description": "Navigate to 'Creators' (https://www.pornpics.de/creators/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/channels/']",
+    "keyword_match": "channels",
+    "element_type": "a",
+    "text_pattern": "Channels",
+    "zone": "main",
+    "description": "Navigate to 'Channels' (https://www.pornpics.de/channels/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/videos/']",
+    "keyword_match": "videos",
+    "element_type": "a",
+    "text_pattern": "Videos",
+    "zone": "nav",
+    "description": "Navigate to 'Videos' (https://www.pornpics.de/videos/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href='/']",
+    "keyword_match": "english",
+    "element_type": "a",
+    "text_pattern": "English",
+    "zone": "main",
+    "description": "Navigate to 'English' (https://www.pornpics.com/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/es/']",
+    "keyword_match": "español",
+    "element_type": "a",
+    "text_pattern": "Español",
+    "zone": "main",
+    "description": "Navigate to 'Español' (https://www.pornpics.com/es/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/']",
+    "keyword_match": "deutsch",
+    "element_type": "a",
+    "text_pattern": "Deutsch",
+    "zone": "main",
+    "description": "Navigate to 'Deutsch' (https://www.pornpics.com/de/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fr/']",
+    "keyword_match": "français",
+    "element_type": "a",
+    "text_pattern": "Français",
+    "zone": "main",
+    "description": "Navigate to 'Français' (https://www.pornpics.com/fr/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/it/']",
+    "keyword_match": "italiano",
+    "element_type": "a",
+    "text_pattern": "Italiano",
+    "zone": "main",
+    "description": "Navigate to 'Italiano' (https://www.pornpics.com/it/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pt/']",
+    "keyword_match": "português",
+    "element_type": "a",
+    "text_pattern": "Português",
+    "zone": "main",
+    "description": "Navigate to 'Português' (https://www.pornpics.com/pt/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/nl/']",
+    "keyword_match": "dutch",
+    "element_type": "a",
+    "text_pattern": "Dutch",
+    "zone": "main",
+    "description": "Navigate to 'Dutch' (https://www.pornpics.com/nl/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/zh/']",
+    "keyword_match": "中文(简体)",
+    "element_type": "a",
+    "text_pattern": "中文(简体)",
+    "zone": "main",
+    "description": "Navigate to '中文(简体)' (https://www.pornpics.com/zh/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/jp/']",
+    "keyword_match": "日本語",
+    "element_type": "a",
+    "text_pattern": "日本語",
+    "zone": "main",
+    "description": "Navigate to '日本語' (https://www.pornpics.com/jp/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pl/']",
+    "keyword_match": "polski",
+    "element_type": "a",
+    "text_pattern": "Polski",
+    "zone": "main",
+    "description": "Navigate to 'Polski' (https://www.pornpics.com/pl/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/cs/']",
+    "keyword_match": "čeština",
+    "element_type": "a",
+    "text_pattern": "Čeština",
+    "zone": "main",
+    "description": "Navigate to 'Čeština' (https://www.pornpics.com/cs/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fi/']",
+    "keyword_match": "suomi",
+    "element_type": "a",
+    "text_pattern": "Suomi",
+    "zone": "main",
+    "description": "Navigate to 'Suomi' (https://www.pornpics.com/fi/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/sv/']",
+    "keyword_match": "svenska",
+    "element_type": "a",
+    "text_pattern": "Svenska",
+    "zone": "main",
+    "description": "Navigate to 'Svenska' (https://www.pornpics.com/sv/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/no/']",
+    "keyword_match": "norsk",
+    "element_type": "a",
+    "text_pattern": "Norsk",
+    "zone": "main",
+    "description": "Navigate to 'Norsk' (https://www.pornpics.com/no/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/da/']",
+    "keyword_match": "dansk",
+    "element_type": "a",
+    "text_pattern": "Dansk",
+    "zone": "main",
+    "description": "Navigate to 'Dansk' (https://www.pornpics.com/da/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/ru/']",
+    "keyword_match": "русский",
+    "element_type": "a",
+    "text_pattern": "Русский",
+    "zone": "main",
+    "description": "Navigate to 'Русский' (https://www.pornpics.com/ru/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/app/']",
+    "keyword_match": "pornpics app",
+    "element_type": "a",
+    "text_pattern": "PornPics App",
+    "zone": "main",
+    "description": "Navigate to 'PornPics App' (https://www.pornpics.de/app/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/content-creators/']",
+    "keyword_match": "content creators",
+    "element_type": "a",
+    "text_pattern": "Content Creators",
+    "zone": "main",
+    "description": "Navigate to 'Content Creators' (https://www.pornpics.de/content-creators/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href='/']",
+    "keyword_match": "alternative version en-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version EN-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version EN-DE' (https://www.pornpics.com/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/']",
+    "keyword_match": "alternative version de-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version DE-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version DE-DE' (https://www.pornpics.com/de/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/goto/cams']",
+    "keyword_match": "live sex",
+    "element_type": "a",
+    "text_pattern": "Live Sex",
+    "zone": "main",
+    "description": "Navigate to 'Live Sex' (https://www.pornpics.de/goto/cams)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/goto/dating']",
+    "keyword_match": "meet&fuck",
+    "element_type": "a",
+    "text_pattern": "Meet&Fuck",
+    "zone": "main",
+    "description": "Navigate to 'Meet&Fuck' (https://www.pornpics.de/goto/dating)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/goto/onlypics']",
+    "keyword_match": "onlypics",
+    "element_type": "a",
+    "text_pattern": "OnlyPics",
+    "zone": "main",
+    "description": "Navigate to 'OnlyPics' (https://www.pornpics.de/goto/onlypics)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/goto/aijerkoff']",
+    "keyword_match": "ai jerk off",
+    "element_type": "a",
+    "text_pattern": "AI Jerk Off",
+    "zone": "main",
+    "description": "Navigate to 'AI Jerk Off' (https://www.pornpics.de/goto/aijerkoff)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href='/']",
+    "keyword_match": "popular",
+    "element_type": "a",
+    "text_pattern": "Popular",
+    "zone": "main",
+    "description": "Navigate to 'Popular' (https://www.pornpics.de/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/']",
+    "keyword_match": "list",
+    "element_type": "a",
+    "text_pattern": "List",
+    "zone": "nav",
+    "description": "Navigate to 'List' (https://www.pornpics.de/tags/)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "pornpics.de",
+    "action": "extraction",
+    "sequence": [
+      "Open Pics menu",
+      "Click Most Popular",
+      "Open gallery"
+    ],
+    "constraints_order": [
+      "entity",
+      "tag",
+      "sort"
+    ],
+    "blocking_rules": {
+      "open_gallery": [
+        "entity"
+      ]
+    },
+    "example_url": "https://www.pornpics.de/popular/",
+    "text": "Strategy for extraction on pornpics.de: Browse most popular galleries. URL: https://www.pornpics.de/popular/",
+    "concept": "Browse most popular galleries"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "pornpics.de",
+    "url": "https://www.pornpics.de/popular/",
+    "concept": "Browse most popular galleries",
+    "sequence": [
+      "Open Pics menu",
+      "Click Most Popular",
+      "Open gallery"
+    ],
+    "blocking_rules": [
+      "wait_for_results_render"
+    ],
+    "action_script": "await page.goto('<url>'); // search/filter and open gallery"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/popular/']",
+    "keyword_match": "english",
+    "element_type": "a",
+    "text_pattern": "English",
+    "zone": "main",
+    "description": "Navigate to 'English' (https://www.pornpics.com/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/es/popular/']",
+    "keyword_match": "español",
+    "element_type": "a",
+    "text_pattern": "Español",
+    "zone": "main",
+    "description": "Navigate to 'Español' (https://www.pornpics.com/es/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/popular/']",
+    "keyword_match": "deutsch",
+    "element_type": "a",
+    "text_pattern": "Deutsch",
+    "zone": "main",
+    "description": "Navigate to 'Deutsch' (https://www.pornpics.com/de/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fr/popular/']",
+    "keyword_match": "français",
+    "element_type": "a",
+    "text_pattern": "Français",
+    "zone": "main",
+    "description": "Navigate to 'Français' (https://www.pornpics.com/fr/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/it/popular/']",
+    "keyword_match": "italiano",
+    "element_type": "a",
+    "text_pattern": "Italiano",
+    "zone": "main",
+    "description": "Navigate to 'Italiano' (https://www.pornpics.com/it/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pt/popular/']",
+    "keyword_match": "português",
+    "element_type": "a",
+    "text_pattern": "Português",
+    "zone": "main",
+    "description": "Navigate to 'Português' (https://www.pornpics.com/pt/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/nl/popular/']",
+    "keyword_match": "dutch",
+    "element_type": "a",
+    "text_pattern": "Dutch",
+    "zone": "main",
+    "description": "Navigate to 'Dutch' (https://www.pornpics.com/nl/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/zh/popular/']",
+    "keyword_match": "中文(简体)",
+    "element_type": "a",
+    "text_pattern": "中文(简体)",
+    "zone": "main",
+    "description": "Navigate to '中文(简体)' (https://www.pornpics.com/zh/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/jp/popular/']",
+    "keyword_match": "日本語",
+    "element_type": "a",
+    "text_pattern": "日本語",
+    "zone": "main",
+    "description": "Navigate to '日本語' (https://www.pornpics.com/jp/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pl/popular/']",
+    "keyword_match": "polski",
+    "element_type": "a",
+    "text_pattern": "Polski",
+    "zone": "main",
+    "description": "Navigate to 'Polski' (https://www.pornpics.com/pl/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/cs/popular/']",
+    "keyword_match": "čeština",
+    "element_type": "a",
+    "text_pattern": "Čeština",
+    "zone": "main",
+    "description": "Navigate to 'Čeština' (https://www.pornpics.com/cs/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fi/popular/']",
+    "keyword_match": "suomi",
+    "element_type": "a",
+    "text_pattern": "Suomi",
+    "zone": "main",
+    "description": "Navigate to 'Suomi' (https://www.pornpics.com/fi/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/sv/popular/']",
+    "keyword_match": "svenska",
+    "element_type": "a",
+    "text_pattern": "Svenska",
+    "zone": "main",
+    "description": "Navigate to 'Svenska' (https://www.pornpics.com/sv/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/no/popular/']",
+    "keyword_match": "norsk",
+    "element_type": "a",
+    "text_pattern": "Norsk",
+    "zone": "main",
+    "description": "Navigate to 'Norsk' (https://www.pornpics.com/no/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/da/popular/']",
+    "keyword_match": "dansk",
+    "element_type": "a",
+    "text_pattern": "Dansk",
+    "zone": "main",
+    "description": "Navigate to 'Dansk' (https://www.pornpics.com/da/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/ru/popular/']",
+    "keyword_match": "русский",
+    "element_type": "a",
+    "text_pattern": "Русский",
+    "zone": "main",
+    "description": "Navigate to 'Русский' (https://www.pornpics.com/ru/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/popular/']",
+    "keyword_match": "alternative version en-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version EN-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version EN-DE' (https://www.pornpics.com/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/popular/']",
+    "keyword_match": "alternative version de-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version DE-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version DE-DE' (https://www.pornpics.com/de/popular/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/goto/aigirlsgo']",
+    "keyword_match": "ai girls",
+    "element_type": "a",
+    "text_pattern": "AI Girls",
+    "zone": "main",
+    "description": "Navigate to 'AI Girls' (https://www.pornpics.de/goto/aigirlsgo)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "pornpics.de",
+    "action": "extraction",
+    "sequence": [
+      "Open Pics menu",
+      "Click Most Recent",
+      "Open gallery"
+    ],
+    "constraints_order": [
+      "entity",
+      "tag",
+      "sort"
+    ],
+    "blocking_rules": {
+      "open_gallery": [
+        "entity"
+      ]
+    },
+    "example_url": "https://www.pornpics.de/recent/",
+    "text": "Strategy for extraction on pornpics.de: Browse most recent galleries. URL: https://www.pornpics.de/recent/",
+    "concept": "Browse most recent galleries"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "pornpics.de",
+    "url": "https://www.pornpics.de/recent/",
+    "concept": "Browse most recent galleries",
+    "sequence": [
+      "Open Pics menu",
+      "Click Most Recent",
+      "Open gallery"
+    ],
+    "blocking_rules": [
+      "wait_for_results_render"
+    ],
+    "action_script": "await page.goto('<url>'); // search/filter and open gallery"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/recent/']",
+    "keyword_match": "english",
+    "element_type": "a",
+    "text_pattern": "English",
+    "zone": "main",
+    "description": "Navigate to 'English' (https://www.pornpics.com/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/es/recent/']",
+    "keyword_match": "español",
+    "element_type": "a",
+    "text_pattern": "Español",
+    "zone": "main",
+    "description": "Navigate to 'Español' (https://www.pornpics.com/es/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/recent/']",
+    "keyword_match": "deutsch",
+    "element_type": "a",
+    "text_pattern": "Deutsch",
+    "zone": "main",
+    "description": "Navigate to 'Deutsch' (https://www.pornpics.com/de/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fr/recent/']",
+    "keyword_match": "français",
+    "element_type": "a",
+    "text_pattern": "Français",
+    "zone": "main",
+    "description": "Navigate to 'Français' (https://www.pornpics.com/fr/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/it/recent/']",
+    "keyword_match": "italiano",
+    "element_type": "a",
+    "text_pattern": "Italiano",
+    "zone": "main",
+    "description": "Navigate to 'Italiano' (https://www.pornpics.com/it/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pt/recent/']",
+    "keyword_match": "português",
+    "element_type": "a",
+    "text_pattern": "Português",
+    "zone": "main",
+    "description": "Navigate to 'Português' (https://www.pornpics.com/pt/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/nl/recent/']",
+    "keyword_match": "dutch",
+    "element_type": "a",
+    "text_pattern": "Dutch",
+    "zone": "main",
+    "description": "Navigate to 'Dutch' (https://www.pornpics.com/nl/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/zh/recent/']",
+    "keyword_match": "中文(简体)",
+    "element_type": "a",
+    "text_pattern": "中文(简体)",
+    "zone": "main",
+    "description": "Navigate to '中文(简体)' (https://www.pornpics.com/zh/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/jp/recent/']",
+    "keyword_match": "日本語",
+    "element_type": "a",
+    "text_pattern": "日本語",
+    "zone": "main",
+    "description": "Navigate to '日本語' (https://www.pornpics.com/jp/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pl/recent/']",
+    "keyword_match": "polski",
+    "element_type": "a",
+    "text_pattern": "Polski",
+    "zone": "main",
+    "description": "Navigate to 'Polski' (https://www.pornpics.com/pl/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/cs/recent/']",
+    "keyword_match": "čeština",
+    "element_type": "a",
+    "text_pattern": "Čeština",
+    "zone": "main",
+    "description": "Navigate to 'Čeština' (https://www.pornpics.com/cs/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fi/recent/']",
+    "keyword_match": "suomi",
+    "element_type": "a",
+    "text_pattern": "Suomi",
+    "zone": "main",
+    "description": "Navigate to 'Suomi' (https://www.pornpics.com/fi/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/sv/recent/']",
+    "keyword_match": "svenska",
+    "element_type": "a",
+    "text_pattern": "Svenska",
+    "zone": "main",
+    "description": "Navigate to 'Svenska' (https://www.pornpics.com/sv/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/no/recent/']",
+    "keyword_match": "norsk",
+    "element_type": "a",
+    "text_pattern": "Norsk",
+    "zone": "main",
+    "description": "Navigate to 'Norsk' (https://www.pornpics.com/no/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/da/recent/']",
+    "keyword_match": "dansk",
+    "element_type": "a",
+    "text_pattern": "Dansk",
+    "zone": "main",
+    "description": "Navigate to 'Dansk' (https://www.pornpics.com/da/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/ru/recent/']",
+    "keyword_match": "русский",
+    "element_type": "a",
+    "text_pattern": "Русский",
+    "zone": "main",
+    "description": "Navigate to 'Русский' (https://www.pornpics.com/ru/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/recent/']",
+    "keyword_match": "alternative version en-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version EN-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version EN-DE' (https://www.pornpics.com/recent/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/recent/']",
+    "keyword_match": "alternative version de-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version DE-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version DE-DE' (https://www.pornpics.com/de/recent/)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "pornpics.de",
+    "action": "extraction",
+    "sequence": [
+      "Open Pics menu",
+      "Click Top Rated",
+      "Open gallery"
+    ],
+    "constraints_order": [
+      "entity",
+      "tag",
+      "sort"
+    ],
+    "blocking_rules": {
+      "open_gallery": [
+        "entity"
+      ]
+    },
+    "example_url": "https://www.pornpics.de/rating/",
+    "text": "Strategy for extraction on pornpics.de: Browse top rated galleries. URL: https://www.pornpics.de/rating/",
+    "concept": "Browse top rated galleries"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "pornpics.de",
+    "url": "https://www.pornpics.de/rating/",
+    "concept": "Browse top rated galleries",
+    "sequence": [
+      "Open Pics menu",
+      "Click Top Rated",
+      "Open gallery"
+    ],
+    "blocking_rules": [
+      "wait_for_results_render"
+    ],
+    "action_script": "await page.goto('<url>'); // search/filter and open gallery"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/rating/']",
+    "keyword_match": "english",
+    "element_type": "a",
+    "text_pattern": "English",
+    "zone": "main",
+    "description": "Navigate to 'English' (https://www.pornpics.com/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/es/rating/']",
+    "keyword_match": "español",
+    "element_type": "a",
+    "text_pattern": "Español",
+    "zone": "main",
+    "description": "Navigate to 'Español' (https://www.pornpics.com/es/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/rating/']",
+    "keyword_match": "deutsch",
+    "element_type": "a",
+    "text_pattern": "Deutsch",
+    "zone": "main",
+    "description": "Navigate to 'Deutsch' (https://www.pornpics.com/de/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fr/rating/']",
+    "keyword_match": "français",
+    "element_type": "a",
+    "text_pattern": "Français",
+    "zone": "main",
+    "description": "Navigate to 'Français' (https://www.pornpics.com/fr/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/it/rating/']",
+    "keyword_match": "italiano",
+    "element_type": "a",
+    "text_pattern": "Italiano",
+    "zone": "main",
+    "description": "Navigate to 'Italiano' (https://www.pornpics.com/it/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pt/rating/']",
+    "keyword_match": "português",
+    "element_type": "a",
+    "text_pattern": "Português",
+    "zone": "main",
+    "description": "Navigate to 'Português' (https://www.pornpics.com/pt/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/nl/rating/']",
+    "keyword_match": "dutch",
+    "element_type": "a",
+    "text_pattern": "Dutch",
+    "zone": "main",
+    "description": "Navigate to 'Dutch' (https://www.pornpics.com/nl/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/zh/rating/']",
+    "keyword_match": "中文(简体)",
+    "element_type": "a",
+    "text_pattern": "中文(简体)",
+    "zone": "main",
+    "description": "Navigate to '中文(简体)' (https://www.pornpics.com/zh/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/jp/rating/']",
+    "keyword_match": "日本語",
+    "element_type": "a",
+    "text_pattern": "日本語",
+    "zone": "main",
+    "description": "Navigate to '日本語' (https://www.pornpics.com/jp/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pl/rating/']",
+    "keyword_match": "polski",
+    "element_type": "a",
+    "text_pattern": "Polski",
+    "zone": "main",
+    "description": "Navigate to 'Polski' (https://www.pornpics.com/pl/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/cs/rating/']",
+    "keyword_match": "čeština",
+    "element_type": "a",
+    "text_pattern": "Čeština",
+    "zone": "main",
+    "description": "Navigate to 'Čeština' (https://www.pornpics.com/cs/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fi/rating/']",
+    "keyword_match": "suomi",
+    "element_type": "a",
+    "text_pattern": "Suomi",
+    "zone": "main",
+    "description": "Navigate to 'Suomi' (https://www.pornpics.com/fi/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/sv/rating/']",
+    "keyword_match": "svenska",
+    "element_type": "a",
+    "text_pattern": "Svenska",
+    "zone": "main",
+    "description": "Navigate to 'Svenska' (https://www.pornpics.com/sv/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/no/rating/']",
+    "keyword_match": "norsk",
+    "element_type": "a",
+    "text_pattern": "Norsk",
+    "zone": "main",
+    "description": "Navigate to 'Norsk' (https://www.pornpics.com/no/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/da/rating/']",
+    "keyword_match": "dansk",
+    "element_type": "a",
+    "text_pattern": "Dansk",
+    "zone": "main",
+    "description": "Navigate to 'Dansk' (https://www.pornpics.com/da/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/ru/rating/']",
+    "keyword_match": "русский",
+    "element_type": "a",
+    "text_pattern": "Русский",
+    "zone": "main",
+    "description": "Navigate to 'Русский' (https://www.pornpics.com/ru/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/rating/']",
+    "keyword_match": "alternative version en-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version EN-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version EN-DE' (https://www.pornpics.com/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/rating/']",
+    "keyword_match": "alternative version de-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version DE-DE",
+    "zone": "main",
+    "description": "Navigate to 'Alternative version DE-DE' (https://www.pornpics.com/de/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/rating/']",
+    "keyword_match": "this week",
+    "element_type": "a",
+    "text_pattern": "This week",
+    "zone": "main",
+    "description": "Navigate to 'This week' (https://www.pornpics.de/rating/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/rating/month/']",
+    "keyword_match": "this month",
+    "element_type": "a",
+    "text_pattern": "This month",
+    "zone": "main",
+    "description": "Navigate to 'This month' (https://www.pornpics.de/rating/month/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/rating/all-time/']",
+    "keyword_match": "all time",
+    "element_type": "a",
+    "text_pattern": "All time",
+    "zone": "main",
+    "description": "Navigate to 'All time' (https://www.pornpics.de/rating/all-time/)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "pornpics.de",
+    "action": "navigation",
+    "sequence": [
+      "Open Tags",
+      "Select tag",
+      "Open gallery"
+    ],
+    "constraints_order": [
+      "entity",
+      "tag",
+      "sort"
+    ],
+    "blocking_rules": {
+      "open_gallery": [
+        "entity"
+      ]
+    },
+    "example_url": "https://www.pornpics.de/tags/",
+    "text": "Strategy for navigation on pornpics.de: Browse tag catalog and open tag results. URL: https://www.pornpics.de/tags/",
+    "concept": "Browse tag catalog and open tag results"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "pornpics.de",
+    "url": "https://www.pornpics.de/tags/",
+    "concept": "Browse tag catalog and open tag results",
+    "sequence": [
+      "Open Tags",
+      "Select tag",
+      "Open gallery"
+    ],
+    "blocking_rules": [
+      "wait_for_results_render"
+    ],
+    "action_script": "await page.goto('<url>'); // search/filter and open gallery"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/tags/']",
+    "keyword_match": "english",
+    "element_type": "a",
+    "text_pattern": "English",
+    "zone": "nav",
+    "description": "Navigate to 'English' (https://www.pornpics.com/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/es/tags/']",
+    "keyword_match": "español",
+    "element_type": "a",
+    "text_pattern": "Español",
+    "zone": "nav",
+    "description": "Navigate to 'Español' (https://www.pornpics.com/es/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/tags/']",
+    "keyword_match": "deutsch",
+    "element_type": "a",
+    "text_pattern": "Deutsch",
+    "zone": "nav",
+    "description": "Navigate to 'Deutsch' (https://www.pornpics.com/de/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fr/tags/']",
+    "keyword_match": "français",
+    "element_type": "a",
+    "text_pattern": "Français",
+    "zone": "nav",
+    "description": "Navigate to 'Français' (https://www.pornpics.com/fr/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/it/tags/']",
+    "keyword_match": "italiano",
+    "element_type": "a",
+    "text_pattern": "Italiano",
+    "zone": "nav",
+    "description": "Navigate to 'Italiano' (https://www.pornpics.com/it/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pt/tags/']",
+    "keyword_match": "português",
+    "element_type": "a",
+    "text_pattern": "Português",
+    "zone": "nav",
+    "description": "Navigate to 'Português' (https://www.pornpics.com/pt/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/nl/tags/']",
+    "keyword_match": "dutch",
+    "element_type": "a",
+    "text_pattern": "Dutch",
+    "zone": "nav",
+    "description": "Navigate to 'Dutch' (https://www.pornpics.com/nl/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/zh/tags/']",
+    "keyword_match": "中文(简体)",
+    "element_type": "a",
+    "text_pattern": "中文(简体)",
+    "zone": "nav",
+    "description": "Navigate to '中文(简体)' (https://www.pornpics.com/zh/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/jp/tags/']",
+    "keyword_match": "日本語",
+    "element_type": "a",
+    "text_pattern": "日本語",
+    "zone": "nav",
+    "description": "Navigate to '日本語' (https://www.pornpics.com/jp/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/pl/tags/']",
+    "keyword_match": "polski",
+    "element_type": "a",
+    "text_pattern": "Polski",
+    "zone": "nav",
+    "description": "Navigate to 'Polski' (https://www.pornpics.com/pl/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/cs/tags/']",
+    "keyword_match": "čeština",
+    "element_type": "a",
+    "text_pattern": "Čeština",
+    "zone": "nav",
+    "description": "Navigate to 'Čeština' (https://www.pornpics.com/cs/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/fi/tags/']",
+    "keyword_match": "suomi",
+    "element_type": "a",
+    "text_pattern": "Suomi",
+    "zone": "nav",
+    "description": "Navigate to 'Suomi' (https://www.pornpics.com/fi/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/sv/tags/']",
+    "keyword_match": "svenska",
+    "element_type": "a",
+    "text_pattern": "Svenska",
+    "zone": "nav",
+    "description": "Navigate to 'Svenska' (https://www.pornpics.com/sv/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/no/tags/']",
+    "keyword_match": "norsk",
+    "element_type": "a",
+    "text_pattern": "Norsk",
+    "zone": "nav",
+    "description": "Navigate to 'Norsk' (https://www.pornpics.com/no/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/da/tags/']",
+    "keyword_match": "dansk",
+    "element_type": "a",
+    "text_pattern": "Dansk",
+    "zone": "nav",
+    "description": "Navigate to 'Dansk' (https://www.pornpics.com/da/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/ru/tags/']",
+    "keyword_match": "русский",
+    "element_type": "a",
+    "text_pattern": "Русский",
+    "zone": "nav",
+    "description": "Navigate to 'Русский' (https://www.pornpics.com/ru/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/tags/']",
+    "keyword_match": "alternative version en-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version EN-DE",
+    "zone": "nav",
+    "description": "Navigate to 'Alternative version EN-DE' (https://www.pornpics.com/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.com",
+    "selector": "a[href*='/de/tags/']",
+    "keyword_match": "alternative version de-de",
+    "element_type": "a",
+    "text_pattern": "Alternative version DE-DE",
+    "zone": "nav",
+    "description": "Navigate to 'Alternative version DE-DE' (https://www.pornpics.com/de/tags/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/a-cup-tits/']",
+    "keyword_match": "a cup tits",
+    "element_type": "a",
+    "text_pattern": "A Cup Tits",
+    "zone": "nav",
+    "description": "Navigate to 'A Cup Tits' (https://www.pornpics.de/tags/a-cup-tits/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/ai/']",
+    "keyword_match": "ai",
+    "element_type": "a",
+    "text_pattern": "AI",
+    "zone": "main",
+    "description": "Navigate to 'AI' (https://www.pornpics.de/ai/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/ai-pussy/']",
+    "keyword_match": "ai pussy",
+    "element_type": "a",
+    "text_pattern": "AI Pussy",
+    "zone": "nav",
+    "description": "Navigate to 'AI Pussy' (https://www.pornpics.de/tags/ai-pussy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/abs/']",
+    "keyword_match": "abs",
+    "element_type": "a",
+    "text_pattern": "Abs",
+    "zone": "nav",
+    "description": "Navigate to 'Abs' (https://www.pornpics.de/tags/abs/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/accidental-creampie/']",
+    "keyword_match": "accidental creampie",
+    "element_type": "a",
+    "text_pattern": "Accidental Creampie",
+    "zone": "nav",
+    "description": "Navigate to 'Accidental Creampie' (https://www.pornpics.de/tags/accidental-creampie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/adult/']",
+    "keyword_match": "adult",
+    "element_type": "a",
+    "text_pattern": "Adult",
+    "zone": "nav",
+    "description": "Navigate to 'Adult' (https://www.pornpics.de/tags/adult/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/african/']",
+    "keyword_match": "african",
+    "element_type": "a",
+    "text_pattern": "African",
+    "zone": "main",
+    "description": "Navigate to 'African' (https://www.pornpics.de/african/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/african-american/']",
+    "keyword_match": "african american",
+    "element_type": "a",
+    "text_pattern": "African American",
+    "zone": "nav",
+    "description": "Navigate to 'African American' (https://www.pornpics.de/tags/african-american/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/african-bbw/']",
+    "keyword_match": "african bbw",
+    "element_type": "a",
+    "text_pattern": "African BBW",
+    "zone": "nav",
+    "description": "Navigate to 'African BBW' (https://www.pornpics.de/tags/african-bbw/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/african-mature/']",
+    "keyword_match": "african mature",
+    "element_type": "a",
+    "text_pattern": "African Mature",
+    "zone": "nav",
+    "description": "Navigate to 'African Mature' (https://www.pornpics.de/tags/african-mature/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/african-pussy/']",
+    "keyword_match": "african pussy",
+    "element_type": "a",
+    "text_pattern": "African Pussy",
+    "zone": "nav",
+    "description": "Navigate to 'African Pussy' (https://www.pornpics.de/tags/african-pussy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/african-teen/']",
+    "keyword_match": "african teen",
+    "element_type": "a",
+    "text_pattern": "African Teen",
+    "zone": "nav",
+    "description": "Navigate to 'African Teen' (https://www.pornpics.de/tags/african-teen/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/afro/']",
+    "keyword_match": "afro",
+    "element_type": "a",
+    "text_pattern": "Afro",
+    "zone": "nav",
+    "description": "Navigate to 'Afro' (https://www.pornpics.de/tags/afro/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/ahegao/']",
+    "keyword_match": "ahegao",
+    "element_type": "a",
+    "text_pattern": "Ahegao",
+    "zone": "nav",
+    "description": "Navigate to 'Ahegao' (https://www.pornpics.de/tags/ahegao/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/all-over-40/']",
+    "keyword_match": "all over 40",
+    "element_type": "a",
+    "text_pattern": "All Over 40",
+    "zone": "nav",
+    "description": "Navigate to 'All Over 40' (https://www.pornpics.de/tags/all-over-40/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/amateur/']",
+    "keyword_match": "amateur",
+    "element_type": "a",
+    "text_pattern": "Amateur",
+    "zone": "main",
+    "description": "Navigate to 'Amateur' (https://www.pornpics.de/amateur/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-anal/']",
+    "keyword_match": "amateur anal",
+    "element_type": "a",
+    "text_pattern": "Amateur Anal",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Anal' (https://www.pornpics.de/tags/amateur-anal/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-ass/']",
+    "keyword_match": "amateur ass",
+    "element_type": "a",
+    "text_pattern": "Amateur Ass",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Ass' (https://www.pornpics.de/tags/amateur-ass/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-bdsm/']",
+    "keyword_match": "amateur bdsm",
+    "element_type": "a",
+    "text_pattern": "Amateur BDSM",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur BDSM' (https://www.pornpics.de/tags/amateur-bdsm/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-beach/']",
+    "keyword_match": "amateur beach",
+    "element_type": "a",
+    "text_pattern": "Amateur Beach",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Beach' (https://www.pornpics.de/tags/amateur-beach/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-bikini/']",
+    "keyword_match": "amateur bikini",
+    "element_type": "a",
+    "text_pattern": "Amateur Bikini",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Bikini' (https://www.pornpics.de/tags/amateur-bikini/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-blowjob/']",
+    "keyword_match": "amateur blowjob",
+    "element_type": "a",
+    "text_pattern": "Amateur Blowjob",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Blowjob' (https://www.pornpics.de/tags/amateur-blowjob/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-brunette/']",
+    "keyword_match": "amateur brunette",
+    "element_type": "a",
+    "text_pattern": "Amateur Brunette",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Brunette' (https://www.pornpics.de/tags/amateur-brunette/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-college/']",
+    "keyword_match": "amateur college",
+    "element_type": "a",
+    "text_pattern": "Amateur College",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur College' (https://www.pornpics.de/tags/amateur-college/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-cougar/']",
+    "keyword_match": "amateur cougar",
+    "element_type": "a",
+    "text_pattern": "Amateur Cougar",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Cougar' (https://www.pornpics.de/tags/amateur-cougar/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-couple/']",
+    "keyword_match": "amateur couple",
+    "element_type": "a",
+    "text_pattern": "Amateur Couple",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Couple' (https://www.pornpics.de/tags/amateur-couple/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-creampie/']",
+    "keyword_match": "amateur creampie",
+    "element_type": "a",
+    "text_pattern": "Amateur Creampie",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Creampie' (https://www.pornpics.de/tags/amateur-creampie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-cumshot/']",
+    "keyword_match": "amateur cumshot",
+    "element_type": "a",
+    "text_pattern": "Amateur Cumshot",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Cumshot' (https://www.pornpics.de/tags/amateur-cumshot/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-dp/']",
+    "keyword_match": "amateur dp",
+    "element_type": "a",
+    "text_pattern": "Amateur DP",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur DP' (https://www.pornpics.de/tags/amateur-dp/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-deepthroat/']",
+    "keyword_match": "amateur deepthroat",
+    "element_type": "a",
+    "text_pattern": "Amateur Deepthroat",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Deepthroat' (https://www.pornpics.de/tags/amateur-deepthroat/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-dildo/']",
+    "keyword_match": "amateur dildo",
+    "element_type": "a",
+    "text_pattern": "Amateur Dildo",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Dildo' (https://www.pornpics.de/tags/amateur-dildo/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-facial/']",
+    "keyword_match": "amateur facial",
+    "element_type": "a",
+    "text_pattern": "Amateur Facial",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Facial' (https://www.pornpics.de/tags/amateur-facial/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-feet/']",
+    "keyword_match": "amateur feet",
+    "element_type": "a",
+    "text_pattern": "Amateur Feet",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Feet' (https://www.pornpics.de/tags/amateur-feet/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-fuck/']",
+    "keyword_match": "amateur fuck",
+    "element_type": "a",
+    "text_pattern": "Amateur Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Fuck' (https://www.pornpics.de/tags/amateur-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-gangbang/']",
+    "keyword_match": "amateur gangbang",
+    "element_type": "a",
+    "text_pattern": "Amateur Gangbang",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Gangbang' (https://www.pornpics.de/tags/amateur-gangbang/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-girlfriend/']",
+    "keyword_match": "amateur girlfriend",
+    "element_type": "a",
+    "text_pattern": "Amateur Girlfriend",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Girlfriend' (https://www.pornpics.de/tags/amateur-girlfriend/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-granny/']",
+    "keyword_match": "amateur granny",
+    "element_type": "a",
+    "text_pattern": "Amateur Granny",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Granny' (https://www.pornpics.de/tags/amateur-granny/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-hairy-pussy/']",
+    "keyword_match": "amateur hairy pussy",
+    "element_type": "a",
+    "text_pattern": "Amateur Hairy Pussy",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Hairy Pussy' (https://www.pornpics.de/tags/amateur-hairy-pussy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-handjob/']",
+    "keyword_match": "amateur handjob",
+    "element_type": "a",
+    "text_pattern": "Amateur Handjob",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Handjob' (https://www.pornpics.de/tags/amateur-handjob/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-hardcore/']",
+    "keyword_match": "amateur hardcore",
+    "element_type": "a",
+    "text_pattern": "Amateur Hardcore",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Hardcore' (https://www.pornpics.de/tags/amateur-hardcore/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-homemade/']",
+    "keyword_match": "amateur homemade",
+    "element_type": "a",
+    "text_pattern": "Amateur Homemade",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Homemade' (https://www.pornpics.de/tags/amateur-homemade/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-housewife/']",
+    "keyword_match": "amateur housewife",
+    "element_type": "a",
+    "text_pattern": "Amateur Housewife",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Housewife' (https://www.pornpics.de/tags/amateur-housewife/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-interracial/']",
+    "keyword_match": "amateur interracial",
+    "element_type": "a",
+    "text_pattern": "Amateur Interracial",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Interracial' (https://www.pornpics.de/tags/amateur-interracial/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-latina/']",
+    "keyword_match": "amateur latina",
+    "element_type": "a",
+    "text_pattern": "Amateur Latina",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Latina' (https://www.pornpics.de/tags/amateur-latina/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-lesbian/']",
+    "keyword_match": "amateur lesbian",
+    "element_type": "a",
+    "text_pattern": "Amateur Lesbian",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Lesbian' (https://www.pornpics.de/tags/amateur-lesbian/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-lingerie/']",
+    "keyword_match": "amateur lingerie",
+    "element_type": "a",
+    "text_pattern": "Amateur Lingerie",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Lingerie' (https://www.pornpics.de/tags/amateur-lingerie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-milf/']",
+    "keyword_match": "amateur milf",
+    "element_type": "a",
+    "text_pattern": "Amateur MILF",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur MILF' (https://www.pornpics.de/tags/amateur-milf/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-milf-fuck/']",
+    "keyword_match": "amateur milf fuck",
+    "element_type": "a",
+    "text_pattern": "Amateur MILF Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur MILF Fuck' (https://www.pornpics.de/tags/amateur-milf-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-milf-lingerie/']",
+    "keyword_match": "amateur milf lingerie",
+    "element_type": "a",
+    "text_pattern": "Amateur MILF Lingerie",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur MILF Lingerie' (https://www.pornpics.de/tags/amateur-milf-lingerie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-masturbation/']",
+    "keyword_match": "amateur masturbation",
+    "element_type": "a",
+    "text_pattern": "Amateur Masturbation",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Masturbation' (https://www.pornpics.de/tags/amateur-masturbation/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-mature-fuck/']",
+    "keyword_match": "amateur mature fuck",
+    "element_type": "a",
+    "text_pattern": "Amateur Mature Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Mature Fuck' (https://www.pornpics.de/tags/amateur-mature-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-mom/']",
+    "keyword_match": "amateur mom",
+    "element_type": "a",
+    "text_pattern": "Amateur Mom",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Mom' (https://www.pornpics.de/tags/amateur-mom/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-natural-tits/']",
+    "keyword_match": "amateur natural tits",
+    "element_type": "a",
+    "text_pattern": "Amateur Natural Tits",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Natural Tits' (https://www.pornpics.de/tags/amateur-natural-tits/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-outdoor/']",
+    "keyword_match": "amateur outdoor",
+    "element_type": "a",
+    "text_pattern": "Amateur Outdoor",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Outdoor' (https://www.pornpics.de/tags/amateur-outdoor/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-pawg/']",
+    "keyword_match": "amateur pawg",
+    "element_type": "a",
+    "text_pattern": "Amateur PAWG",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur PAWG' (https://www.pornpics.de/tags/amateur-pawg/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-pov/']",
+    "keyword_match": "amateur pov",
+    "element_type": "a",
+    "text_pattern": "Amateur POV",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur POV' (https://www.pornpics.de/tags/amateur-pov/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-pantyhose/']",
+    "keyword_match": "amateur pantyhose",
+    "element_type": "a",
+    "text_pattern": "Amateur Pantyhose",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Pantyhose' (https://www.pornpics.de/tags/amateur-pantyhose/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-petite/']",
+    "keyword_match": "amateur petite",
+    "element_type": "a",
+    "text_pattern": "Amateur Petite",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Petite' (https://www.pornpics.de/tags/amateur-petite/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-pussy/']",
+    "keyword_match": "amateur pussy",
+    "element_type": "a",
+    "text_pattern": "Amateur Pussy",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Pussy' (https://www.pornpics.de/tags/amateur-pussy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-redhead/']",
+    "keyword_match": "amateur redhead",
+    "element_type": "a",
+    "text_pattern": "Amateur Redhead",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Redhead' (https://www.pornpics.de/tags/amateur-redhead/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-selfie/']",
+    "keyword_match": "amateur selfie",
+    "element_type": "a",
+    "text_pattern": "Amateur Selfie",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Selfie' (https://www.pornpics.de/tags/amateur-selfie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-sex/']",
+    "keyword_match": "amateur sex",
+    "element_type": "a",
+    "text_pattern": "Amateur Sex",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Sex' (https://www.pornpics.de/tags/amateur-sex/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-shower/']",
+    "keyword_match": "amateur shower",
+    "element_type": "a",
+    "text_pattern": "Amateur Shower",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Shower' (https://www.pornpics.de/tags/amateur-shower/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-small-tits/']",
+    "keyword_match": "amateur small tits",
+    "element_type": "a",
+    "text_pattern": "Amateur Small Tits",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Small Tits' (https://www.pornpics.de/tags/amateur-small-tits/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-solo/']",
+    "keyword_match": "amateur solo",
+    "element_type": "a",
+    "text_pattern": "Amateur Solo",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Solo' (https://www.pornpics.de/tags/amateur-solo/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-spreading/']",
+    "keyword_match": "amateur spreading",
+    "element_type": "a",
+    "text_pattern": "Amateur Spreading",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Spreading' (https://www.pornpics.de/tags/amateur-spreading/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-stockings/']",
+    "keyword_match": "amateur stockings",
+    "element_type": "a",
+    "text_pattern": "Amateur Stockings",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Stockings' (https://www.pornpics.de/tags/amateur-stockings/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-swingers/']",
+    "keyword_match": "amateur swingers",
+    "element_type": "a",
+    "text_pattern": "Amateur Swingers",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Swingers' (https://www.pornpics.de/tags/amateur-swingers/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-teen/']",
+    "keyword_match": "amateur teen",
+    "element_type": "a",
+    "text_pattern": "Amateur Teen",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Teen' (https://www.pornpics.de/tags/amateur-teen/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-teen-fuck/']",
+    "keyword_match": "amateur teen fuck",
+    "element_type": "a",
+    "text_pattern": "Amateur Teen Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Teen Fuck' (https://www.pornpics.de/tags/amateur-teen-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-teen-selfie/']",
+    "keyword_match": "amateur teen selfie",
+    "element_type": "a",
+    "text_pattern": "Amateur Teen Selfie",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Teen Selfie' (https://www.pornpics.de/tags/amateur-teen-selfie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-thong/']",
+    "keyword_match": "amateur thong",
+    "element_type": "a",
+    "text_pattern": "Amateur Thong",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Thong' (https://www.pornpics.de/tags/amateur-thong/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-threesome/']",
+    "keyword_match": "amateur threesome",
+    "element_type": "a",
+    "text_pattern": "Amateur Threesome",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Threesome' (https://www.pornpics.de/tags/amateur-threesome/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-undressing/']",
+    "keyword_match": "amateur undressing",
+    "element_type": "a",
+    "text_pattern": "Amateur Undressing",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Undressing' (https://www.pornpics.de/tags/amateur-undressing/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-upskirt/']",
+    "keyword_match": "amateur upskirt",
+    "element_type": "a",
+    "text_pattern": "Amateur Upskirt",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Upskirt' (https://www.pornpics.de/tags/amateur-upskirt/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-voyeur/']",
+    "keyword_match": "amateur voyeur",
+    "element_type": "a",
+    "text_pattern": "Amateur Voyeur",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Voyeur' (https://www.pornpics.de/tags/amateur-voyeur/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-wife/']",
+    "keyword_match": "amateur wife",
+    "element_type": "a",
+    "text_pattern": "Amateur Wife",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Wife' (https://www.pornpics.de/tags/amateur-wife/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/amateur-yoga-pants/']",
+    "keyword_match": "amateur yoga pants",
+    "element_type": "a",
+    "text_pattern": "Amateur Yoga Pants",
+    "zone": "nav",
+    "description": "Navigate to 'Amateur Yoga Pants' (https://www.pornpics.de/tags/amateur-yoga-pants/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/american/']",
+    "keyword_match": "american",
+    "element_type": "a",
+    "text_pattern": "American",
+    "zone": "nav",
+    "description": "Navigate to 'American' (https://www.pornpics.de/tags/american/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/american-milf/']",
+    "keyword_match": "american milf",
+    "element_type": "a",
+    "text_pattern": "American MILF",
+    "zone": "nav",
+    "description": "Navigate to 'American MILF' (https://www.pornpics.de/tags/american-milf/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/american-mature/']",
+    "keyword_match": "american mature",
+    "element_type": "a",
+    "text_pattern": "American Mature",
+    "zone": "nav",
+    "description": "Navigate to 'American Mature' (https://www.pornpics.de/tags/american-mature/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/american-teen/']",
+    "keyword_match": "american teen",
+    "element_type": "a",
+    "text_pattern": "American Teen",
+    "zone": "nav",
+    "description": "Navigate to 'American Teen' (https://www.pornpics.de/tags/american-teen/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/anal/']",
+    "keyword_match": "anal",
+    "element_type": "a",
+    "text_pattern": "Anal",
+    "zone": "main",
+    "description": "Navigate to 'Anal' (https://www.pornpics.de/anal/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-creampie/']",
+    "keyword_match": "anal creampie",
+    "element_type": "a",
+    "text_pattern": "Anal Creampie",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Creampie' (https://www.pornpics.de/tags/anal-creampie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-cum/']",
+    "keyword_match": "anal cum",
+    "element_type": "a",
+    "text_pattern": "Anal Cum",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Cum' (https://www.pornpics.de/tags/anal-cum/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-dildo/']",
+    "keyword_match": "anal dildo",
+    "element_type": "a",
+    "text_pattern": "Anal Dildo",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Dildo' (https://www.pornpics.de/tags/anal-dildo/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-feet/']",
+    "keyword_match": "anal feet",
+    "element_type": "a",
+    "text_pattern": "Anal Feet",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Feet' (https://www.pornpics.de/tags/anal-feet/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-fetish/']",
+    "keyword_match": "anal fetish",
+    "element_type": "a",
+    "text_pattern": "Anal Fetish",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Fetish' (https://www.pornpics.de/tags/anal-fetish/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-fingering/']",
+    "keyword_match": "anal fingering",
+    "element_type": "a",
+    "text_pattern": "Anal Fingering",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Fingering' (https://www.pornpics.de/tags/anal-fingering/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-fisting/']",
+    "keyword_match": "anal fisting",
+    "element_type": "a",
+    "text_pattern": "Anal Fisting",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Fisting' (https://www.pornpics.de/tags/anal-fisting/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-fuck/']",
+    "keyword_match": "anal fuck",
+    "element_type": "a",
+    "text_pattern": "Anal Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Fuck' (https://www.pornpics.de/tags/anal-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-gangbang/']",
+    "keyword_match": "anal gangbang",
+    "element_type": "a",
+    "text_pattern": "Anal Gangbang",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Gangbang' (https://www.pornpics.de/tags/anal-gangbang/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/anal-gape/']",
+    "keyword_match": "anal gape",
+    "element_type": "a",
+    "text_pattern": "Anal Gape",
+    "zone": "main",
+    "description": "Navigate to 'Anal Gape' (https://www.pornpics.de/anal-gape/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-insertion/']",
+    "keyword_match": "anal insertion",
+    "element_type": "a",
+    "text_pattern": "Anal Insertion",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Insertion' (https://www.pornpics.de/tags/anal-insertion/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-licking/']",
+    "keyword_match": "anal licking",
+    "element_type": "a",
+    "text_pattern": "Anal Licking",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Licking' (https://www.pornpics.de/tags/anal-licking/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-masturbation/']",
+    "keyword_match": "anal masturbation",
+    "element_type": "a",
+    "text_pattern": "Anal Masturbation",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Masturbation' (https://www.pornpics.de/tags/anal-masturbation/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-orgy/']",
+    "keyword_match": "anal orgy",
+    "element_type": "a",
+    "text_pattern": "Anal Orgy",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Orgy' (https://www.pornpics.de/tags/anal-orgy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-pov/']",
+    "keyword_match": "anal pov",
+    "element_type": "a",
+    "text_pattern": "Anal POV",
+    "zone": "nav",
+    "description": "Navigate to 'Anal POV' (https://www.pornpics.de/tags/anal-pov/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-panties/']",
+    "keyword_match": "anal panties",
+    "element_type": "a",
+    "text_pattern": "Anal Panties",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Panties' (https://www.pornpics.de/tags/anal-panties/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-riding/']",
+    "keyword_match": "anal riding",
+    "element_type": "a",
+    "text_pattern": "Anal Riding",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Riding' (https://www.pornpics.de/tags/anal-riding/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-threesome/']",
+    "keyword_match": "anal threesome",
+    "element_type": "a",
+    "text_pattern": "Anal Threesome",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Threesome' (https://www.pornpics.de/tags/anal-threesome/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anal-toys/']",
+    "keyword_match": "anal toys",
+    "element_type": "a",
+    "text_pattern": "Anal Toys",
+    "zone": "nav",
+    "description": "Navigate to 'Anal Toys' (https://www.pornpics.de/tags/anal-toys/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/ankle-socks/']",
+    "keyword_match": "ankle socks",
+    "element_type": "a",
+    "text_pattern": "Ankle Socks",
+    "zone": "nav",
+    "description": "Navigate to 'Ankle Socks' (https://www.pornpics.de/tags/ankle-socks/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anorexic/']",
+    "keyword_match": "anorexic",
+    "element_type": "a",
+    "text_pattern": "Anorexic",
+    "zone": "nav",
+    "description": "Navigate to 'Anorexic' (https://www.pornpics.de/tags/anorexic/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/anus/']",
+    "keyword_match": "anus",
+    "element_type": "a",
+    "text_pattern": "Anus",
+    "zone": "nav",
+    "description": "Navigate to 'Anus' (https://www.pornpics.de/tags/anus/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/arab/']",
+    "keyword_match": "arab",
+    "element_type": "a",
+    "text_pattern": "Arab",
+    "zone": "main",
+    "description": "Navigate to 'Arab' (https://www.pornpics.de/arab/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/arched-back/']",
+    "keyword_match": "arched back",
+    "element_type": "a",
+    "text_pattern": "Arched Back",
+    "zone": "nav",
+    "description": "Navigate to 'Arched Back' (https://www.pornpics.de/tags/arched-back/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/argentina/']",
+    "keyword_match": "argentina",
+    "element_type": "a",
+    "text_pattern": "Argentina",
+    "zone": "main",
+    "description": "Navigate to 'Argentina' (https://www.pornpics.de/argentina/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/armpit/']",
+    "keyword_match": "armpit",
+    "element_type": "a",
+    "text_pattern": "Armpit",
+    "zone": "main",
+    "description": "Navigate to 'Armpit' (https://www.pornpics.de/armpit/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/armpit-licking/']",
+    "keyword_match": "armpit licking",
+    "element_type": "a",
+    "text_pattern": "Armpit Licking",
+    "zone": "nav",
+    "description": "Navigate to 'Armpit Licking' (https://www.pornpics.de/tags/armpit-licking/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/asian/']",
+    "keyword_match": "asian",
+    "element_type": "a",
+    "text_pattern": "Asian",
+    "zone": "main",
+    "description": "Navigate to 'Asian' (https://www.pornpics.de/asian/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-amateur/']",
+    "keyword_match": "asian amateur",
+    "element_type": "a",
+    "text_pattern": "Asian Amateur",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Amateur' (https://www.pornpics.de/tags/asian-amateur/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-american/']",
+    "keyword_match": "asian american",
+    "element_type": "a",
+    "text_pattern": "Asian American",
+    "zone": "nav",
+    "description": "Navigate to 'Asian American' (https://www.pornpics.de/tags/asian-american/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-anal/']",
+    "keyword_match": "asian anal",
+    "element_type": "a",
+    "text_pattern": "Asian Anal",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Anal' (https://www.pornpics.de/tags/asian-anal/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-anal-gape/']",
+    "keyword_match": "asian anal gape",
+    "element_type": "a",
+    "text_pattern": "Asian Anal Gape",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Anal Gape' (https://www.pornpics.de/tags/asian-anal-gape/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-ass/']",
+    "keyword_match": "asian ass",
+    "element_type": "a",
+    "text_pattern": "Asian Ass",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Ass' (https://www.pornpics.de/tags/asian-ass/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-ass-pussy/']",
+    "keyword_match": "asian ass pussy",
+    "element_type": "a",
+    "text_pattern": "Asian Ass Pussy",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Ass Pussy' (https://www.pornpics.de/tags/asian-ass-pussy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-ass-spread/']",
+    "keyword_match": "asian ass spread",
+    "element_type": "a",
+    "text_pattern": "Asian Ass Spread",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Ass Spread' (https://www.pornpics.de/tags/asian-ass-spread/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-asshole/']",
+    "keyword_match": "asian asshole",
+    "element_type": "a",
+    "text_pattern": "Asian Asshole",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Asshole' (https://www.pornpics.de/tags/asian-asshole/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-bbc/']",
+    "keyword_match": "asian bbc",
+    "element_type": "a",
+    "text_pattern": "Asian BBC",
+    "zone": "nav",
+    "description": "Navigate to 'Asian BBC' (https://www.pornpics.de/tags/asian-bbc/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-bbw/']",
+    "keyword_match": "asian bbw",
+    "element_type": "a",
+    "text_pattern": "Asian BBW",
+    "zone": "nav",
+    "description": "Navigate to 'Asian BBW' (https://www.pornpics.de/tags/asian-bbw/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-bdsm/']",
+    "keyword_match": "asian bdsm",
+    "element_type": "a",
+    "text_pattern": "Asian BDSM",
+    "zone": "nav",
+    "description": "Navigate to 'Asian BDSM' (https://www.pornpics.de/tags/asian-bdsm/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-babe/']",
+    "keyword_match": "asian babe",
+    "element_type": "a",
+    "text_pattern": "Asian Babe",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Babe' (https://www.pornpics.de/tags/asian-babe/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-beach/']",
+    "keyword_match": "asian beach",
+    "element_type": "a",
+    "text_pattern": "Asian Beach",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Beach' (https://www.pornpics.de/tags/asian-beach/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-bent-over/']",
+    "keyword_match": "asian bent over",
+    "element_type": "a",
+    "text_pattern": "Asian Bent Over",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Bent Over' (https://www.pornpics.de/tags/asian-bent-over/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-big-boobs/']",
+    "keyword_match": "asian big boobs",
+    "element_type": "a",
+    "text_pattern": "Asian Big Boobs",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Big Boobs' (https://www.pornpics.de/tags/asian-big-boobs/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-big-cock/']",
+    "keyword_match": "asian big cock",
+    "element_type": "a",
+    "text_pattern": "Asian Big Cock",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Big Cock' (https://www.pornpics.de/tags/asian-big-cock/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-big-pussy/']",
+    "keyword_match": "asian big pussy",
+    "element_type": "a",
+    "text_pattern": "Asian Big Pussy",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Big Pussy' (https://www.pornpics.de/tags/asian-big-pussy/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-big-tits/']",
+    "keyword_match": "asian big tits",
+    "element_type": "a",
+    "text_pattern": "Asian Big Tits",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Big Tits' (https://www.pornpics.de/tags/asian-big-tits/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-bikini/']",
+    "keyword_match": "asian bikini",
+    "element_type": "a",
+    "text_pattern": "Asian Bikini",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Bikini' (https://www.pornpics.de/tags/asian-bikini/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-blowjob/']",
+    "keyword_match": "asian blowjob",
+    "element_type": "a",
+    "text_pattern": "Asian Blowjob",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Blowjob' (https://www.pornpics.de/tags/asian-blowjob/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-bondage/']",
+    "keyword_match": "asian bondage",
+    "element_type": "a",
+    "text_pattern": "Asian Bondage",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Bondage' (https://www.pornpics.de/tags/asian-bondage/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-boobs/']",
+    "keyword_match": "asian boobs",
+    "element_type": "a",
+    "text_pattern": "Asian Boobs",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Boobs' (https://www.pornpics.de/tags/asian-boobs/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-boots/']",
+    "keyword_match": "asian boots",
+    "element_type": "a",
+    "text_pattern": "Asian Boots",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Boots' (https://www.pornpics.de/tags/asian-boots/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-cameltoe/']",
+    "keyword_match": "asian cameltoe",
+    "element_type": "a",
+    "text_pattern": "Asian Cameltoe",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Cameltoe' (https://www.pornpics.de/tags/asian-cameltoe/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-close-up/']",
+    "keyword_match": "asian close up",
+    "element_type": "a",
+    "text_pattern": "Asian Close Up",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Close Up' (https://www.pornpics.de/tags/asian-close-up/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-cowgirl/']",
+    "keyword_match": "asian cowgirl",
+    "element_type": "a",
+    "text_pattern": "Asian Cowgirl",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Cowgirl' (https://www.pornpics.de/tags/asian-cowgirl/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-creampie/']",
+    "keyword_match": "asian creampie",
+    "element_type": "a",
+    "text_pattern": "Asian Creampie",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Creampie' (https://www.pornpics.de/tags/asian-creampie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-cum-in-mouth/']",
+    "keyword_match": "asian cum in mouth",
+    "element_type": "a",
+    "text_pattern": "Asian Cum In Mouth",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Cum In Mouth' (https://www.pornpics.de/tags/asian-cum-in-mouth/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-cumshot/']",
+    "keyword_match": "asian cumshot",
+    "element_type": "a",
+    "text_pattern": "Asian Cumshot",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Cumshot' (https://www.pornpics.de/tags/asian-cumshot/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-dp/']",
+    "keyword_match": "asian dp",
+    "element_type": "a",
+    "text_pattern": "Asian DP",
+    "zone": "nav",
+    "description": "Navigate to 'Asian DP' (https://www.pornpics.de/tags/asian-dp/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-deepthroat/']",
+    "keyword_match": "asian deepthroat",
+    "element_type": "a",
+    "text_pattern": "Asian Deepthroat",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Deepthroat' (https://www.pornpics.de/tags/asian-deepthroat/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-dildo/']",
+    "keyword_match": "asian dildo",
+    "element_type": "a",
+    "text_pattern": "Asian Dildo",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Dildo' (https://www.pornpics.de/tags/asian-dildo/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-doggystyle/']",
+    "keyword_match": "asian doggystyle",
+    "element_type": "a",
+    "text_pattern": "Asian Doggystyle",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Doggystyle' (https://www.pornpics.de/tags/asian-doggystyle/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-dress/']",
+    "keyword_match": "asian dress",
+    "element_type": "a",
+    "text_pattern": "Asian Dress",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Dress' (https://www.pornpics.de/tags/asian-dress/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-face/']",
+    "keyword_match": "asian face",
+    "element_type": "a",
+    "text_pattern": "Asian Face",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Face' (https://www.pornpics.de/tags/asian-face/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-facesitting/']",
+    "keyword_match": "asian facesitting",
+    "element_type": "a",
+    "text_pattern": "Asian Facesitting",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Facesitting' (https://www.pornpics.de/tags/asian-facesitting/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-facial/']",
+    "keyword_match": "asian facial",
+    "element_type": "a",
+    "text_pattern": "Asian Facial",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Facial' (https://www.pornpics.de/tags/asian-facial/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-fake-tits/']",
+    "keyword_match": "asian fake tits",
+    "element_type": "a",
+    "text_pattern": "Asian Fake Tits",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Fake Tits' (https://www.pornpics.de/tags/asian-fake-tits/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-feet/']",
+    "keyword_match": "asian feet",
+    "element_type": "a",
+    "text_pattern": "Asian Feet",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Feet' (https://www.pornpics.de/tags/asian-feet/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-femdom/']",
+    "keyword_match": "asian femdom",
+    "element_type": "a",
+    "text_pattern": "Asian Femdom",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Femdom' (https://www.pornpics.de/tags/asian-femdom/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-fetish/']",
+    "keyword_match": "asian fetish",
+    "element_type": "a",
+    "text_pattern": "Asian Fetish",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Fetish' (https://www.pornpics.de/tags/asian-fetish/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-fingering/']",
+    "keyword_match": "asian fingering",
+    "element_type": "a",
+    "text_pattern": "Asian Fingering",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Fingering' (https://www.pornpics.de/tags/asian-fingering/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-fitness/']",
+    "keyword_match": "asian fitness",
+    "element_type": "a",
+    "text_pattern": "Asian Fitness",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Fitness' (https://www.pornpics.de/tags/asian-fitness/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-footjob/']",
+    "keyword_match": "asian footjob",
+    "element_type": "a",
+    "text_pattern": "Asian Footjob",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Footjob' (https://www.pornpics.de/tags/asian-footjob/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-fuck/']",
+    "keyword_match": "asian fuck",
+    "element_type": "a",
+    "text_pattern": "Asian Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Fuck' (https://www.pornpics.de/tags/asian-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-gangbang/']",
+    "keyword_match": "asian gangbang",
+    "element_type": "a",
+    "text_pattern": "Asian Gangbang",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Gangbang' (https://www.pornpics.de/tags/asian-gangbang/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-girlfriend/']",
+    "keyword_match": "asian girlfriend",
+    "element_type": "a",
+    "text_pattern": "Asian Girlfriend",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Girlfriend' (https://www.pornpics.de/tags/asian-girlfriend/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-glasses/']",
+    "keyword_match": "asian glasses",
+    "element_type": "a",
+    "text_pattern": "Asian Glasses",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Glasses' (https://www.pornpics.de/tags/asian-glasses/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-granny/']",
+    "keyword_match": "asian granny",
+    "element_type": "a",
+    "text_pattern": "Asian Granny",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Granny' (https://www.pornpics.de/tags/asian-granny/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-group/']",
+    "keyword_match": "asian group",
+    "element_type": "a",
+    "text_pattern": "Asian Group",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Group' (https://www.pornpics.de/tags/asian-group/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-handjob/']",
+    "keyword_match": "asian handjob",
+    "element_type": "a",
+    "text_pattern": "Asian Handjob",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Handjob' (https://www.pornpics.de/tags/asian-handjob/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-hardcore/']",
+    "keyword_match": "asian hardcore",
+    "element_type": "a",
+    "text_pattern": "Asian Hardcore",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Hardcore' (https://www.pornpics.de/tags/asian-hardcore/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-high-heels/']",
+    "keyword_match": "asian high heels",
+    "element_type": "a",
+    "text_pattern": "Asian High Heels",
+    "zone": "nav",
+    "description": "Navigate to 'Asian High Heels' (https://www.pornpics.de/tags/asian-high-heels/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-housewife/']",
+    "keyword_match": "asian housewife",
+    "element_type": "a",
+    "text_pattern": "Asian Housewife",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Housewife' (https://www.pornpics.de/tags/asian-housewife/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-interracial/']",
+    "keyword_match": "asian interracial",
+    "element_type": "a",
+    "text_pattern": "Asian Interracial",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Interracial' (https://www.pornpics.de/tags/asian-interracial/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-jeans/']",
+    "keyword_match": "asian jeans",
+    "element_type": "a",
+    "text_pattern": "Asian Jeans",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Jeans' (https://www.pornpics.de/tags/asian-jeans/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-kissing/']",
+    "keyword_match": "asian kissing",
+    "element_type": "a",
+    "text_pattern": "Asian Kissing",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Kissing' (https://www.pornpics.de/tags/asian-kissing/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-legs/']",
+    "keyword_match": "asian legs",
+    "element_type": "a",
+    "text_pattern": "Asian Legs",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Legs' (https://www.pornpics.de/tags/asian-legs/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-lesbian/']",
+    "keyword_match": "asian lesbian",
+    "element_type": "a",
+    "text_pattern": "Asian Lesbian",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Lesbian' (https://www.pornpics.de/tags/asian-lesbian/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-lingerie/']",
+    "keyword_match": "asian lingerie",
+    "element_type": "a",
+    "text_pattern": "Asian Lingerie",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Lingerie' (https://www.pornpics.de/tags/asian-lingerie/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-milf/']",
+    "keyword_match": "asian milf",
+    "element_type": "a",
+    "text_pattern": "Asian MILF",
+    "zone": "nav",
+    "description": "Navigate to 'Asian MILF' (https://www.pornpics.de/tags/asian-milf/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-milf-anal/']",
+    "keyword_match": "asian milf anal",
+    "element_type": "a",
+    "text_pattern": "Asian MILF Anal",
+    "zone": "nav",
+    "description": "Navigate to 'Asian MILF Anal' (https://www.pornpics.de/tags/asian-milf-anal/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-milf-feet/']",
+    "keyword_match": "asian milf feet",
+    "element_type": "a",
+    "text_pattern": "Asian MILF Feet",
+    "zone": "nav",
+    "description": "Navigate to 'Asian MILF Feet' (https://www.pornpics.de/tags/asian-milf-feet/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-milf-fuck/']",
+    "keyword_match": "asian milf fuck",
+    "element_type": "a",
+    "text_pattern": "Asian MILF Fuck",
+    "zone": "nav",
+    "description": "Navigate to 'Asian MILF Fuck' (https://www.pornpics.de/tags/asian-milf-fuck/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-maid/']",
+    "keyword_match": "asian maid",
+    "element_type": "a",
+    "text_pattern": "Asian Maid",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Maid' (https://www.pornpics.de/tags/asian-maid/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-massage/']",
+    "keyword_match": "asian massage",
+    "element_type": "a",
+    "text_pattern": "Asian Massage",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Massage' (https://www.pornpics.de/tags/asian-massage/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "pornpics.de",
+    "selector": "a[href*='/tags/asian-masturbation/']",
+    "keyword_match": "asian masturbation",
+    "element_type": "a",
+    "text_pattern": "Asian Masturbation",
+    "zone": "nav",
+    "description": "Navigate to 'Asian Masturbation' (https://www.pornpics.de/tags/asian-masturbation/)"
+  }
+]

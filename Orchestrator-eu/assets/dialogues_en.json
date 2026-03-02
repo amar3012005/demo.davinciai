@@ -1,0 +1,128 @@
+{
+  "language": "en",
+  "dialogues": {
+    "intro": [
+      {
+        "text": "హాయ్! నేను తారా, టాస్క్ (Telangana Academy for Skill and Knowledge) లో work chestanu. చెప్పండి ఏం help కావాలి ?",
+        "emotion": "warm",
+        "audio_file": "intro_en.wav"
+      },
+      {
+        "text": "హాయ్! నేను తారా, టాస్క్ (Telangana Academy for Skill and Knowledge) లో work chestanu. చెప్పండి ఏం help కావాలి ?",
+        "emotion": "friendly",
+        "audio_file": "intro_alt_en.wav"
+      }
+    ],
+    "exit": [
+      {
+        "text": "Thank you for using TASK. TARA signing off!",
+        "emotion": "grateful",
+        "audio_file": "exit_en.wav",
+        "keywords": [
+          "bye",
+          "goodbye",
+          "see you",
+          "thanks",
+          "thank you",
+          "that's all",
+          "that's it",
+          "nothing else"
+        ]
+      },
+      {
+        "text": "Have a great day! Remember, TARA is always here to help you manage your workspaces.",
+        "emotion": "friendly",
+        "audio_file": "exit_alt_en.wav"
+      }
+    ],
+    "filler_immediate": [
+      {
+        "text": "Okay.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_1_en.wav"
+      },
+      {
+        "text": "Got it.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_2_en.wav"
+      },
+      {
+        "text": "I see.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_3_en.wav"
+      },
+      {
+        "text": "Understood.",
+        "emotion": "neutral",
+        "trigger": "immediate",
+        "audio_file": "filler_immediate_4_en.wav"
+      }
+    ],
+    "filler_latency": [
+      {
+        "text": "Let me check that for you...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:1500",
+        "audio_file": "filler_latency_1_en.wav"
+      },
+      {
+        "text": "Give me a moment while I find that information...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:2000",
+        "audio_file": "filler_latency_2_en.wav"
+      },
+      {
+        "text": "I'm looking that up for you right now...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:1800",
+        "audio_file": "filler_latency_3_en.wav"
+      },
+      {
+        "text": "Just a moment, please...",
+        "emotion": "thinking",
+        "trigger": "delay_ms:1500",
+        "audio_file": "filler_latency_4_en.wav"
+      }
+    ],
+    "timeout": [
+      {
+        "text": "Are you still there? I'm here to help you.",
+        "emotion": "concerned",
+        "trigger": "timeout_ms:10000",
+        "audio_file": "timeout_1_en.wav"
+      },
+      {
+        "text": "Can you hear me? If you'd like to say something, please speak.",
+        "emotion": "helpful",
+        "trigger": "timeout_ms:10000",
+        "audio_file": "timeout_2_en.wav"
+      },
+      {
+        "text": "Hello? I'm still here if you need assistance.",
+        "emotion": "friendly",
+        "trigger": "timeout_ms:10000",
+        "audio_file": "timeout_3_en.wav"
+      }
+    ],
+    "unclear": [
+      {
+        "text": "Sorry, I didn't catch that clearly. Could you please repeat your question?",
+        "emotion": "neutral",
+        "audio_file": "unclear_1_en.wav"
+      },
+      {
+        "text": "I might have missed that. Could you say it again, please?",
+        "emotion": "neutral",
+        "audio_file": "unclear_2_en.wav"
+      },
+      {
+        "text": "I didn't quite understand. Can you rephrase that?",
+        "emotion": "helpful",
+        "audio_file": "unclear_3_en.wav"
+      }
+    ]
+  }
+}

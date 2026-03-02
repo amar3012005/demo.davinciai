@@ -1,0 +1,221 @@
+# Orchestra-daytona Configuration
+# Generalized orchestrator for Daytona with multi-language support
+
+server:
+  host: "0.0.0.0"
+  port: 8004
+  log_level: "INFO"
+
+organization:
+  name: "Davinci AI"
+  full_name: "Davinci AI"
+  knowledge_base_path: "/home/prometheus/daytona_agent/daytona_knowledge_base"
+
+agent:
+  name: "Tara"
+  id: "tara"
+  tenant_id: "tenant"
+  wss_url: "ws://localhost:8004/ws"
+  public_url: "http://localhost:8004"
+
+languages:
+  default: "en"
+  supported:
+    - "en"
+    - "de"
+  auto_detect: true
+  stream_out: "en"  # "en", "de", or "auto" - Controls agent's TTS language and audio file selection
+                      # "en" or "de": Agent always speaks in specified language regardless of input
+                      # "auto": Agent speaks in detected input language
+  disable_pregenerated_audio: true # Forces TTS for all dialogues (intro, exit, fillers, etc.)
+
+services:
+  stt:
+    url: "http://stt:8002"
+    type: "sarvam"  # Sarvam STT service
+    streaming: true
+    language_detection: true
+  
+  tts:
+    url: "http://tts:8000"
+    type: "elevenlabs"  # TTS-LABS service (ElevenLabs)
+    streaming: true
+    streaming_mode: "continuous"  # "buffered" or "continuous"
+    voices:
+      en:
+        voice_id: "07bc462a-c644-49f1-baf7-82d5599131be"
+        language: "en-US"
+      de:
+        voice_id: "a0e99841-438c-4a64-b679-ae501e7d6091"
+        language: "de-DE"
+  
+  rag:
+    url: "http://rag:8003"
+    stream_endpoint: "/api/v1/stream_query"
+    knowledge_base_path: "/home/prometheus/daytona_agent/daytona_knowledge_base"
+    top_k: 5
+    similarity_threshold: 0.7
+    enable_incremental: true
+    language: "english"
+    enable_map: false  # Disable HiveMind map lookups by default
+  
+  intent:
+    url: "http://intent:8002"
+    enabled: false  # Skip intent service for direct RAG queries
+  
+  redis:
+    url: "redis://redis:6379/0"
+    host: "redis"
+    port: 6379
+    db: 0
+    enabled: true  # For state persistence only
+  
+  davinciai_backend_url: ""
+
+dialogue:
+  en:
+    intro:
+      - text: "Hello! Welcome to {{ORGANIZATION_NAME}}. I'm {{AGENT_NAME}}, your virtual assistant. How can I help you today?"
+        emotion: "warm"
+        audio_file: "intro_en.wav"
+      - text: "Good day! I'm {{AGENT_NAME}} from {{ORGANIZATION_NAME}}. What would you like to know?"
+        emotion: "friendly"
+    
+    exit:
+      - text: "Thank you for contacting {{ORGANIZATION_NAME}}. If you need any further assistance, please don't hesitate to reach out. Have a wonderful day!"
+        emotion: "grateful"
+        audio_file: "exit_en.wav"
+        keywords: ["bye", "goodbye", "see you", "thanks", "thank you", "that's all"]
+      - text: "I'm glad I could help! If you have any more questions about {{ORGANIZATION_NAME}}, feel free to ask. Take care!"
+        emotion: "friendly"
+        audio_file: "exit_alt_en.wav"
+    
+    filler_immediate:
+      - text: "Okay."
+        emotion: "neutral"
+        trigger: "immediate"
+      - text: "I understand."
+        emotion: "neutral"
+        trigger: "immediate"
+      - text: "Got it."
+        emotion: "neutral"
+        trigger: "immediate"
+    
+    filler_latency:
+      - text: "Let me check that for you..."
+        emotion: "thinking"
+        trigger: "delay_ms:1500"
+        audio_file: "filler_latency_1_en.wav"
+      - text: "Give me a moment while I find that information..."
+        emotion: "thinking"
+        trigger: "delay_ms:2000"
+        audio_file: "filler_latency_2_en.wav"
+      - text: "I'm looking that up for you right now..."
+        emotion: "thinking"
+        trigger: "delay_ms:1800"
+    
+    timeout:
+      - text: "Are you still there? I'm here to help you with any questions about {{ORGANIZATION_NAME}}."
+        emotion: "concerned"
+        trigger: "timeout_ms:30000"
+        audio_file: "timeout_en.wav"
+      - text: "Can you hear me? If you'd like to ask something about {{ORGANIZATION_NAME}}, please speak."
+        emotion: "helpful"
+        trigger: "timeout_ms:30000"
+        audio_file: "timeout_alt_en.wav"
+    
+    unclear:
+      - text: "I'm sorry, I didn't catch that clearly. Could you please repeat your question?"
+        emotion: "neutral"
+      - text: "I might have missed that. Could you say it again, please?"
+        emotion: "neutral"
+
+  de:
+    intro:
+      - text: "Hallo! Willkommen bei {{ORGANIZATION_NAME}}. Ich bin {{AGENT_NAME}}. Wie kann ich Ihnen heute helfen?"
+        emotion: "warm"
+        audio_file: "intro_de.wav"
+      - text: "Guten Tag! Ich bin hier, um Ihnen bei Fragen zu {{ORGANIZATION_NAME}} zu helfen. Womit kann ich Ihnen behilflich sein?"
+        emotion: "friendly"
+    
+    exit:
+      - text: "Vielen Dank, dass Sie {{ORGANIZATION_NAME}} kontaktiert haben. Falls Sie weitere Hilfe benötigen, zögern Sie bitte nicht, uns zu kontaktieren. Einen schönen Tag noch!"
+        emotion: "grateful"
+        audio_file: "exit_de.wav"
+        keywords: ["auf wiedersehen", "tschüss", "bis später", "danke", "vielen dank", "das war's"]
+      - text: "Gern geschehen! Falls Sie weitere Fragen haben, können Sie gerne fragen. Auf Wiedersehen!"
+        emotion: "friendly"
+        audio_file: "exit_alt_de.wav"
+    
+    filler_immediate:
+      - text: "Okay."
+        emotion: "neutral"
+        trigger: "immediate"
+      - text: "Verstanden."
+        emotion: "neutral"
+        trigger: "immediate"
+      - text: "Alles klar."
+        emotion: "neutral"
+        trigger: "immediate"
+    
+    filler_latency:
+      - text: "Lassen Sie mich das für Sie überprüfen..."
+        emotion: "thinking"
+        trigger: "delay_ms:1500"
+        audio_file: "filler_latency_1_de.wav"
+      - text: "Geben Sie mir einen Moment, während ich diese Information finde..."
+        emotion: "thinking"
+        trigger: "delay_ms:2000"
+        audio_file: "filler_latency_2_de.wav"
+      - text: "Ich schaue das gerade für Sie nach..."
+        emotion: "thinking"
+        trigger: "delay_ms:1800"
+    
+    timeout:
+      - text: "Sind Sie noch da? Ich bin hier, um Ihnen bei Fragen zu {{ORGANIZATION_NAME}} zu helfen."
+        emotion: "concerned"
+        trigger: "timeout_ms:30000"
+        audio_file: "timeout_de.wav"
+      - text: "Können Sie mich hören? Wenn Sie etwas fragen möchten, sprechen Sie bitte."
+        emotion: "helpful"
+        trigger: "timeout_ms:30000"
+        audio_file: "timeout_alt_de.wav"
+    
+    unclear:
+      - text: "Entschuldigung, das habe ich nicht klar verstanden. Könnten Sie Ihre Frage bitte wiederholen?"
+        emotion: "neutral"
+      - text: "Das habe ich möglicherweise verpasst. Könnten Sie das bitte noch einmal sagen?"
+        emotion: "neutral"
+
+session:
+  timeout_seconds: 30.0
+  max_timeout_prompts: 2  # After 2 timeouts, play exit dialogue and end session
+  ttl_seconds: 3600
+  ignore_stt_while_speaking: false
+
+performance:
+  enable_incremental_rag: true
+  prewarm_on_vad: false
+  max_concurrent_sessions: 100
+  enable_fillers: false  # Disable all immediate and latency filler phrases
+
+# Fallback responses when APIs fail or timeout
+fallback_responses:
+  en:
+    api_down: "I'm experiencing technical difficulties right now. Please try again in a moment."
+    rag_timeout: "I'm taking longer than usual to find that information. Let me try again."
+    stt_error: "I didn't catch that clearly. Could you please repeat?"
+    tts_error: "I'm having trouble speaking right now, but I'm still listening."
+    connection_lost: "We seem to have lost connection. Please try reconnecting."
+    unknown_error: "I encountered an unexpected error. Please try again or contact support."
+  
+  de:
+    api_down: "Ich habe gerade technische Schwierigkeiten. Bitte versuchen Sie es gleich noch einmal."
+    rag_timeout: "Ich brauche länger als üblich, um diese Information zu finden. Lassen Sie mich es noch einmal versuchen."
+    stt_error: "Ich habe das nicht klar verstanden. Könnten Sie das bitte wiederholen?"
+    tts_error: "Ich habe Schwierigkeiten beim Sprechen, aber ich höre Ihnen noch zu."
+    connection_lost: "Wir scheinen die Verbindung verloren zu haben. Bitte versuchen Sie, sich erneut zu verbinden."
+    unknown_error: "Ich bin auf einen unerwarteten Fehler gestoßen. Bitte versuchen Sie es erneut oder kontaktieren Sie den Support."
+
+
+

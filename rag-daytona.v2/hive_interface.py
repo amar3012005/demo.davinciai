@@ -139,6 +139,27 @@ class HiveInterface:
             f"Redis={REDIS_AVAILABLE and redis_client is not None}"
         )
 
+    async def is_domain_indexed(self, domain: str) -> bool:
+        """Check if a domain has any indexed documents in the Qdrant collection."""
+        if not domain or not self.qdrant or not QDRANT_AVAILABLE:
+            return False
+        try:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            result = self.qdrant.scroll(
+                collection_name=self.collection,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(key="domain", match=MatchValue(value=domain))
+                    ]
+                ),
+                limit=1,
+            )
+            points = result[0] if isinstance(result, tuple) else result
+            return len(points) > 0
+        except Exception as e:
+            logger.warning(f"is_domain_indexed check failed for '{domain}': {e}")
+            return False
+
     async def retrieve(
         self,
         schema: TacticalSchema,

@@ -1,0 +1,13 @@
+# Audio files directory
+# Pre-generated dialogue audio files (intro, exit, fillers, timeout) are stored here.
+# Files are named with language suffix: _en.wav or _de.wav
+# Generated using: python -m orchestra_daytona.generate_dialogue_audio --lang en|de
+
+
+
+
+
+
+
+
+

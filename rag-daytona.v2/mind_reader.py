@@ -160,7 +160,9 @@ Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain":
         self,
         user_input: str,
         current_url: str = "",
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        previous_goal: Optional[str] = None,
+        nodes: Optional[list] = None
     ) -> TacticalSchema:
         """
         Convert raw input to TacticalSchema.

@@ -25,12 +25,27 @@ async def parse_schema(
     logger.info("👁️ Step 0: Live Graph getting DOM nodes for Mind Reader...")
     nodes = await live_graph.get_visible_nodes(session_id)
     logger.info("🧠 Step 1: Mind Reader parsing intent...")
-    schema = await mind_reader.translate(
-        user_input=goal,
-        current_url=current_url,
-        previous_goal=previous_goal,
-        nodes=nodes,
-    )
+    try:
+        schema = await mind_reader.translate(
+            user_input=goal,
+            current_url=current_url,
+            previous_goal=previous_goal,
+            nodes=nodes,
+        )
+    except TypeError as e:
+        # Compatibility path for deployments where MindReader.translate
+        # has not yet adopted previous_goal/nodes kwargs.
+        if "unexpected keyword argument" in str(e):
+            logger.warning(
+                f"MindReader.translate compatibility fallback: {e}. "
+                "Retrying without optional kwargs."
+            )
+            schema = await mind_reader.translate(
+                user_input=goal,
+                current_url=current_url,
+            )
+        else:
+            raise
     logger.info(f"   ✅ Intent: {schema.action.value} on '{schema.target_entity}'")
     return schema
 

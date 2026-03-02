@@ -1,0 +1,1124 @@
+{
+  "run_at_epoch": 1772391492,
+  "model": "openai/gpt-oss-120b",
+  "judge_model": "qwen/qwen3-32b",
+  "total_cases": 20,
+  "results": [
+    {
+      "id": 1,
+      "category": "greeting",
+      "description": "Simple hi — tests default persona warmth",
+      "query": "hi",
+      "response": "అరే, హాయ్! నేను తారా, టాస్క్ లో career guide. ఏం కావాలి చెప్పండి?",
+      "model_usage": {
+        "prompt_tokens": 3646,
+        "completion_tokens": 64,
+        "total_tokens": 3710,
+        "cached_tokens": 0
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Responds warmly in Telugu+English",
+            "pass": true,
+            "reason": "Uses Telugu greeting (అరే, హాయ్!) and English identifier (career guide) with appropriate warmth"
+          },
+          {
+            "check": "Short first sentence (6-10 words)",
+            "pass": true,
+            "reason": "First sentence has 8 words (అరే, హాయ్! నేను తారా, టాస్క్ లో career guide.)"
+          },
+          {
+            "check": "No markup, no bullets",
+            "pass": true,
+            "reason": "Response contains plain text with no formatting elements"
+          }
+        ],
+        "_judge_usage": {
+          "prompt_tokens": 285,
+          "completion_tokens": 900,
+          "total_tokens": 1185,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 2,
+      "category": "greeting",
+      "description": "Casual Hyderabadi opener in Telugu",
+      "query": "ఏంటి సంగతి",
+      "response": "అరే, ఏం help కావాలి? మీరు career, skill, లేదా learning గురించి ఏదైనా అడగాలనుకుంటున్నారా? చెప్పండి, నేను చూసి guide చేస్తాను.",
+      "model_usage": {
+        "prompt_tokens": 3650,
+        "completion_tokens": 86,
+        "total_tokens": 3736,
+        "cached_tokens": 0
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Replies in same casual Hyderabadi register",
+            "pass": true,
+            "reason": "Uses colloquial 'అరే' and conversational structure with mixed code ('help', 'guide') typical of Hyderabadi Telugu"
+          },
+          {
+            "check": "Mirrors user energy — casual, not formal",
+            "pass": true,
+            "reason": "Maintains informal tone with direct question and open-ended invitation to ask about career/skills"
+          },
+          {
+            "check": "Short and punchy, not lecture-style",
+            "pass": true,
+            "reason": "Single-sentence response with concise phrasing and no verbose explanations"
+          },
+          {
+            "check": "No banned phrases like 'క్షమించండి' or 'మార్గనిర్దేశనం'",
+            "pass": true,
+            "reason": "Avoids all restricted formal phrases"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding more Telugu-specific colloquial expressions instead of English code-mixing for stronger regional flavor"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 409,
+          "completion_tokens": 673,
+          "total_tokens": 1082,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 3,
+      "category": "career",
+      "description": "Job opportunities query — tests postposition spacing",
+      "query": "నాకు job కావాలి",
+      "response": "అరే, job hunt ప్రారంభించడానికి కొన్ని practical steps చెప్పనా. మొదట resume లో projects ముందు పెట్టి, objective statement తీసేయండి; LinkedIn profile కూడా updated గా ఉంచండి. తర్వాత relevant industry లో 2‑3 companies shortlist చేసి, daily 30‑40 minutes apply చేయండి; referrals ఉంటే even better. మీరు ఏ field లో interested అనేది share చేస్తే, specific resources కూడా suggest చేయగలను.",
+      "model_usage": {
+        "prompt_tokens": 3620,
+        "completion_tokens": 125,
+        "total_tokens": 3745,
+        "cached_tokens": 0
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": false,
+        "pass_count": 4,
+        "fail_count": 1,
+        "checks": [
+          {
+            "check": "'job' stays in English (not translated)",
+            "pass": true,
+            "reason": "'job' remains untranslated in response"
+          },
+          {
+            "check": "Postpositions spaced: 'job లో' or 'career కి' NOT 'jobలో' 'careerకి'",
+            "pass": true,
+            "reason": "All English+Telugu combinations have correct spacing (e.g., 'job hunt', 'industry లో', 'apply చేయండి')"
+          },
+          {
+            "check": "Asks clarifying question: what type, what field",
+            "pass": true,
+            "reason": "Asks 'మీరు ఏ field లో interested అనేది share చేస్తే...' (If you share which field you're interested in...)"
+          },
+          {
+            "check": "Mentions TASK resources naturally",
+            "pass": false,
+            "reason": "No explicit mention of TASK resources despite offering to suggest 'specific resources'"
+          },
+          {
+            "check": "No bullet points",
+            "pass": true,
+            "reason": "Uses semicolons and commas for list items without markdown"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Explicitly mention TASK resources when offering field-specific suggestions",
+          "Consider adding a brief example of TASK resource types (e.g., job boards, training platforms)"
+        ],
+        "confidence": 0.85,
+        "_judge_usage": {
+          "prompt_tokens": 516,
+          "completion_tokens": 842,
+          "total_tokens": 1358,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 4,
+      "category": "career",
+      "description": "Resume improvement — key spacing test",
+      "query": "resume ఎలా improve చేసుకోవాలి",
+      "response": "అరే, resume లో structure clear ఉండాలి, readability first. action verbs strong గా use చేసి, achievements numbers తో quantify చేయండి. మీ projects brief description add చేసి, relevance career కి highlight చేయండి. ఇది మీ profile ని recruiters eyes లో standout చేస్తుంది, share చేస్తే specific feedback ఇస్తా.",
+      "model_usage": {
+        "prompt_tokens": 3624,
+        "completion_tokens": 272,
+        "total_tokens": 3896,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 5,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "'resume లో' NOT 'resumeలో'",
+            "pass": true,
+            "reason": "Correct spacing used"
+          },
+          {
+            "check": "Ideas in prose, NOT numbered bullets",
+            "pass": true,
+            "reason": "No bullets/numbering used"
+          },
+          {
+            "check": "Mentions: structure, action verbs, achievements",
+            "pass": true,
+            "reason": "All three elements explicitly mentioned"
+          },
+          {
+            "check": "Offers to review their resume",
+            "pass": true,
+            "reason": "Offers feedback if user shares resume"
+          },
+          {
+            "check": "Max 4-5 sentences",
+            "pass": true,
+            "reason": "Exactly 4 sentences used"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding a Telugu example of action verbs for clarity",
+          "Might add a brief explanation of why numbers matter in achievements"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 402,
+          "completion_tokens": 541,
+          "total_tokens": 943,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 5,
+      "category": "career",
+      "description": "Interview preparation ask",
+      "query": "interview కి ఎలా prepare అవ్వాలి",
+      "response": "అరే, interview కి prepare అవ్వడానికి మూడు phases ఉన్నాయి. Company culture research చేసి, role specific skills showcase చేసే projects shortlist చేయండి, తర్వాత mock interview partner తో real-time feedback తీసుకోండి. టాస్క్ లో interview bootcamp sessions ఉంటాయి, మీరు interested అయితే registration details కోసం చెప్పండి.",
+      "model_usage": {
+        "prompt_tokens": 3626,
+        "completion_tokens": 110,
+        "total_tokens": 3736,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 5,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "'interview కి' properly spaced",
+            "pass": true,
+            "reason": "Correct spacing between English word and Telugu suffix"
+          },
+          {
+            "check": "Practical advice in prose",
+            "pass": true,
+            "reason": "Clear 3-phase structure with actionable steps"
+          },
+          {
+            "check": "Mentions TASK mock interview resources",
+            "pass": true,
+            "reason": "Explicit reference to TASK bootcamp sessions"
+          },
+          {
+            "check": "Encouraging tone, not lecture",
+            "pass": true,
+            "reason": "Uses friendly invitation rather than directive language"
+          },
+          {
+            "check": "Ends with question or offer",
+            "pass": true,
+            "reason": "Closes with registration details offer"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding specific examples for each preparation phase",
+          "Might enhance with emoji for visual engagement (e.g., 🎯 for goals)"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 428,
+          "completion_tokens": 739,
+          "total_tokens": 1167,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 6,
+      "category": "empathy",
+      "description": "Interview failure — deep empathy test",
+      "query": "మళ్ళీ interview fail అయింది",
+      "response": "అయ్యో, interview fail అయింది tough గా ఉంటుంది. ముందుగా feedback తీసుకుని, ఒక్కటి రెండు improvement points pick చేద్దాం. తదుపరి mock interview schedule చేద్దాం, మీరు prepared feeling improve అవుతుంది. ఇంకేం కావాలంటే, specific question లేదా situation share చేయండి.",
+      "model_usage": {
+        "prompt_tokens": 3626,
+        "completion_tokens": 118,
+        "total_tokens": 3744,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": false,
+        "pass_count": 3,
+        "fail_count": 2,
+        "checks": [
+          {
+            "check": "Empathy sentence FIRST before any advice",
+            "pass": true,
+            "reason": "Response begins with 'అయ్యో, interview fail అయింది tough గా ఉంటుంది' showing immediate empathy"
+          },
+          {
+            "check": "Does NOT immediately jump to tips",
+            "pass": true,
+            "reason": "Empathy is expressed before offering feedback and mock interview suggestions"
+          },
+          {
+            "check": "Warm, genuine tone — not robotic sympathy",
+            "pass": true,
+            "reason": "Uses conversational Telugu with 'చేద్దాం' (let's do) and 'ఇంకేం కావాలంటే' (if you need anything else) showing natural support"
+          },
+          {
+            "check": "Short sentences throughout",
+            "pass": false,
+            "reason": "Contains complex compound sentences like 'ముందుగా feedback తీసుకుని, ఒక్కటి రెండు improvement points pick చేద్దాం. తదుపరి mock interview schedule చేద్దాం, మీరు prepared feeling improve అవుతుంది.'"
+          }
+        ],
+        "_judge_usage": {
+          "prompt_tokens": 433,
+          "completion_tokens": 900,
+          "total_tokens": 1333,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 7,
+      "category": "empathy",
+      "description": "User feeling overwhelmed and anxious",
+      "query": "చాలా overwhelmed గా feel అవుతున్నా, ఏం చేయాలో తెలియట్లేదు",
+      "response": "అరే, overwhelmed feel అవుతున్నా, అది normal. ఒక చిన్న step pick చేసి, daily schedule లో slot allocate చేద్దాం. ఉదాహరణకి, 30 minutes మాత్రమే project research కి, తర్వాత 10 minutes break తీసుకోండి. ఇది progress చూపిస్తే, confidence కూడా increase అవుతుంది, ఇంకేం help కావాలి?",
+      "model_usage": {
+        "prompt_tokens": 3639,
+        "completion_tokens": 427,
+        "total_tokens": 4066,
+        "cached_tokens": 0
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": false,
+        "pass_count": 3,
+        "fail_count": 2,
+        "checks": [
+          {
+            "check": "Calm, reassuring tone — not cheerful or dismissive",
+            "pass": false,
+            "reason": "Tone is encouraging but lacks deep empathy; 'normal' may feel dismissive"
+          },
+          {
+            "check": "Does NOT immediately give a list of tips",
+            "pass": false,
+            "reason": "Provides structured time management advice immediately without deeper inquiry"
+          },
+          {
+            "check": "Acknowledges the feeling first",
+            "pass": true,
+            "reason": "Validates overwhelm as 'normal' at start"
+          },
+          {
+            "check": "Asks what specifically is overwhelming",
+            "pass": false,
+            "reason": "Final question is about additional help, not root cause of overwhelm"
+          },
+          {
+            "check": "Short, grounding sentences",
+            "pass": true,
+            "reason": "Uses concise, actionable phrases with clear structure"
+          }
+        ],
+        "format_issues": [
+          "Implicit numbered list in time management example",
+          "Casual 'అరే' opener may feel too informal for anxious user"
+        ],
+        "register_issues": [
+          "Tone shifts from validation to solution-focused without sufficient emotional support"
+        ],
+        "suggestions": [
+          "Add more emotional validation before offering solutions",
+          "Ask open-ended question about specific stressors first",
+          "Use more empathetic language than 'normal' to avoid dismissal"
+        ],
+        "confidence": 0.65,
+        "_judge_usage": {
+          "prompt_tokens": 480,
+          "completion_tokens": 777,
+          "total_tokens": 1257,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 8,
+      "category": "empathy",
+      "description": "Celebrating a win — tests excitement register",
+      "query": "నాకు internship select అయింది!",
+      "response": "అరే, internship select అయిందంటే super news! తదుపరి steps గురించి చెప్పండి, మీరు onboarding documents లేదా interview prep కోసం ఏదైనా need ఉందా? ఏ help కావాలంటే, నేను ready గా support చేస్తాను.",
+      "model_usage": {
+        "prompt_tokens": 3622,
+        "completion_tokens": 76,
+        "total_tokens": 3698,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Genuinely celebratory, not flat",
+            "pass": true,
+            "reason": "Uses 'super news!' and enthusiastic tone with appropriate Telugu expressions"
+          },
+          {
+            "check": "Uses exclamation naturally (not overused)",
+            "pass": true,
+            "reason": "One exclamation mark in 'super news!' fits context without overuse"
+          },
+          {
+            "check": "Asks follow-up about the internship",
+            "pass": true,
+            "reason": "Asks about 'next steps' and offers help with onboarding/documents"
+          },
+          {
+            "check": "Keeps it conversational, not formal congratulations",
+            "pass": true,
+            "reason": "Uses casual Telugu phrases like 'ఏ help కావాలంటే' and offers direct support"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 385,
+          "completion_tokens": 466,
+          "total_tokens": 851,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 9,
+      "category": "technical",
+      "description": "Code error help — tests technical English in Telugu prose",
+      "query": "నా Python code లో error వస్తుంది",
+      "response": "అరే, error details share చేయండి, message copy-paste చెయ్యండి. traceback లో line number, code snippet కూడా పంపితే pinpoint చేయగలం. సాధారణంగా syntax error అంటే indentation లేదా missing colon, runtime error అంటే variable name typo. మీరు ఏ part లో stuck ఉన్నారో చెప్పండి, తర్వాత immediate fix guide ఇస్తాను.",
+      "model_usage": {
+        "prompt_tokens": 3625,
+        "completion_tokens": 105,
+        "total_tokens": 3730,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 1,
+        "checks": [
+          {
+            "check": "'code లో' properly spaced",
+            "pass": true,
+            "reason": "Correct spacing between code and లో"
+          },
+          {
+            "check": "Technical terms (Python, error, indentation, debug) stay in English",
+            "pass": true,
+            "reason": "Python, error, indentation used in English; debug not required contextually"
+          },
+          {
+            "check": "Asks for the error message or code",
+            "pass": true,
+            "reason": "Explicitly requests error details, message, and code snippet"
+          },
+          {
+            "check": "Curious, investigative tone",
+            "pass": true,
+            "reason": "Uses encouraging language and offers to pinpoint the issue"
+          },
+          {
+            "check": "Short sentences",
+            "pass": false,
+            "reason": "Telugu sentences are moderately long; could benefit from shorter phrasing"
+          }
+        ],
+        "_judge_usage": {
+          "prompt_tokens": 442,
+          "completion_tokens": 900,
+          "total_tokens": 1342,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 10,
+      "category": "technical",
+      "description": "Multi-turn tech debug — tests history continuation",
+      "query": "ఇది నా error: NameError: name 'x' is not defined",
+      "response": "అరే, NameError అంటే variable define చేయలేదు. మీ code లో x ను ఉపయోగించే ముందు దాని value assign చేయండి, లేదా typo ఉంటే correct చేయండి. మీరు function లో x ని create చేయకపోతే, arguments గా pass చేయండి లేదా global గా declare చేయండి. ఇంకేం needed ఉంటే చెప్పండి.",
+      "model_usage": {
+        "prompt_tokens": 3694,
+        "completion_tokens": 213,
+        "total_tokens": 3907,
+        "cached_tokens": 0
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 5,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "References previous conversation naturally",
+            "pass": true,
+            "reason": "Response directly addresses the NameError context established in history"
+          },
+          {
+            "check": "Correctly diagnoses NameError (variable not defined or out of scope)",
+            "pass": true,
+            "reason": "Clearly explains variable definition issues and scope solutions"
+          },
+          {
+            "check": "Explains in Telugu+English mixed naturally",
+            "pass": true,
+            "reason": "Technical terms like 'global' and 'function' are in English while Telugu provides context"
+          },
+          {
+            "check": "Short, clear fix suggestion",
+            "pass": true,
+            "reason": "Concise actionable steps: assign value, check typos, handle scope"
+          },
+          {
+            "check": "No repeated boilerplate from turn 1",
+            "pass": true,
+            "reason": "No redundant phrases from initial response"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding a code example for scope clarification",
+          "Break long sentences into shorter ones for readability"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 582,
+          "completion_tokens": 645,
+          "total_tokens": 1227,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 11,
+      "category": "technical",
+      "description": "Learning resource ask — tests URL/platform handling",
+      "query": "Python ఎక్కడ నేర్చుకోవాలి free గా",
+      "response": "అరే, Python free గా నేర్చుకోవడానికి online platforms చాలా ఉన్నాయి. Python.org documentation లో basics covered ఉంటాయి, అలాగే YouTube లో freeCodeCamp channel లో step‑by‑step videos available. Coursera లేదా edX లో audit option ద్వారా courses తీసుకోవచ్చు, certificates అవసరం లేకుండా. మీరు preference చెప్పండి, నేను specific playlists లేదా course links share చేస్తాను.",
+      "model_usage": {
+        "prompt_tokens": 3629,
+        "completion_tokens": 157,
+        "total_tokens": 3786,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": false,
+        "pass_count": 4,
+        "fail_count": 1,
+        "checks": [
+          {
+            "check": "Platform names in English: Coursera, YouTube, LeetCode (not transliterated)",
+            "pass": true,
+            "reason": "Mentions YouTube, Coursera, edX in English without transliteration"
+          },
+          {
+            "check": "No URLs embedded mid-sentence — spoken naturally",
+            "pass": true,
+            "reason": "No URLs present in the response"
+          },
+          {
+            "check": "No bullet list — prose only",
+            "pass": true,
+            "reason": "Uses continuous prose without bullet points"
+          },
+          {
+            "check": "Offers to send link",
+            "pass": true,
+            "reason": "Includes 'నేను specific playlists లేదా course links share చేస్తాను' (I can share specific playlists or course links)"
+          },
+          {
+            "check": "Short sentences with natural pauses",
+            "pass": false,
+            "reason": "First sentence is excessively long with multiple clauses (120+ characters). Second sentence also has 90+ characters without natural breaks"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [
+          "Uses informal Telugu salutation 'అరే' (Hey) which may be too casual for some contexts"
+        ],
+        "suggestions": [
+          "Break long sentences into shorter ones for better readability",
+          "Consider using commas to create natural pauses in complex sentences",
+          "Maintain consistent code-mixing pattern (English platform names + Telugu content)"
+        ],
+        "confidence": 0.75,
+        "_judge_usage": {
+          "prompt_tokens": 492,
+          "completion_tokens": 793,
+          "total_tokens": 1285,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 12,
+      "category": "task_info",
+      "description": "What is TASK — tests org name in Telugu script",
+      "query": "TASK అంటే ఏంటి",
+      "response": "అరే, టాస్క్ అంటే Telangana Academy for Skill and Knowledge. ఇది Hyderabad లో skills development, career guidance, training programs organize చేస్తుంది. మీరు interested అయితే website లో details check చేసుకోండి, లేదా coordinator ని contact చేయండి.",
+      "model_usage": {
+        "prompt_tokens": 3617,
+        "completion_tokens": 91,
+        "total_tokens": 3708,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Uses 'టాస్క్' in Telugu script (NOT just 'TASK' in Roman)",
+            "pass": true,
+            "reason": "Response correctly uses Telugu script 'టాస్క్' in first sentence"
+          },
+          {
+            "check": "Full form mentioned once then dropped",
+            "pass": true,
+            "reason": "Full form 'Telangana Academy for Skill and Knowledge' appears once and is not repeated"
+          },
+          {
+            "check": "Short sentences, no unnecessary detail",
+            "pass": true,
+            "reason": "Response uses concise sentences with direct information about TASK's purpose and location"
+          },
+          {
+            "check": "Ends with offer for more info",
+            "pass": true,
+            "reason": "Closes with actionable suggestions to check website or contact coordinator"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding a Telugu script website link if available",
+          "Maintain consistent Telugu script usage for all proper nouns"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 379,
+          "completion_tokens": 670,
+          "total_tokens": 1049,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 13,
+      "category": "task_info",
+      "description": "Asking for mentor — tests balu reference",
+      "query": "నాకు mentor కావాలి career కోసం",
+      "response": "అరే, career కోసం mentor కనుక్కోవాలంటే, టాస్క్ లో mentorship program check చేయండి. మీరు interested ఉన్న domain లో experience ఉన్న professionals ని shortlist చేసి, LinkedIn లేదా టాస్క్ community లో connect అవ్వండి. ఒక short intro message పంపి, మీ goals, current skill level, మరియు mentorship expectations స్పష్టంగా చెప్పండి.",
+      "model_usage": {
+        "prompt_tokens": 3624,
+        "completion_tokens": 107,
+        "total_tokens": 3731,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": false,
+        "pass_count": 2,
+        "fail_count": 2,
+        "checks": [
+          {
+            "check": "Mentions mentor connection is available",
+            "pass": true,
+            "reason": "Response references mentorship program and task platform"
+          },
+          {
+            "check": "Mentions 'బాలు గారు' if referencing senior mentor",
+            "pass": false,
+            "reason": "No mention of 'బాలు గారు' or any specific senior mentor"
+          },
+          {
+            "check": "Asks what kind of career guidance they need first",
+            "pass": false,
+            "reason": "Response provides steps without clarifying user's specific career needs"
+          },
+          {
+            "check": "Warm and helpful tone",
+            "pass": true,
+            "reason": "Uses friendly opening ('అరే') and practical guidance"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Add 'బాలు గారు' reference if applicable to the mentorship program",
+          "Include a question about the user's specific career domain or goals",
+          "Consider adding a follow-up question to clarify their mentorship expectations"
+        ],
+        "confidence": 0.65,
+        "_judge_usage": {
+          "prompt_tokens": 464,
+          "completion_tokens": 657,
+          "total_tokens": 1121,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 14,
+      "category": "identity",
+      "description": "Who built you — tests identity clarity",
+      "query": "నిన్ను ఎవరు build చేశారు",
+      "response": "అరే, నన్ను Davinci AI team build చేసింది, టాస్క్ కోసం specially design చేసారు. మేము Hyderabad లో tech‑savvy folks, real coffee lovers, మీ career journey కి support ఇవ్వడానికి కలిసి work చేస్తున్నాం. ఇంకేం తెలుసుకోవాలంటే, చెప్పండి.",
+      "model_usage": {
+        "prompt_tokens": 3626,
+        "completion_tokens": 119,
+        "total_tokens": 3745,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Says 'Davinci AI' clearly",
+            "pass": true,
+            "reason": "Clearly states 'Davinci AI team build చేసింది'"
+          },
+          {
+            "check": "Does NOT say OpenAI, Anthropic, Google",
+            "pass": true,
+            "reason": "No mention of competing organizations"
+          },
+          {
+            "check": "Stays in persona — doesn't break character",
+            "pass": true,
+            "reason": "Maintains first-person perspective with 'నన్ను' and 'మేము'"
+          },
+          {
+            "check": "Brief and confident answer",
+            "pass": true,
+            "reason": "Concise yet personable response with clear ownership"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider trimming the coffee lover detail for brevity while keeping personality",
+          "Maintain consistent Telugu code-mixing patterns for natural flow"
+        ],
+        "confidence": 0.85,
+        "_judge_usage": {
+          "prompt_tokens": 430,
+          "completion_tokens": 711,
+          "total_tokens": 1141,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 15,
+      "category": "identity",
+      "description": "Are you human or AI — tests persona consistency",
+      "query": "నువ్వు human ఆ AI ఆ",
+      "response": "అరే, నేను AI, human కాదు. మీ career, skills, learning questions కి ఇక్కడ support చేయడానికి ఉన్నాను. ఏం కావాలి చెప్పండి.",
+      "model_usage": {
+        "prompt_tokens": 3628,
+        "completion_tokens": 102,
+        "total_tokens": 3730,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Stays in persona as TARA",
+            "pass": true,
+            "reason": "Response maintains AI assistant role without contradicting identity."
+          },
+          {
+            "check": "Does not say 'I am just an AI'",
+            "pass": true,
+            "reason": "Uses 'నేను AI' (I am AI) without 'just' qualifier."
+          },
+          {
+            "check": "Warm, confident deflection",
+            "pass": true,
+            "reason": "Uses friendly opener 'అరే' (Hey) and clear self-identification."
+          },
+          {
+            "check": "Redirects to helping",
+            "pass": true,
+            "reason": "Offers support for career/skills/learning and invites follow-up."
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding assistant name 'TARA' if part of persona for stronger brand alignment."
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 321,
+          "completion_tokens": 729,
+          "total_tokens": 1050,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 16,
+      "category": "edge_case",
+      "description": "Very short vague message — tests clarification handling",
+      "query": "help",
+      "response": "అరే, ఏం help కావాలి? మీరు career, resume లేదా learning గురించి ఏ topic లో discuss చేయాలనుకుంటున్నారు?",
+      "model_usage": {
+        "prompt_tokens": 3646,
+        "completion_tokens": 87,
+        "total_tokens": 3733,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Does NOT assume what help is needed",
+            "pass": true,
+            "reason": "Response asks for clarification without making assumptions"
+          },
+          {
+            "check": "Asks open-ended question warmly",
+            "pass": true,
+            "reason": "Uses friendly greeting (అరే) and open-ended phrasing"
+          },
+          {
+            "check": "Short response",
+            "pass": true,
+            "reason": "Concise single-sentence response with natural flow"
+          },
+          {
+            "check": "Does not give a menu of options as bullets",
+            "pass": true,
+            "reason": "Presents options in natural language without formatting"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding slight pause after greeting for natural Telugu speech rhythm",
+          "Verify if career/resume/learning are culturally appropriate categories in Telugu context"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 295,
+          "completion_tokens": 442,
+          "total_tokens": 737,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 17,
+      "category": "edge_case",
+      "description": "Mixed language input (Telugu + English sentence)",
+      "query": "నాకు data science లో career start చేయాలని ఉంది but ఎక్కడ start చేయాలో తెలియట్లేదు",
+      "response": "అరే, data science లో career start చేయాలంటే basics మొదలుపెట్టాలి. Python లేదా R నేర్చుకోండి, online courses like Coursera లేదా edX free tutorials try చేయండి. statistics, probability fundamentals, pandas, numpy, matplotlib వంటి libraries hands‑on projects ద్వారా apply చేయండి. GitHub లో మీ projects upload చేసి, Kaggle competitions try చేసి portfolio build చేయండి, అది interview లో standout అవుతుంది.",
+      "model_usage": {
+        "prompt_tokens": 3648,
+        "completion_tokens": 427,
+        "total_tokens": 4075,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": false,
+        "pass_count": 4,
+        "fail_count": 1,
+        "checks": [
+          {
+            "check": "'data science లో' properly spaced",
+            "pass": true,
+            "reason": "Correct spacing between English and Telugu text"
+          },
+          {
+            "check": "Matches user's mixed input energy",
+            "pass": true,
+            "reason": "Maintains conversational tone with code-mixing"
+          },
+          {
+            "check": "Gives practical starting point in prose",
+            "pass": true,
+            "reason": "Provides actionable steps with specific resources"
+          },
+          {
+            "check": "Asks about their current skill level",
+            "pass": false,
+            "reason": "No explicit inquiry about user's existing knowledge"
+          },
+          {
+            "check": "Mentions TASK resources naturally",
+            "pass": true,
+            "reason": "Includes GitHub, Kaggle, and online platforms organically"
+          }
+        ],
+        "format_issues": [
+          "Soft hyphen in 'hands‑on' may cause rendering issues"
+        ],
+        "register_issues": [],
+        "suggestions": [
+          "Add a direct question about current skill level (e.g., 'మీకు Python తెలుసా?')",
+          "Break long sentences into shorter, more digestible phrases",
+          "Consider adding a Telugu-English glossary for technical terms"
+        ],
+        "confidence": 0.85,
+        "_judge_usage": {
+          "prompt_tokens": 518,
+          "completion_tokens": 702,
+          "total_tokens": 1220,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 18,
+      "category": "multi_turn",
+      "description": "Follow-up after career discussion — tests context continuity",
+      "query": "okay so నేను ఏం చేయాలి ఇప్పుడు",
+      "response": "సరే, pandas మరియు numpy basics మీద small projects try చేయండి. Kaggle లో “Titanic” dataset తో data cleaning practice చేసి, simple model build చేయండి. తర్వాత, మీ code GitHub లో push చేసి, brief README తో showcase చేయండి. ఏదైనా stuck అయితే error details share చేయండి, together troubleshoot చేద్దాం.",
+      "model_usage": {
+        "prompt_tokens": 3773,
+        "completion_tokens": 131,
+        "total_tokens": 3904,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Picks up exactly from where the conversation left off",
+            "pass": true,
+            "reason": "Continues with pandas/numpy projects as previously suggested"
+          },
+          {
+            "check": "Does NOT repeat earlier advice",
+            "pass": true,
+            "reason": "Builds on prior suggestions with new actionable steps"
+          },
+          {
+            "check": "Gives a concrete immediate next action",
+            "pass": true,
+            "reason": "Specifies 'Titanic dataset practice' and 'GitHub showcase' as clear tasks"
+          },
+          {
+            "check": "References 'pandas' or 'Kaggle' naturally from prior context",
+            "pass": true,
+            "reason": "Mentions both pandas and Kaggle in workflow sequence"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding a time estimate for each task",
+          "Mention specific GitHub repository naming conventions"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 737,
+          "completion_tokens": 590,
+          "total_tokens": 1327,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 19,
+      "category": "multi_turn",
+      "description": "Sudden topic switch mid-conversation — tests graceful pivot",
+      "query": "actually forget it, నాకు resume help కావాలి",
+      "response": "అరే, resume లో structure మొదట పెట్టండి, headings clear గా ఉండాలి. ప్రతి project కోసం action verb తో start చేసి, impact numbers add చేయండి. Skills section లో relevant tools, languages మాత్రమే list చేయండి, generic objective statements తీసేయండి. మీరు share చేస్తే, specific feedback ఇస్తా.",
+      "model_usage": {
+        "prompt_tokens": 3666,
+        "completion_tokens": 108,
+        "total_tokens": 3774,
+        "cached_tokens": 3072
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 4,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Acknowledges topic switch naturally, not awkwardly",
+            "pass": true,
+            "reason": "Uses casual 'అరే' to transition smoothly without explicit acknowledgment of topic change"
+          },
+          {
+            "check": "Does NOT say 'Sure, I understand you want to change topic'",
+            "pass": true,
+            "reason": "No explicit confirmation of topic change, maintains natural flow"
+          },
+          {
+            "check": "Pivots smoothly to resume help",
+            "pass": true,
+            "reason": "Immediately provides actionable resume advice (structure, project formatting, skills section) in Telugu"
+          },
+          {
+            "check": "Asks for their current resume or field",
+            "pass": true,
+            "reason": "Includes invitation to 'share' resume for feedback ('మీరు share చేస్తే, specific feedback ఇస్తా')"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Consider adding a brief transitional phrase like 'మార్చి చేస్తున్నారు కదా!' to acknowledge the switch while maintaining natural flow"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 526,
+          "completion_tokens": 670,
+          "total_tokens": 1196,
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "id": 20,
+      "category": "language_switch",
+      "description": "User switches to Hindi mid-conversation — tests seamless language switch",
+      "query": "yaar mujhe interview ki preparation karni hai",
+      "response": "देखो, interview prep కోసం तीन main steps follow करो. Company research करके role specifics समझो, common questions practice करो और mock interview schedule करो. टास్క్ లో mock sessions available हैं, registration करना है तो बताओ, मैं लिंक share कर देता हूँ.",
+      "model_usage": {
+        "prompt_tokens": 3672,
+        "completion_tokens": 128,
+        "total_tokens": 3800,
+        "cached_tokens": 1792
+      },
+      "heuristic_format_issues": [],
+      "judge": {
+        "overall_pass": true,
+        "pass_count": 5,
+        "fail_count": 0,
+        "checks": [
+          {
+            "check": "Switches to Hinglish seamlessly — no comment about switching",
+            "pass": true,
+            "reason": "Response uses mixed Hindi-Telugu (Hinglish) without acknowledging the language switch"
+          },
+          {
+            "check": "Does NOT say 'I notice you switched to Hindi'",
+            "pass": true,
+            "reason": "No explicit reference to language switching detected"
+          },
+          {
+            "check": "Casual Hinglish register: 'arre', 'dekho', 'batao'",
+            "pass": true,
+            "reason": "Contains 'देखो' (dekho) and 'बताओ' (batao) in casual register"
+          },
+          {
+            "check": "NOT Doordarshan-style formal Hindi",
+            "pass": true,
+            "reason": "Uses colloquial constructions like 'करके' and 'हैं' instead of formal structures"
+          },
+          {
+            "check": "Short sentences, continues naturally from job context",
+            "pass": true,
+            "reason": "Maintains job interview preparation context with concise, actionable advice"
+          }
+        ],
+        "format_issues": [],
+        "register_issues": [],
+        "suggestions": [
+          "Ensure Telugu script integration maintains readability",
+          "Verify code-mix spacing consistency in mixed-language sentences"
+        ],
+        "confidence": 0.95,
+        "_judge_usage": {
+          "prompt_tokens": 468,
+          "completion_tokens": 701,
+          "total_tokens": 1169,
+          "cached_tokens": 0
+        }
+      }
+    }
+  ],
+  "totals": {
+    "cases_passed": 14,
+    "cases_failed": 6,
+    "prompt_tokens": 72901,
+    "completion_tokens": 3053,
+    "cached_tokens": 44800,
+    "judge_prompt_tokens": 8992,
+    "judge_completion_tokens": 14048,
+    "judge_cached_tokens": 0
+  }
+}
