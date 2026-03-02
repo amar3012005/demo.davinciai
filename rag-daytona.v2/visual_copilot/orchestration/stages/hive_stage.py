@@ -15,10 +15,6 @@ async def resolve_hive_response(*, app_state: Any, hive_interface: Any, schema: 
                 visual_hints=[],
                 cached=False,
                 query_time_ms=0,
-                strategy_score=0.0,
-                strategy_query_used="",
-                strategy_threshold_used=0.0,
-                strategy_accepted=False,
             )
         cache_hive = getattr(app_state, "_hive_cache", {})
         if not hasattr(app_state, "_hive_cache"):
@@ -37,10 +33,6 @@ async def resolve_hive_response(*, app_state: Any, hive_interface: Any, schema: 
                     visual_hints=[],
                     cached=False,
                     query_time_ms=0,
-                    strategy_score=0.0,
-                    strategy_query_used="",
-                    strategy_threshold_used=0.0,
-                    strategy_accepted=False,
                 )
     return hive_response, domain_known_for_hive
 

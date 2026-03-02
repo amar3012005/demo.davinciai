@@ -560,6 +560,10 @@ class MissionState:
     ambiguity_count: int
     created_at: float
     updated_at: float
+    pending_action: Optional[Dict[str, Any]] = None
+    last_url: Optional[str] = None
+    last_dom_signature: Optional[str] = None
+    pending_verify_attempts: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary for Redis storage."""
@@ -575,7 +579,11 @@ class MissionState:
             "action_history": self.action_history,
             "ambiguity_count": self.ambiguity_count,
             "created_at": self.created_at,
-            "updated_at": self.updated_at
+            "updated_at": self.updated_at,
+            "pending_action": self.pending_action,
+            "last_url": self.last_url,
+            "last_dom_signature": self.last_dom_signature,
+            "pending_verify_attempts": self.pending_verify_attempts
         }
 
     @classmethod
@@ -599,7 +607,11 @@ class MissionState:
             action_history=data.get("action_history", []),
             ambiguity_count=data.get("ambiguity_count", 0),
             created_at=data.get("created_at", time.time()),
-            updated_at=data.get("updated_at", time.time())
+            updated_at=data.get("updated_at", time.time()),
+            pending_action=data.get("pending_action"),
+            last_url=data.get("last_url"),
+            last_dom_signature=data.get("last_dom_signature"),
+            pending_verify_attempts=data.get("pending_verify_attempts", 0)
         )
 
     def to_json(self) -> str:

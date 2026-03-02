@@ -32,9 +32,6 @@ class MissionService:
             session_id=session_id,
             schema=schema,
             strategy=strategy,
-            nodes=nodes,
-            app=app,
-            mission_id=mission_id,
         )
         emit_event(
             logger,

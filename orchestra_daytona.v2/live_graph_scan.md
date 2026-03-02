@@ -1,535 +1,723 @@
 # 📸 Live Graph Scan Log
 
-> Session started: `2026-03-01 22:13:08`
+> Session started: `2026-03-02 15:11:39`
 > This file is rewritten every time TARA starts a NEW session.
 > Subsequent scans in the same session are appended below.
 
 ---
 
 ---
-## 📸 Scan — 2026-03-01 22:13:08
-**Session:** `uD8x7y7bpMN7…`  **URL:** `https://console.groq.com/docs/text-chat`  **Nodes:** 521  ⏱ 18ms
+## 📸 Scan — 2026-03-02 15:11:39
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/docs/overview`  **Nodes:** 236  ⏱ 9ms
 
 | # | Node ID | Tag | Zone | Interactive | Visible | Text |
 |---|---------|-----|------|:-----------:|:-------:|------|
-| 1 | `t-mh4cgu` | div | main | ✅ | ✅ | Interactive Mode Full voice walkthrough with speech & action |
-| 2 | `t-ulwkny` | div | main | ✅ | ✅ |  |
-| 3 | `t-159qa5d` | div | main | ✅ | ✅ | Interactive Mode Full voice walkthrough with speech & action |
-| 4 | `t-1s42gqy` | div | main | ✅ | ✅ | Interactive Mode |
-| 5 | `t-10a89v2` | div | main | ✅ | ✅ | Full voice walkthrough with speech & actions |
-| 6 | `t-1adlzx6` | div | main | ✅ | ✅ | Turbo Mode Quick text actions, no voice - maximum speed |
-| 7 | `t-ulyu7z` | div | main | ✅ | ✅ |  |
-| 8 | `t-2rcmat` | div | main | ✅ | ✅ | Turbo Mode Quick text actions, no voice - maximum speed |
-| 9 | `t-r94w0t` | div | main | ✅ | ✅ | Turbo Mode |
-| 10 | `t-1age76` | div | main | ✅ | ✅ | Quick text actions, no voice - maximum speed |
-| 11 | `t-13eh5lo` | div | main | — | ✅ | Choose Mode |
-| 12 | `t-21kp2d` | div | main | — | ✅ | How should TARA assist you this session? |
-| 13 | `t-9uogpe` | a | main | ✅ | ✅ | Groq |
-| 14 | `t-1v1vl4e` | img | main | ✅ | ✅ |  |
-| 15 | `radix-_R_pf9fd8pb_` | button | main | ✅ | ✅ | Personal |
-| 16 | `t-4kga61` | span | main | ✅ | ✅ | Personal |
-| 17 | `radix-_R_3pf9fd8pb_` | button | main | ✅ | ✅ | Default Project |
-| 18 | `t-1jdbwot` | span | main | ✅ | ✅ | Default Project |
-| 19 | `t-1uiw0v3` | a | nav | ✅ | ✅ | Playground |
-| 20 | `t-11u0s77` | span | nav | ✅ | ✅ | Playground |
-| 21 | `t-10gina` | a | nav | ✅ | ✅ | API Keys |
-| 22 | `t-niozmn` | span | nav | ✅ | ✅ | API Keys |
-| 23 | `t-11pn1p9` | a | nav | ✅ | ✅ | Dashboard |
-| 24 | `t-m99akk` | span | nav | ✅ | ✅ | Dashboard |
-| 25 | `t-dmyuik` | a | nav | ✅ | ✅ | Docs |
-| 26 | `t-8o49bu` | span | nav | ✅ | ✅ | Docs |
-| 27 | `t-1c2vgf2` | a | nav | ✅ | ✅ |  |
-| 28 | `t-jtxz8m` | span | nav | ✅ | ✅ |  |
-| 29 | `radix-_r_6_` | button | main | ✅ | ✅ | Amar Sai |
-| 30 | `t-sjnxoc` | span | main | ✅ | ✅ | Amar Sai |
-| 31 | `t-qp5ah9` | img | main | ✅ | ✅ |  |
-| 32 | `t-1uj5zow` | button | sidebar | ✅ | ✅ | Search (Command+K) |
-| 33 | `t-xcl7v5` | span | sidebar | ✅ | ✅ | Search |
-| 34 | `t-l1aucu` | span | sidebar | ✅ | ✅ | Search |
-| 35 | `t-j06qa5` | span | sidebar | ✅ | ✅ | ⌘ K |
-| 36 | `t-1fjregp` | kbd | sidebar | ✅ | ✅ | ⌘ |
-| 37 | `t-19s0nhn` | kbd | sidebar | ✅ | ✅ | K |
-| 38 | `t-3h9yq6` | a | sidebar | ✅ | ✅ | Docs |
-| 39 | `t-13t9km2` | a | sidebar | ✅ | ✅ | API Reference |
-| 40 | `t-198qt1m` | a | nav | ✅ | ✅ | Overview |
-| 41 | `t-47uhhd` | span | nav | ✅ | ✅ | Overview |
-| 42 | `t-eptvvt` | a | nav | ✅ | ✅ | Quickstart |
-| 43 | `t-14f81lw` | span | nav | ✅ | ✅ | Quickstart |
-| 44 | `t-v0p0p4` | a | nav | ✅ | ✅ | Models |
-| 45 | `t-8nubr0` | span | nav | ✅ | ✅ | Models |
-| 46 | `t-1ipkrvl` | a | nav | ✅ | ✅ | OpenAI Compatibility |
-| 47 | `t-f4q8yd` | span | nav | ✅ | ✅ | OpenAI Compatibility |
-| 48 | `t-vvpcyr` | a | nav | ✅ | ✅ | Rate Limits |
-| 49 | `t-tjo4qq` | span | nav | ✅ | ✅ | Rate Limits |
-| 50 | `t-ao4brp` | a | nav | ✅ | ✅ | Templates |
-| 51 | `t-qid8km` | span | nav | ✅ | ✅ | Templates |
-| 52 | `t-63jko1` | a | nav | ✅ | ✅ | API Reference |
-| 53 | `t-db79hz` | span | nav | ✅ | ✅ | API Reference |
-| 54 | `t-115qbkn` | a | nav | ✅ | ✅ | Text Generation |
-| 55 | `t-fpu8z5` | span | nav | ✅ | ✅ | Text Generation |
-| 56 | `t-1aoxtmi` | a | nav | ✅ | ✅ | Speech to Text |
-| 57 | `t-12agzz0` | span | nav | ✅ | ✅ | Speech to Text |
-| 58 | `t-1kokfyz` | a | nav | ✅ | ✅ | Text to Speech |
-| 59 | `t-1xgqrzx` | span | nav | ✅ | ✅ | Text to Speech |
-| 60 | `t-4qmpzd` | a | nav | ✅ | ✅ | OCR and Image Recognition |
-| 61 | `t-155p6p1` | span | nav | ✅ | ✅ | OCR and Image Recognition |
-| 62 | `t-1ye8nzt` | a | nav | ✅ | ✅ | Reasoning |
-| 63 | `t-1778emt` | span | nav | ✅ | ✅ | Reasoning |
-| 64 | `t-3kuqhf` | a | nav | ✅ | ✅ | Content Moderation |
-| 65 | `t-ka43tf` | span | nav | ✅ | ✅ | Content Moderation |
-| 66 | `t-159dtea` | a | nav | ✅ | ✅ | Structured Outputs |
-| 67 | `t-rk7qh6` | span | nav | ✅ | ✅ | Structured Outputs |
-| 68 | `t-oyb6gh` | a | nav | ✅ | ✅ | Prompt Caching |
-| 69 | `t-1s93iu1` | span | nav | ✅ | ✅ | Prompt Caching |
-| 70 | `t-ku72cz` | a | nav | ✅ | ✅ | Tool Use |
-| 71 | `t-1jxgvlt` | span | nav | ✅ | ✅ | Tool Use |
-| 72 | `t-gbqv7k` | a | nav | ✅ | ✅ | Integrations Catalog |
-| 73 | `t-y0m9s5` | span | nav | ✅ | ✅ | Integrations Catalog |
-| 74 | `t-fx5w1l` | a | nav | ✅ | ✅ | Coding with Groq |
-| 75 | `t-b3sh3k` | span | nav | ✅ | ✅ | Coding with Groq |
-| 76 | `t-smrtix` | a | nav | ✅ | ✅ | Overview |
-| 77 | `t-1tnhy8g` | span | nav | ✅ | ✅ | Overview |
-| 78 | `t-1634ewk` | a | nav | ✅ | ✅ | Systems |
-| 79 | `t-14zupfo` | span | nav | ✅ | ✅ | Systems |
-| 80 | `t-1opela` | a | nav | ✅ | ✅ | Use Cases |
-| 81 | `t-2ezzqp` | span | nav | ✅ | ✅ | Use Cases |
-| 82 | `t-ggmj2d` | a | nav | ✅ | ✅ | Prompting Guide |
-| 83 | `t-1wrhah` | span | nav | ✅ | ✅ | Prompting Guide |
-| 84 | `t-12oobgh` | a | nav | ✅ | ✅ | Assistant Message Prefilling |
-| 85 | `t-eatd6p` | span | nav | ✅ | ✅ | Assistant Message Prefilling |
-| 86 | `t-19jiv25` | a | nav | ✅ | ✅ | Service Tiers |
-| 87 | `t-182mvx8` | span | nav | ✅ | ✅ | Service Tiers |
-| 88 | `t-62qwb9` | a | nav | ✅ | ✅ | Performance Tier |
-| 89 | `t-1snj8ci` | span | nav | ✅ | ✅ | Performance Tier |
-| 90 | `t-9m7bro` | a | nav | ✅ | ✅ | Flex Processing |
-| 91 | `t-2pfqkt` | span | nav | ✅ | ✅ | Flex Processing |
-| 92 | `t-1ewpzv5` | a | nav | ✅ | ✅ | Batch Processing |
-| 93 | `t-1mmacbp` | span | nav | ✅ | ✅ | Batch Processing |
-| 94 | `t-15tsjfr` | a | nav | ✅ | ✅ | LoRA Inference |
-| 95 | `t-7awddr` | span | nav | ✅ | ✅ | LoRA Inference |
-| 96 | `t-1aldk04` | a | nav | ✅ | ✅ | Production Checklist |
-| 97 | `t-14vz9dd` | span | nav | ✅ | ✅ | Production Checklist |
-| 98 | `t-1ntf8w3` | a | nav | ✅ | ✅ | Optimizing Latency |
-| 99 | `t-ylkn7n` | span | nav | ✅ | ✅ | Optimizing Latency |
-| 100 | `t-1oqx87g` | a | nav | ✅ | ✅ | Security Onboarding |
-| 101 | `t-f8ioet` | span | nav | ✅ | ✅ | Security Onboarding |
-| 102 | `t-11st23g` | a | nav | ✅ | ✅ | Prometheus Metrics |
-| 103 | `t-v272s` | span | nav | ✅ | ✅ | Prometheus Metrics |
-| 104 | `t-12qmjoz` | a | nav | ✅ | ✅ | Spend Limits |
-| 105 | `t-1as6nfg` | span | nav | ✅ | ✅ | Spend Limits |
-| 106 | `t-sd2r7h` | a | nav | ✅ | ✅ | Projects |
-| 107 | `t-nfziwj` | span | nav | ✅ | ✅ | Projects |
-| 108 | `t-wfurm9` | a | nav | ✅ | ✅ | Model Permissions |
-| 109 | `t-l0wd2b` | span | nav | ✅ | ✅ | Model Permissions |
-| 110 | `t-1fuv312` | a | nav | ✅ | ✅ | Billing FAQs |
-| 111 | `t-pxhpkt` | span | nav | ✅ | ✅ | Billing FAQs |
-| 112 | `t-1it2rlj` | a | nav | ✅ | ✅ | Your Data |
-| 113 | `t-slhyqb` | span | nav | ✅ | ✅ | Your Data |
-| 114 | `t-18ou1es` | a | nav | ✅ | ✅ | SDK Libraries |
-| 115 | `t-10ecss5` | span | nav | ✅ | ✅ | SDK Libraries |
-| 116 | `t-1adtpjw` | a | nav | ✅ | ✅ | Groq Badge |
-| 117 | `t-1nvhmq9` | span | nav | ✅ | ✅ | Groq Badge |
-| 118 | `t-4libq8` | a | nav | ✅ | ✅ | Developer Community |
-| 119 | `t-u59urf` | span | nav | ✅ | ✅ | Developer Community |
-| 120 | `t-1ojofn1` | a | nav | ✅ | ✅ | OpenBench |
-| 121 | `t-jktwzk` | span | nav | ✅ | ✅ | OpenBench |
-| 122 | `t-1gn8s0i` | a | nav | ✅ | ✅ | Error Codes |
-| 123 | `t-1yhl0ep` | span | nav | ✅ | ✅ | Error Codes |
-| 124 | `t-rae15o` | a | nav | ✅ | ✅ | Changelog |
-| 125 | `t-1m9agja` | span | nav | ✅ | ✅ | Changelog |
-| 126 | `t-19cayhc` | a | nav | ✅ | ✅ | Policies & Notices |
-| 127 | `t-10ed6bf` | span | nav | ✅ | ✅ | Policies & Notices |
-| 128 | `t-1ulgdm9` | button | main | ✅ | ✅ | Copy page |
-| 129 | `radix-_r_j_` | button | main | ✅ | ✅ |  |
-| 130 | `t-qn3ncz` | a | main | ✅ | ✅ | Chat Completions |
-| 131 | `t-1w5dour` | a | main | ✅ | ✅ | visit the API reference page. |
-| 132 | `t-1arc10` | a | main | ✅ | ✅ | Getting Started with Groq SDK |
-| 133 | `t-9ypz1v` | a | main | ✅ | ✅ | Groq SDK |
-| 134 | `t-1fek3tb` | a | main | ✅ | ✅ | API key |
-| 135 | `t-17ay5c8` | div | main | ✅ | ✅ | Python JavaScript |
-| 136 | `radix-_r_l_-trigger-` | button | main | ✅ | ✅ | Python |
-| 137 | `radix-_r_l_-trigger-` | button | main | ✅ | ✅ | JavaScript |
-| 138 | `radix-_r_l_-content-` | div | main | ✅ | ✅ | shell pip install groq Performing a Basic Chat Completion Th |
-| 139 | `t-13l342x` | button | main | ✅ | ✅ | Copy snippet |
-| 140 | `t-ikifup` | a | main | ✅ | ✅ | Performing a Basic Chat Completion |
-| 141 | `t-rfrnt6` | button | main | ✅ | ✅ | Copy snippet |
-| 142 | `t-z06d9x` | a | main | ✅ | ✅ | Streaming a Chat Completion |
-| 143 | `t-1bwo89a` | button | main | ✅ | ✅ | Copy snippet |
-| 144 | `t-1r3wy2y` | a | main | ✅ | ✅ | Performing a Chat Completion with a Stop Sequence |
-| 145 | `t-1sd4xy0` | button | main | ✅ | ✅ | Copy snippet |
-| 146 | `t-rrmn9x` | a | main | ✅ | ✅ | Performing an Async Chat Completion |
-| 147 | `t-py8wor` | button | main | ✅ | ✅ | Copy snippet |
-| 148 | `t-3sr61h` | a | main | ✅ | ✅ | Streaming an Async Chat Completion |
-| 149 | `t-1njxrmm` | button | main | ✅ | ✅ | Copy snippet |
-| 150 | `t-h4o9g1` | a | main | ✅ | ✅ | Structured Outputs and JSON |
-| 151 | `t-1ch7ilb` | a | main | ✅ | ✅ | structured outputs documentation |
-| 152 | `t-18k8twt` | button | main | ✅ | ✅ | Yes |
-| 153 | `t-uxirag` | span | main | ✅ | ✅ | Yes |
-| 154 | `t-1smurj6` | button | main | ✅ | ✅ | No |
-| 155 | `t-12tyig7` | span | main | ✅ | ✅ | No |
-| 156 | `t-1mejxvv` | button | main | ✅ | ✅ | Suggest Edits |
-| 157 | `t-1x13yku` | span | main | ✅ | ✅ | Suggest Edits |
-| 158 | `t-117msqm` | a | main | ✅ | ✅ | Chat Completions |
-| 159 | `t-cusvou` | a | main | ✅ | ✅ | Performing a Basic Chat Completion |
-| 160 | `t-1x8kwn0` | a | main | ✅ | ✅ | Streaming a Chat Completion |
-| 161 | `t-65r4r2` | a | main | ✅ | ✅ | Performing a Chat Completion with a Stop Sequence |
-| 162 | `t-7whe26` | a | main | ✅ | ✅ | Performing an Async Chat Completion |
-| 163 | `t-1m0l5q3` | a | main | ✅ | ✅ | Structured Outputs and JSON |
-| 164 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
-| 165 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
-| 166 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
-| 167 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
-| 168 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
-| 169 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
-| 170 | `t-g2t1kp` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
-| 171 | `t-27x5nu` | nav | nav | — | ✅ | GETTING STARTED Overview Quickstart Models OpenAI Compatibil |
-| 172 | `t-19fcpmx` | h3 | nav | — | ✅ | GETTING STARTED |
-| 173 | `t-14xocwu` | h3 | nav | — | ✅ | CORE FEATURES |
-| 174 | `t-1wyrazg` | h3 | nav | — | ✅ | TOOLS & INTEGRATIONS |
-| 175 | `t-7118hu` | h3 | nav | — | ✅ | COMPOUND (AGENTIC AI) |
-| 176 | `t-i4byxg` | h3 | nav | — | ✅ | GUIDES |
-| 177 | `t-ne4vxw` | h3 | nav | — | ✅ | SERVICE TIERS |
-| 178 | `t-k8yq78` | h3 | nav | — | ✅ | ADVANCED |
-| 179 | `t-8s0yr3` | h3 | nav | — | ✅ | PRODUCTION READINESS |
-| 180 | `t-pmlkeb` | h3 | nav | — | ✅ | ACCOUNT AND CONSOLE |
-| 181 | `t-f2fvg7` | h3 | nav | — | ✅ | DEVELOPER RESOURCES |
-| 182 | `t-1lvbhpb` | h3 | nav | — | ✅ | LEGAL |
-| 183 | `t-17t42a4` | h1 | main | — | ✅ | Text Generation |
-| 184 | `t-qibmf8` | p | main | — | ✅ | Generating text with Groq's Chat Completions API enables you |
-| 185 | `chat-completions` | h2 | main | — | ✅ | Chat Completions |
-| 186 | `t-1fabtwz` | p | main | — | ✅ | Chat completions allow your applications to have dynamic int |
-| 187 | `t-1qvy5oo` | p | main | — | ✅ | Chat models can handle both multi-turn discussions (conversa |
-| 188 | `t-q22hf2` | p | main | — | ✅ | For details about all available parameters, visit the API re |
-| 189 | `getting-started-with` | h3 | main | — | ✅ | Getting Started with Groq SDK |
-| 190 | `t-axf9mc` | p | main | — | ✅ | To start using Groq's Chat Completions API, you'll need to i |
-| 191 | `t-j9yvb9` | div | main | — | ✅ | shell |
-| 192 | `t-1vsmce2` | span | main | — | ✅ | pip |
-| 193 | `t-161l48j` | span | main | — | ✅ | install |
-| 194 | `t-1lmmysa` | span | main | — | ✅ | groq |
-| 195 | `performing-a-basic-c` | h2 | main | — | ✅ | Performing a Basic Chat Completion |
-| 196 | `t-1tyo1d3` | p | main | — | ✅ | The simplest way to use the Chat Completions API is to send  |
-| 197 | `t-6d2pqk` | div | main | — | ✅ | Python |
-| 198 | `t-95va93` | span | main | — | ✅ | from |
-| 199 | `t-17gfqux` | span | main | — | ✅ | groq |
-| 200 | `t-1pu86ge` | span | main | — | ✅ | import |
-| 201 | `t-1yqoixr` | span | main | — | ✅ | Groq |
-| 202 | `t-wz7wlq` | span | main | — | ✅ | client |
-| 203 | `t-1yqoj8y` | span | main | — | ✅ | Groq |
-| 204 | `t-71ejr5` | span | main | — | ✅ | chat_completion |
-| 205 | `t-mtk78f` | span | main | — | ✅ | client |
-| 206 | `t-30bnxy` | span | main | — | ✅ | chat |
-| 207 | `t-eo48j8` | span | main | — | ✅ | completions |
-| 208 | `t-1v3vdlx` | span | main | — | ✅ | create |
-| 209 | `t-mvy4ot` | span | main | — | ✅ | messages |
-| 210 | `t-1jc0bvw` | span | main | — | ✅ | # Set an optional system message. This sets the behavior of  |
-| 211 | `t-7l7az3` | span | main | — | ✅ | # assistant and can be used to provide specific instructions |
-| 212 | `t-1o7m078` | span | main | — | ✅ | # how it should behave throughout the conversation. |
-| 213 | `t-1ss8ud5` | span | main | — | ✅ | "role" |
-| 214 | `t-1ugfu5e` | span | main | — | ✅ | "system" |
-| 215 | `t-1mf8tjf` | span | main | — | ✅ | "content" |
-| 216 | `t-9ad6py` | span | main | — | ✅ | "You are a helpful assistant." |
-| 217 | `t-lzc63a` | span | main | — | ✅ | # Set a user message for the assistant to respond to. |
-| 218 | `t-1ss8rzo` | span | main | — | ✅ | "role" |
-| 219 | `t-ds7zkp` | span | main | — | ✅ | "user" |
-| 220 | `t-1mf95vo` | span | main | — | ✅ | "content" |
-| 221 | `t-1d30n85` | span | main | — | ✅ | "Explain the importance of fast language models" |
-| 222 | `t-74riqi` | span | main | — | ✅ | # The language model which will generate the completion. |
-| 223 | `t-kbwdeg` | span | main | — | ✅ | model |
-| 224 | `t-1a6ll1x` | span | main | — | ✅ | "llama-3.3-70b-versatile" |
-| 225 | `t-wclbo7` | span | main | — | ✅ | # Print the completion returned by the LLM. |
-| 226 | `t-cg9i1v` | span | main | — | ✅ | print |
-| 227 | `t-j6zuk5` | span | main | — | ✅ | chat_completion |
-| 228 | `t-1tbbezy` | span | main | — | ✅ | choices |
-| 229 | `t-1xoege1` | span | main | — | ✅ | message |
-| 230 | `t-1qo4yyh` | span | main | — | ✅ | content |
-| 231 | `streaming-a-chat-com` | h2 | main | — | ✅ | Streaming a Chat Completion |
-| 232 | `t-272n8a` | p | main | — | ✅ | For a more responsive user experience, you can stream the mo |
-| 233 | `t-1j22q3b` | p | main | — | ✅ | To enable streaming, set the parameter stream=True. The comp |
-| 234 | `t-12t5w02` | code | main | — | ✅ | stream=True |
-| 235 | `t-8sms7c` | div | main | — | ✅ | Python |
-| 236 | `t-kxzw9v` | span | main | — | ✅ | from |
-| 237 | `t-vob4u5` | span | main | — | ✅ | groq |
-| 238 | `t-2l8qi2` | span | main | — | ✅ | import |
-| 239 | `t-1myjx3v` | span | main | — | ✅ | Groq |
-| 240 | `t-l73aru` | span | main | — | ✅ | client |
-| 241 | `t-1myjx86` | span | main | — | ✅ | Groq |
-| 242 | `t-xjai7w` | span | main | — | ✅ | stream |
-| 243 | `t-1o80cd7` | span | main | — | ✅ | client |
-| 244 | `t-10mzkz6` | span | main | — | ✅ | chat |
-| 245 | `t-1cas5kg` | span | main | — | ✅ | completions |
-| 246 | `t-tpf8o1` | span | main | — | ✅ | create |
-| 247 | `t-at13kl` | span | main | — | ✅ | # Required parameters |
-| 248 | `t-1oae912` | span | main | — | ✅ | messages |
-| 249 | `t-hxk65l` | span | main | — | ✅ | # Set an optional system message. This sets the behavior of  |
-| 250 | `t-18znkci` | span | main | — | ✅ | # assistant and can be used to provide specific instructions |
-| 251 | `t-qky7er` | span | main | — | ✅ | # how it should behave throughout the conversation. |
-| 252 | `t-rdsh87` | span | main | — | ✅ | "role" |
-| 253 | `t-t1zjfn` | span | main | — | ✅ | "system" |
-| 254 | `t-osl43m` | span | main | — | ✅ | "content" |
-| 255 | `t-1aothmp` | span | main | — | ✅ | "You are a helpful assistant." |
-| 256 | `t-1ndsml0` | span | main | — | ✅ | # Set a user message for the assistant to respond to. |
-| 257 | `t-rdsfqp` | span | main | — | ✅ | "role" |
-| 258 | `t-1f6o59a` | span | main | — | ✅ | "user" |
-| 259 | `t-osl6kj` | span | main | — | ✅ | "content" |
-| 260 | `t-udf6n4` | span | main | — | ✅ | "Explain the importance of fast language models" |
-| 261 | `t-xun1qx` | span | main | — | ✅ | # The language model which will generate the completion. |
-| 262 | `t-1sn4tcj` | span | main | — | ✅ | model |
-| 263 | `t-jgpxwb` | span | main | — | ✅ | "llama-3.3-70b-versatile" |
-| 264 | `t-i1yn6p` | span | main | — | ✅ | # Optional parameters |
-| 265 | `t-1q4qfc6` | span | main | — | ✅ | # Controls randomness: lowering results in less random compl |
-| 266 | `t-7tg7b9` | span | main | — | ✅ | # As the temperature approaches zero, the model will become  |
-| 267 | `t-ney81` | span | main | — | ✅ | # and repetitive. |
-| 268 | `t-99ci2k` | span | main | — | ✅ | temperature |
-| 269 | `t-1gnoza1` | span | main | — | ✅ | 0.5 |
-| 270 | `t-1hr10bs` | span | main | — | ✅ | # The maximum number of tokens to generate. Requests can use |
-| 271 | `t-unyrk7` | span | main | — | ✅ | # 2048 tokens shared between prompt and completion. |
-| 272 | `t-a03dny` | span | main | — | ✅ | max_completion_tokens |
-| 273 | `t-hrlswj` | span | main | — | ✅ | 1024 |
-| 274 | `t-1isyd0y` | span | main | — | ✅ | # Controls diversity via nucleus sampling: 0.5 means half of |
-| 275 | `t-w2w2x4` | span | main | — | ✅ | # likelihood-weighted options are considered. |
-| 276 | `t-138ay0p` | span | main | — | ✅ | top_p |
-| 277 | `t-140bsgy` | span | main | — | ✅ | # A stop sequence is a predefined or user-specified text str |
-| 278 | `t-2efcni` | span | main | — | ✅ | # signals an AI to stop generating content, ensuring its res |
-| 279 | `t-xqktv` | span | main | — | ✅ | # remain focused and concise. Examples include punctuation m |
-| 280 | `t-15hdiq0` | span | main | — | ✅ | # markers like "[end]". |
-| 281 | `t-bfra19` | span | main | — | ✅ | stop |
-| 282 | `t-u5wz7d` | span | main | — | ✅ | None |
-| 283 | `t-e0cu9h` | span | main | — | ✅ | # If set, partial message deltas will be sent. |
-| 284 | `t-157x6i7` | span | main | — | ✅ | stream |
-| 285 | `t-64b9yf` | span | main | — | ✅ | True |
-| 286 | `t-1y2d3vi` | span | main | — | ✅ | # Print the incremental deltas returned by the LLM. |
-| 287 | `t-okbpe6` | span | main | — | ✅ | for |
-| 288 | `t-1wmt79r` | span | main | — | ✅ | chunk |
-| 289 | `t-157x85m` | span | main | — | ✅ | stream |
-| 290 | `t-1365u24` | span | main | — | ✅ | print |
-| 291 | `t-1wmtesp` | span | main | — | ✅ | chunk |
-| 292 | `t-l02a3s` | span | main | — | ✅ | choices |
-| 293 | `t-1q07zh` | span | main | — | ✅ | delta |
-| 294 | `t-icubg2` | span | main | — | ✅ | content |
-| 295 | `t-lbl7vh` | span | main | — | ✅ | end |
-| 296 | `performing-a-chat-co` | h2 | main | — | ✅ | Performing a Chat Completion with a Stop Sequence |
-| 297 | `t-1ssr2bk` | p | main | — | ✅ | Stop sequences allow you to control where the model should s |
-| 298 | `t-t1pn0e` | div | main | — | ✅ | Python |
-| 299 | `t-1pua6yd` | span | main | — | ✅ | from |
-| 300 | `t-rqpyq3` | span | main | — | ✅ | groq |
-| 301 | `t-5z5yfw` | span | main | — | ✅ | import |
-| 302 | `t-aojw4t` | span | main | — | ✅ | Groq |
-| 303 | `t-1lgdlrw` | span | main | — | ✅ | client |
-| 304 | `t-aojwcg` | span | main | — | ✅ | Groq |
-| 305 | `t-1pp90dv` | span | main | — | ✅ | chat_completion |
-| 306 | `t-1d7jk8d` | span | main | — | ✅ | client |
-| 307 | `t-daz9pg` | span | main | — | ✅ | chat |
-| 308 | `t-2vitdy` | span | main | — | ✅ | completions |
-| 309 | `t-uqsj93` | span | main | — | ✅ | create |
-| 310 | `t-1f4sdqb` | span | main | — | ✅ | # Required parameters |
-| 311 | `t-r1ks0w` | span | main | — | ✅ | messages |
-| 312 | `t-193cwhr` | span | main | — | ✅ | # Set an optional system message. This sets the behavior of  |
-| 313 | `t-bsguus` | span | main | — | ✅ | # assistant and can be used to provide specific instructions |
-| 314 | `t-1g9mnxx` | span | main | — | ✅ | # how it should behave throughout the conversation. |
-| 315 | `t-ocy1t` | span | main | — | ✅ | "role" |
-| 316 | `t-xm75cl` | span | main | — | ✅ | "system" |
-| 317 | `t-1501m7o` | span | main | — | ✅ | "content" |
-| 318 | `t-1g6kvdj` | span | main | — | ✅ | "You are a helpful assistant." |
-| 319 | `t-li8rmq` | span | main | — | ✅ | # Set a user message for the assistant to respond to. |
-| 320 | `t-ocmhz` | span | main | — | ✅ | "role" |
-| 321 | `t-15p9s6g` | span | main | — | ✅ | "user" |
-| 322 | `t-1501v79` | span | main | — | ✅ | "content" |
-| 323 | `t-1077bvt` | span | main | — | ✅ | "Count to 10. Your response must begin with \"1, \". example |
-| 324 | `t-1c65gpb` | span | main | — | ✅ | # The language model which will generate the completion. |
-| 325 | `t-bkhdd1` | span | main | — | ✅ | model |
-| 326 | `t-4py4wd` | span | main | — | ✅ | "llama-3.3-70b-versatile" |
-| 327 | `t-g5b2mv` | span | main | — | ✅ | # Optional parameters |
-| 328 | `t-ux2vkg` | span | main | — | ✅ | # Controls randomness: lowering results in less random compl |
-| 329 | `t-xi5tbn` | span | main | — | ✅ | # As the temperature approaches zero, the model will become  |
-| 330 | `t-a2ck1j` | span | main | — | ✅ | # and repetitive. |
-| 331 | `t-1bgi622` | span | main | — | ✅ | temperature |
-| 332 | `t-csv6y7` | span | main | — | ✅ | 0.5 |
-| 333 | `t-rwnfi6` | span | main | — | ✅ | # The maximum number of tokens to generate. Requests can use |
-| 334 | `t-11u1e8h` | span | main | — | ✅ | # 2048 tokens shared between prompt and completion. |
-| 335 | `t-1s311q0` | span | main | — | ✅ | max_completion_tokens |
-| 336 | `t-vrtmat` | span | main | — | ✅ | 1024 |
-| 337 | `t-18sas` | span | main | — | ✅ | # Controls diversity via nucleus sampling: 0.5 means half of |
-| 338 | `t-92r9oe` | span | main | — | ✅ | # likelihood-weighted options are considered. |
-| 339 | `t-tig6lr` | span | main | — | ✅ | top_p |
-| 340 | `t-uci178` | span | main | — | ✅ | # A stop sequence is a predefined or user-specified text str |
-| 341 | `t-drgo60` | span | main | — | ✅ | # signals an AI to stop generating content, ensuring its res |
-| 342 | `t-16gjs91` | span | main | — | ✅ | # remain focused and concise. Examples include punctuation m |
-| 343 | `t-5iodjy` | span | main | — | ✅ | # markers like "[end]". |
-| 344 | `t-11d9tec` | span | main | — | ✅ | # For this example, we will use ", 6" so that the llm stops  |
-| 345 | `t-1n09sv6` | span | main | — | ✅ | # If multiple stop values are needed, an array of string may |
-| 346 | `t-e2tcue` | span | main | — | ✅ | # stop=[", 6", ", six", ", Six"] |
-| 347 | `t-14foecc` | span | main | — | ✅ | stop |
-| 348 | `t-161fqsc` | span | main | — | ✅ | ", 6" |
-| 349 | `t-kdcksi` | span | main | — | ✅ | # If set, partial message deltas will be sent. |
-| 350 | `t-1ma5188` | span | main | — | ✅ | stream |
-| 351 | `t-1430uuv` | span | main | — | ✅ | False |
-| 352 | `t-ff3gzv` | span | main | — | ✅ | # Print the completion returned by the LLM. |
-| 353 | `t-15zp1w7` | span | main | — | ✅ | print |
-| 354 | `t-1ba4k1x` | span | main | — | ✅ | chat_completion |
-| 355 | `t-w3xoa` | span | main | — | ✅ | choices |
-| 356 | `t-1gj8f4f` | span | main | — | ✅ | message |
-| 357 | `t-1d4e5zj` | span | main | — | ✅ | content |
-| 358 | `performing-an-async-` | h2 | main | — | ✅ | Performing an Async Chat Completion |
-| 359 | `t-tp338p` | p | main | — | ✅ | For applications that need to maintain responsiveness while  |
-| 360 | `t-tnk7h9` | div | main | — | ✅ | Python |
-| 361 | `t-k5d6kd` | span | main | — | ✅ | import |
-| 362 | `t-1y82jlv` | span | main | — | ✅ | asyncio |
-| 363 | `t-1bo2z01` | span | main | — | ✅ | from |
-| 364 | `t-108ykst` | span | main | — | ✅ | groq |
-| 365 | `t-k5d6ok` | span | main | — | ✅ | import |
-| 366 | `t-1koca79` | span | main | — | ✅ | AsyncGroq |
-| 367 | `t-1f89xv6` | span | main | — | ✅ | async |
-| 368 | `t-1fsjq9d` | span | main | — | ✅ | def |
-| 369 | `t-tathhv` | span | main | — | ✅ | main |
-| 370 | `t-8ejdzi` | span | main | — | ✅ | client |
-| 371 | `t-nibn5k` | span | main | — | ✅ | AsyncGroq |
-| 372 | `t-kw8tcl` | span | main | — | ✅ | chat_completion |
-| 373 | `t-twl325` | span | main | — | ✅ | await |
-| 374 | `t-8ejd8t` | span | main | — | ✅ | client |
-| 375 | `t-1i3zglg` | span | main | — | ✅ | chat |
-| 376 | `t-aqt2g2` | span | main | — | ✅ | completions |
-| 377 | `t-y5cjkj` | span | main | — | ✅ | create |
-| 378 | `t-1ijc945` | span | main | — | ✅ | # Required parameters |
-| 379 | `t-ug4n9g` | span | main | — | ✅ | messages |
-| 380 | `t-1chwtgf` | span | main | — | ✅ | # Set an optional system message. This sets the behavior of  |
-| 381 | `t-8dwxsk` | span | main | — | ✅ | # assistant and can be used to provide specific instructions |
-| 382 | `t-bgmgyd` | span | main | — | ✅ | # how it should behave throughout the conversation. |
-| 383 | `t-42wky5` | span | main | — | ✅ | "role" |
-| 384 | `t-1ruas1r` | span | main | — | ✅ | "system" |
-| 385 | `t-71qjc` | span | main | — | ✅ | "content" |
-| 386 | `t-1jl4qrd` | span | main | — | ✅ | "You are a helpful assistant." |
-| 387 | `t-2erl09` | span | main | — | ✅ | # Set a user message for the assistant to respond to. |
-| 388 | `t-1rmy16k` | span | main | — | ✅ | "role" |
-| 389 | `t-1ag68i9` | span | main | — | ✅ | "user" |
-| 390 | `t-6gemq6` | span | main | — | ✅ | "content" |
-| 391 | `t-v2f7tp` | span | main | — | ✅ | "Explain the importance of fast language models" |
-| 392 | `t-1l3han` | span | main | — | ✅ | # The language model which will generate the completion. |
-| 393 | `t-15ad7e3` | span | main | — | ✅ | model |
-| 394 | `t-1a16c06` | span | main | — | ✅ | "llama-3.3-70b-versatile" |
-| 395 | `t-1qqd7mi` | span | main | — | ✅ | # Optional parameters |
-| 396 | `t-xx2xqs` | span | main | — | ✅ | # Controls randomness: lowering results in less random compl |
-| 397 | `t-923sdv` | span | main | — | ✅ | # As the temperature approaches zero, the model will become |
-| 398 | `t-1gx5cxh` | span | main | — | ✅ | # deterministic and repetitive. |
-| 399 | `t-vg7oj` | span | main | — | ✅ | temperature |
-| 400 | `t-16ir165` | span | main | — | ✅ | 0.5 |
-| 401 | `t-1gcpieo` | span | main | — | ✅ | # The maximum number of tokens to generate. Requests can use |
-| 402 | `t-yu0wyn` | span | main | — | ✅ | # 2048 tokens shared between prompt and completion. |
-| 403 | `t-yd5fsk` | span | main | — | ✅ | max_completion_tokens |
-| 404 | `t-7brbhl` | span | main | — | ✅ | 1024 |
-| 405 | `t-tr4j48` | span | main | — | ✅ | # Controls diversity via nucleus sampling: 0.5 means half of |
-| 406 | `t-sxxnzm` | span | main | — | ✅ | # likelihood-weighted options are considered. |
-| 407 | `t-1hyi8kk` | span | main | — | ✅ | top_p |
-| 408 | `t-5wff77` | span | main | — | ✅ | # A stop sequence is a predefined or user-specified text str |
-| 409 | `t-1j2mt83` | span | main | — | ✅ | # signals an AI to stop generating content, ensuring its res |
-| 410 | `t-1qbm6ni` | span | main | — | ✅ | # remain focused and concise. Examples include punctuation m |
-| 411 | `t-1kotl3p` | span | main | — | ✅ | # markers like "[end]". |
-| 412 | `t-apo0gr` | span | main | — | ✅ | stop |
-| 413 | `t-xznsrz` | span | main | — | ✅ | None |
-| 414 | `t-1uyd003` | span | main | — | ✅ | # If set, partial message deltas will be sent. |
-| 415 | `t-sk4s1r` | span | main | — | ✅ | stream |
-| 416 | `t-1nxzph4` | span | main | — | ✅ | False |
-| 417 | `t-13v6z2a` | span | main | — | ✅ | # Print the completion returned by the LLM. |
-| 418 | `t-18znntr` | span | main | — | ✅ | print |
-| 419 | `t-1ea38n6` | span | main | — | ✅ | chat_completion |
-| 420 | `t-1677nb1` | span | main | — | ✅ | choices |
-| 421 | `t-s34y9x` | span | main | — | ✅ | message |
-| 422 | `t-1wzd2bw` | span | main | — | ✅ | content |
-| 423 | `t-18vslwg` | span | main | — | ✅ | asyncio |
-| 424 | `t-1edb623` | span | main | — | ✅ | run |
-| 425 | `t-17im9hj` | span | main | — | ✅ | main |
-| 426 | `streaming-an-async-c` | h3 | main | — | ✅ | Streaming an Async Chat Completion |
-| 427 | `t-1dqcpp4` | p | main | — | ✅ | You can combine the benefits of streaming and asynchronous p |
-| 428 | `t-wp1qpk` | div | main | — | ✅ | Python |
-| 429 | `t-nncvfc` | span | main | — | ✅ | import |
-| 430 | `t-1t4spy` | span | main | — | ✅ | asyncio |
-| 431 | `t-1vqchuc` | span | main | — | ✅ | from |
-| 432 | `t-a2j1wo` | span | main | — | ✅ | groq |
-| 433 | `t-nncvox` | span | main | — | ✅ | import |
-| 434 | `t-1o6bz28` | span | main | — | ✅ | AsyncGroq |
-| 435 | `t-2zvz5j` | span | main | — | ✅ | async |
-| 436 | `t-p81epg` | span | main | — | ✅ | def |
-| 437 | `t-hrxn86` | span | main | — | ✅ | main |
-| 438 | `t-1vwrkaz` | span | main | — | ✅ | client |
-| 439 | `t-1vyxiil` | span | main | — | ✅ | AsyncGroq |
-| 440 | `t-1habfk9` | span | main | — | ✅ | stream |
-| 441 | `t-19795dk` | span | main | — | ✅ | await |
-| 442 | `t-1vwrl54` | span | main | — | ✅ | client |
-| 443 | `t-1tmvav5` | span | main | — | ✅ | chat |
-| 444 | `t-1j7eraf` | span | main | — | ✅ | completions |
-| 445 | `t-19o88pi` | span | main | — | ✅ | create |
-| 446 | `t-1xu0hy8` | span | main | — | ✅ | # Required parameters |
-| 447 | `t-19qsw5d` | span | main | — | ✅ | messages |
-| 448 | `t-1o0sisa` | span | main | — | ✅ | # Set an optional system message. This sets the behavior of  |
-| 449 | `t-1vw5amp` | span | main | — | ✅ | # assistant and can be used to provide specific instructions |
-| 450 | `t-1yyuvdc` | span | main | — | ✅ | # how it should behave throughout the conversation. |
-| 451 | `t-flsgso` | span | main | — | ✅ | "role" |
-| 452 | `t-1cjmo8q` | span | main | — | ✅ | "system" |
-| 453 | `t-1np9wnx` | span | main | — | ✅ | "content" |
-| 454 | `t-1yvssvw` | span | main | — | ✅ | "You are a helpful assistant." |
-| 455 | `t-1ca95to` | span | main | — | ✅ | # Set a user message for the assistant to respond to. |
-| 456 | `t-hrggd5` | span | main | — | ✅ | "role" |
-| 457 | `t-4fdnqs` | span | main | — | ✅ | "user" |
-| 458 | `t-1gbw9ez` | span | main | — | ✅ | "content" |
-| 459 | `t-6mzigo` | span | main | — | ✅ | "Explain the importance of fast language models" |
-| 460 | `t-q0j6wa` | span | main | — | ✅ | # The language model which will generate the completion. |
-| 461 | `t-xq3mz2` | span | main | — | ✅ | model |
-| 462 | `t-5opnn` | span | main | — | ✅ | "llama-3.3-70b-versatile" |
-| 463 | `t-12ax9z3` | span | main | — | ✅ | # Optional parameters |
-| 464 | `t-8rgoz5` | span | main | — | ✅ | # Controls randomness: lowering results in less random compl |
-| 465 | `t-1jnrwk6` | span | main | — | ✅ | # As the temperature approaches zero, the model will become |
-| 466 | `t-shpfbk` | span | main | — | ✅ | # deterministic and repetitive. |
-| 467 | `t-16w8nba` | span | main | — | ✅ | temperature |
-| 468 | `t-hd4s94` | span | main | — | ✅ | 0.5 |
-| 469 | `t-5r1cb9` | span | main | — | ✅ | # The maximum number of tokens to generate. Requests can use |
-| 470 | `t-1nzne62` | span | main | — | ✅ | # 2048 tokens shared between prompt and completion. |
-| 471 | `t-15xf1qp` | span | main | — | ✅ | max_completion_tokens |
-| 472 | `t-1hxfm6k` | span | main | — | ✅ | 1024 |
-| 473 | `t-4li3n1` | span | main | — | ✅ | # Controls diversity via nucleus sampling: 0.5 means half of |
-| 474 | `t-4ihydz` | span | main | — | ✅ | # likelihood-weighted options are considered. |
-| 475 | `t-oy6rcx` | span | main | — | ✅ | top_p |
-| 476 | `t-1gi88uu` | span | main | — | ✅ | # A stop sequence is a predefined or user-specified text str |
-| 477 | `t-1qmxwpi` | span | main | — | ✅ | # signals an AI to stop generating content, ensuring its res |
-| 478 | `t-kay1qj` | span | main | — | ✅ | # remain focused and concise. Examples include punctuation m |
-| 479 | `t-rodo8g` | span | main | — | ✅ | # markers like "[end]". |
-| 480 | `t-i9z2f2` | span | main | — | ✅ | stop |
-| 481 | `t-1mez0y2` | span | main | — | ✅ | None |
-| 482 | `t-oxouxy` | span | main | — | ✅ | # If set, partial message deltas will be sent. |
-| 483 | `t-1hpsqxm` | span | main | — | ✅ | stream |
-| 484 | `t-v98uty` | span | main | — | ✅ | True |
-| 485 | `t-1opu6sr` | span | main | — | ✅ | # Print the incremental deltas returned by the LLM. |
-| 486 | `t-rv6fjh` | span | main | — | ✅ | async |
-| 487 | `t-5j2fix` | span | main | — | ✅ | for |
-| 488 | `t-m4s7bu` | span | main | — | ✅ | chunk |
-| 489 | `t-1hpsm4b` | span | main | — | ✅ | stream |
-| 490 | `t-jtzy2j` | span | main | — | ✅ | print |
-| 491 | `t-m4s4xm` | span | main | — | ✅ | chunk |
-| 492 | `t-1driwnv` | span | main | — | ✅ | choices |
-| 493 | `t-67elw0` | span | main | — | ✅ | delta |
-| 494 | `t-qyp36w` | span | main | — | ✅ | content |
-| 495 | `t-oo1uz0` | span | main | — | ✅ | end |
-| 496 | `t-1gg3wnc` | span | main | — | ✅ | asyncio |
-| 497 | `t-8cnava` | span | main | — | ✅ | run |
-| 498 | `t-icynom` | span | main | — | ✅ | main |
-| 499 | `structured-outputs-a` | h2 | main | — | ✅ | Structured Outputs and JSON |
-| 500 | `t-1w20d9t` | p | main | — | ✅ | Need reliable, type-safe JSON responses that match your exac |
-| 501 | `t-f09vfe` | p | main | — | ✅ | For complete guides on implementing structured outputs with  |
-| 502 | `t-mb5s98` | p | main | — | ✅ | Key capabilities: |
-| 503 | `t-1t7ovm9` | li | main | — | ✅ | JSON Schema enforcement: Responses match your schema exactly |
-| 504 | `t-blzbw8` | strong | main | — | ✅ | JSON Schema enforcement |
-| 505 | `t-191bt51` | li | main | — | ✅ | Type-safe outputs: No validation or retry logic needed |
-| 506 | `t-hlsiho` | strong | main | — | ✅ | Type-safe outputs |
-| 507 | `t-1cfwxv0` | li | main | — | ✅ | Programmatic refusal detection: Handle safety-based refusals |
-| 508 | `t-13wzr8` | strong | main | — | ✅ | Programmatic refusal detection |
-| 509 | `t-1b1ijif` | li | main | — | ✅ | JSON Object Mode: Basic JSON output with prompt-guided struc |
-| 510 | `t-7s7jy0` | strong | main | — | ✅ | JSON Object Mode |
-| 511 | `t-rjk27l` | h3 | main | — | ✅ | Was this page helpful? |
-| 512 | `t-spvudj` | h4 | main | — | ✅ | On this page |
-| 513 | `t-sxmrnn` | li | main | — | ✅ | Chat Completions |
-| 514 | `t-s2awx3` | li | main | — | ✅ | Performing a Basic Chat Completion |
-| 515 | `t-15sgy8f` | li | main | — | ✅ | Streaming a Chat Completion |
-| 516 | `t-1h4dams` | li | main | — | ✅ | Performing a Chat Completion with a Stop Sequence |
-| 517 | `t-p95p6d` | li | main | — | ✅ | Performing an Async Chat Completion |
-| 518 | `t-lspk1t` | li | main | — | ✅ | Structured Outputs and JSON |
-| 519 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
-| 520 | `t-1dthcy1` | div | main | — | ✅ | Ready |
-| 521 | `recharts_measurement` | span | main | — | ✅ | $0.03 |
+| 1 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 2 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 3 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 4 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 5 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 6 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 7 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 8 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 9 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 10 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 11 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 12 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 13 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 14 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 15 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 16 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 17 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 18 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 19 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 20 | `t-1yd68lz` | button | sidebar | ✅ | ✅ | Search (Command+K) |
+| 21 | `t-1dgqnp2` | span | sidebar | ✅ | ✅ | Search |
+| 22 | `t-pz16fd` | span | sidebar | ✅ | ✅ | Search |
+| 23 | `t-1q50qga` | span | sidebar | ✅ | ✅ | ⌘ K |
+| 24 | `t-ue5wbi` | kbd | sidebar | ✅ | ✅ | ⌘ |
+| 25 | `t-dhulho` | kbd | sidebar | ✅ | ✅ | K |
+| 26 | `t-el7fah` | a | sidebar | ✅ | ✅ | Docs |
+| 27 | `t-gd5fb1` | a | sidebar | ✅ | ✅ | API Reference |
+| 28 | `t-1hemkod` | a | nav | ✅ | ✅ | Overview |
+| 29 | `t-sv36g6` | span | nav | ✅ | ✅ | Overview |
+| 30 | `t-mvo0lq` | a | nav | ✅ | ✅ | Quickstart |
+| 31 | `t-1qiubsz` | span | nav | ✅ | ✅ | Quickstart |
+| 32 | `t-136noj3` | a | nav | ✅ | ✅ | Models |
+| 33 | `t-1gm5maj` | span | nav | ✅ | ✅ | Models |
+| 34 | `t-mncubq` | a | nav | ✅ | ✅ | OpenAI Compatibility |
+| 35 | `t-1uhs376` | span | nav | ✅ | ✅ | OpenAI Compatibility |
+| 36 | `t-18ctgp0` | a | nav | ✅ | ✅ | Rate Limits |
+| 37 | `t-ar1t0l` | span | nav | ✅ | ✅ | Rate Limits |
+| 38 | `t-1be375e` | a | nav | ✅ | ✅ | Templates |
+| 39 | `t-1l8f7ep` | span | nav | ✅ | ✅ | Templates |
+| 40 | `t-ikqkli` | a | nav | ✅ | ✅ | API Reference |
+| 41 | `t-19945v4` | span | nav | ✅ | ✅ | API Reference |
+| 42 | `t-l2k35c` | a | nav | ✅ | ✅ | Text Generation |
+| 43 | `t-tncfrq` | span | nav | ✅ | ✅ | Text Generation |
+| 44 | `t-vyox19` | a | nav | ✅ | ✅ | Speech to Text |
+| 45 | `t-1gut7dn` | span | nav | ✅ | ✅ | Speech to Text |
+| 46 | `t-15y9zx8` | a | nav | ✅ | ✅ | Text to Speech |
+| 47 | `t-bpdbay` | span | nav | ✅ | ✅ | Text to Speech |
+| 48 | `t-1dbxpji` | a | nav | ✅ | ✅ | OCR and Image Recognition |
+| 49 | `t-19844o2` | span | nav | ✅ | ✅ | OCR and Image Recognition |
+| 50 | `t-3omgce` | a | nav | ✅ | ✅ | Reasoning |
+| 51 | `t-dgyjbm` | span | nav | ✅ | ✅ | Reasoning |
+| 52 | `t-14wyaac` | a | nav | ✅ | ✅ | Content Moderation |
+| 53 | `t-kcpd5g` | span | nav | ✅ | ✅ | Content Moderation |
+| 54 | `t-qm48ut` | a | nav | ✅ | ✅ | Structured Outputs |
+| 55 | `t-uho83x` | span | nav | ✅ | ✅ | Structured Outputs |
+| 56 | `t-ab2ynq` | a | nav | ✅ | ✅ | Prompt Caching |
+| 57 | `t-1pw4ppa` | span | nav | ✅ | ✅ | Prompt Caching |
+| 58 | `t-dg0hx0` | a | nav | ✅ | ✅ | Tool Use |
+| 59 | `t-9c7e6e` | span | nav | ✅ | ✅ | Tool Use |
+| 60 | `t-12bbn7r` | a | nav | ✅ | ✅ | Integrations Catalog |
+| 61 | `t-19q38w2` | span | nav | ✅ | ✅ | Integrations Catalog |
+| 62 | `t-15ky9q` | a | nav | ✅ | ✅ | Coding with Groq |
+| 63 | `t-d4c8pj` | span | nav | ✅ | ✅ | Coding with Groq |
+| 64 | `t-173clvi` | a | nav | ✅ | ✅ | Overview |
+| 65 | `t-1ppb2c7` | span | nav | ✅ | ✅ | Overview |
+| 66 | `t-1whn643` | a | nav | ✅ | ✅ | Systems |
+| 67 | `t-chyy2r` | span | nav | ✅ | ✅ | Systems |
+| 68 | `t-4i84k9` | a | nav | ✅ | ✅ | Use Cases |
+| 69 | `t-18r96t2` | span | nav | ✅ | ✅ | Use Cases |
+| 70 | `t-1e48ade` | a | nav | ✅ | ✅ | Prompting Guide |
+| 71 | `t-1rmnk9a` | span | nav | ✅ | ✅ | Prompting Guide |
+| 72 | `t-1hggedi` | a | nav | ✅ | ✅ | Assistant Message Prefilling |
+| 73 | `t-1d1bvba` | span | nav | ✅ | ✅ | Assistant Message Prefilling |
+| 74 | `t-bvso3e` | a | nav | ✅ | ✅ | Service Tiers |
+| 75 | `t-ljhs2j` | span | nav | ✅ | ✅ | Service Tiers |
+| 76 | `t-17hi58y` | a | nav | ✅ | ✅ | Performance Tier |
+| 77 | `t-2xl4lh` | span | nav | ✅ | ✅ | Performance Tier |
+| 78 | `t-1u2pic3` | a | nav | ✅ | ✅ | Flex Processing |
+| 79 | `t-w6yn7u` | span | nav | ✅ | ✅ | Flex Processing |
+| 80 | `t-1hrt8wm` | a | nav | ✅ | ✅ | Batch Processing |
+| 81 | `t-18wncrm` | span | nav | ✅ | ✅ | Batch Processing |
+| 82 | `t-1rqci1s` | a | nav | ✅ | ✅ | LoRA Inference |
+| 83 | `t-1gf01iw` | span | nav | ✅ | ✅ | LoRA Inference |
+| 84 | `t-96jev7` | a | nav | ✅ | ✅ | Production Checklist |
+| 85 | `t-mb84vq` | span | nav | ✅ | ✅ | Production Checklist |
+| 86 | `t-11wqumc` | a | nav | ✅ | ✅ | Optimizing Latency |
+| 87 | `t-1pnjhdw` | span | nav | ✅ | ✅ | Optimizing Latency |
+| 88 | `t-1lvwvd7` | a | nav | ✅ | ✅ | Security Onboarding |
+| 89 | `t-5xcq6q` | span | nav | ✅ | ✅ | Security Onboarding |
+| 90 | `t-n876or` | a | nav | ✅ | ✅ | Prometheus Metrics |
+| 91 | `t-1tfvj4j` | span | nav | ✅ | ✅ | Prometheus Metrics |
+| 92 | `t-55pu9g` | a | nav | ✅ | ✅ | Spend Limits |
+| 93 | `t-fgopcr` | span | nav | ✅ | ✅ | Spend Limits |
+| 94 | `t-dd4916` | a | nav | ✅ | ✅ | Projects |
+| 95 | `t-qt4aus` | span | nav | ✅ | ✅ | Projects |
+| 96 | `t-i27pqu` | a | nav | ✅ | ✅ | Model Permissions |
+| 97 | `t-1wfrm5g` | span | nav | ✅ | ✅ | Model Permissions |
+| 98 | `t-i9u4nl` | a | nav | ✅ | ✅ | Billing FAQs |
+| 99 | `t-vq6jzu` | span | nav | ✅ | ✅ | Billing FAQs |
+| 100 | `t-l809rk` | a | nav | ✅ | ✅ | Your Data |
+| 101 | `t-li7i6s` | span | nav | ✅ | ✅ | Your Data |
+| 102 | `t-15xxntv` | a | nav | ✅ | ✅ | SDK Libraries |
+| 103 | `t-18t19wy` | span | nav | ✅ | ✅ | SDK Libraries |
+| 104 | `t-1d4oqe3` | a | nav | ✅ | ✅ | Groq Badge |
+| 105 | `t-f4btna` | span | nav | ✅ | ✅ | Groq Badge |
+| 106 | `t-v8enc7` | a | nav | ✅ | ✅ | Developer Community |
+| 107 | `t-104e9fg` | span | nav | ✅ | ✅ | Developer Community |
+| 108 | `t-bcgn56` | a | nav | ✅ | ✅ | OpenBench |
+| 109 | `t-5nffev` | span | nav | ✅ | ✅ | OpenBench |
+| 110 | `t-125ge51` | a | nav | ✅ | ✅ | Error Codes |
+| 111 | `t-1hpbaja` | span | nav | ✅ | ✅ | Error Codes |
+| 112 | `t-vgafvf` | a | nav | ✅ | ✅ | Changelog |
+| 113 | `t-bni5kh` | span | nav | ✅ | ✅ | Changelog |
+| 114 | `t-7uw0ev` | a | nav | ✅ | ✅ | Policies & Notices |
+| 115 | `t-1b0x54s` | span | nav | ✅ | ✅ | Policies & Notices |
+| 116 | `t-ybtmoy` | button | main | ✅ | ✅ | Select a language |
+| 117 | `t-ge774` | span | main | ✅ | ✅ | Python |
+| 118 | `t-17e7kkh` | button | main | ✅ | ✅ | Copy snippet |
+| 119 | `google-workspace-con` | a | main | ✅ | ✅ | Google Workspace Connectors are now available on Groq Connec |
+| 120 | `t-1weqel8` | div | main | ✅ | ✅ | Google Workspace Connectors are now available on Groq Connec |
+| 121 | `t-7m0a39` | img | main | ✅ | ✅ |  |
+| 122 | `t-1lapuar` | div | main | ✅ | ✅ | Google Workspace Connectors are now available on Groq Connec |
+| 123 | `t-w2te4d` | div | main | ✅ | ✅ | Google Workspace Connectors are now available on Groq |
+| 124 | `t-1f0ecuf` | div | main | ✅ | ✅ | Connect your AI agents to Gmail, Google Calendar, and Google |
+| 125 | `t-ssd50u` | div | main | ✅ | ✅ | Learn More |
+| 126 | `t-pesqpc` | div | main | ✅ | ✅ | Learn More |
+| 127 | `t-1ih7up6` | button | main | ✅ | ✅ | Play video |
+| 128 | `t-z7uvyv` | img | main | ✅ | ✅ |  |
+| 129 | `t-t62li1` | a | main | ✅ | ✅ | Quick Start Get started with the Groq API |
+| 130 | `t-82010j` | div | main | ✅ | ✅ | Quick Start Get started with the Groq API |
+| 131 | `t-v6i9w1` | div | main | ✅ | ✅ |  |
+| 132 | `t-7545md` | div | main | ✅ | ✅ | Quick Start |
+| 133 | `t-15wx164` | div | main | ✅ | ✅ | Get started with the Groq API |
+| 134 | `t-16wx5bm` | div | main | ✅ | ✅ | Get started with the Groq API |
+| 135 | `t-a8x1t9` | a | main | ✅ | ✅ | Models See all the models Groq offers |
+| 136 | `t-15xej3i` | div | main | ✅ | ✅ | Models See all the models Groq offers |
+| 137 | `t-vsfqnk` | div | main | ✅ | ✅ |  |
+| 138 | `t-1f2b2x9` | div | main | ✅ | ✅ | Models |
+| 139 | `t-1ksy2g5` | div | main | ✅ | ✅ | See all the models Groq offers |
+| 140 | `t-1qqkcxn` | div | main | ✅ | ✅ | See all the models Groq offers |
+| 141 | `t-9i9lx6` | a | main | ✅ | ✅ | API Reference Explore all API endpoints |
+| 142 | `t-zhigxn` | div | main | ✅ | ✅ | API Reference Explore all API endpoints |
+| 143 | `t-tyq8nn` | div | main | ✅ | ✅ |  |
+| 144 | `t-d94lup` | div | main | ✅ | ✅ | API Reference |
+| 145 | `t-gl29hd` | div | main | ✅ | ✅ | Explore all API endpoints |
+| 146 | `t-jauw0v` | div | main | ✅ | ✅ | Explore all API endpoints |
+| 147 | `t-1stvok6` | a | main | ✅ | ✅ | Cookbooks See code examples and tutorials |
+| 148 | `t-6fq3sg` | div | main | ✅ | ✅ | Cookbooks See code examples and tutorials |
+| 149 | `t-uknpf6` | div | main | ✅ | ✅ |  |
+| 150 | `t-14m1mo1` | div | main | ✅ | ✅ | Cookbooks |
+| 151 | `t-1dcgagi` | div | main | ✅ | ✅ | See code examples and tutorials |
+| 152 | `t-12bmulo` | div | main | ✅ | ✅ | See code examples and tutorials |
+| 153 | `t-1n8gv50` | a | main | ✅ | ✅ | Rate Limits Reference the model rate limits |
+| 154 | `t-1bb6o8i` | div | main | ✅ | ✅ | Rate Limits Reference the model rate limits |
+| 155 | `t-sqy7f9` | div | main | ✅ | ✅ |  |
+| 156 | `t-1ro1hkg` | div | main | ✅ | ✅ | Rate Limits |
+| 157 | `t-1kneaal` | div | main | ✅ | ✅ | Reference the model rate limits |
+| 158 | `t-10xdqbn` | div | main | ✅ | ✅ | Reference the model rate limits |
+| 159 | `t-11d6ntt` | a | main | ✅ | ✅ | Integrations Connect to external services |
+| 160 | `t-igtg4z` | div | main | ✅ | ✅ | Integrations Connect to external services |
+| 161 | `t-tcvo6s` | div | main | ✅ | ✅ |  |
+| 162 | `t-sxqzfc` | div | main | ✅ | ✅ | Integrations |
+| 163 | `t-sv5phc` | div | main | ✅ | ✅ | Connect to external services |
+| 164 | `t-12vvlge` | div | main | ✅ | ✅ | Connect to external services |
+| 165 | `t-f8u3wt` | button | main | ✅ | ✅ | Copy to clipboard |
+| 166 | `t-jm7gnm` | a | main | ✅ | ✅ | Learn about |
+| 167 | `t-oozhze` | button | main | ✅ | ✅ | Yes |
+| 168 | `t-9d7wsv` | span | main | ✅ | ✅ | Yes |
+| 169 | `t-3lxvut` | button | main | ✅ | ✅ | No |
+| 170 | `t-19i7bk0` | span | main | ✅ | ✅ | No |
+| 171 | `t-odlbu4` | button | main | ✅ | ✅ | Suggest Edits |
+| 172 | `t-9x73s9` | span | main | ✅ | ✅ | Suggest Edits |
+| 173 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 174 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 175 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 176 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 177 | `t-mh4cgu` | div | main | ✅ | ✅ | Interactive Mode Full voice walkthrough with speech & action |
+| 178 | `t-ulwkny` | div | main | ✅ | ✅ |  |
+| 179 | `t-159qa5d` | div | main | ✅ | ✅ | Interactive Mode Full voice walkthrough with speech & action |
+| 180 | `t-1s42gqy` | div | main | ✅ | ✅ | Interactive Mode |
+| 181 | `t-10a89v2` | div | main | ✅ | ✅ | Full voice walkthrough with speech & actions |
+| 182 | `t-1adlzx6` | div | main | ✅ | ✅ | Turbo Mode Quick text actions, no voice - maximum speed |
+| 183 | `t-ulyu7z` | div | main | ✅ | ✅ |  |
+| 184 | `t-2rcmat` | div | main | ✅ | ✅ | Turbo Mode Quick text actions, no voice - maximum speed |
+| 185 | `t-r94w0t` | div | main | ✅ | ✅ | Turbo Mode |
+| 186 | `t-1age76` | div | main | ✅ | ✅ | Quick text actions, no voice - maximum speed |
+| 187 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 188 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 189 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 190 | `t-o8207h` | nav | nav | — | ✅ | GETTING STARTED Overview Quickstart Models OpenAI Compatibil |
+| 191 | `t-1pike9a` | h3 | nav | — | ✅ | GETTING STARTED |
+| 192 | `t-1her7cp` | h3 | nav | — | ✅ | CORE FEATURES |
+| 193 | `t-1pkjdsr` | h3 | nav | — | ✅ | TOOLS & INTEGRATIONS |
+| 194 | `t-lhko3p` | h3 | nav | — | ✅ | COMPOUND (AGENTIC AI) |
+| 195 | `t-3cms7n` | h3 | nav | — | ✅ | GUIDES |
+| 196 | `t-8xmzsj` | h3 | nav | — | ✅ | SERVICE TIERS |
+| 197 | `t-fut6qr` | h3 | nav | — | ✅ | ADVANCED |
+| 198 | `t-16e6fxk` | h3 | nav | — | ✅ | PRODUCTION READINESS |
+| 199 | `t-mvqjk4` | h3 | nav | — | ✅ | ACCOUNT AND CONSOLE |
+| 200 | `t-mhv7n4` | h3 | nav | — | ✅ | DEVELOPER RESOURCES |
+| 201 | `t-1bwxeg` | h3 | nav | — | ✅ | LEGAL |
+| 202 | `t-12ta7iv` | h2 | main | — | ✅ | Welcome |
+| 203 | `t-1931cks` | p | main | — | ✅ | Fast LLM inference, OpenAI-compatible. Simple to integrate,  |
+| 204 | `t-1u2mx2l` | span | main | — | ✅ | from |
+| 205 | `t-83kzb8` | span | main | — | ✅ | openai |
+| 206 | `t-rdkkec` | span | main | — | ✅ | import |
+| 207 | `t-1lh77oi` | span | main | — | ✅ | OpenAI |
+| 208 | `t-rdkkhs` | span | main | — | ✅ | import |
+| 209 | `t-ow1u8i` | span | main | — | ✅ | client |
+| 210 | `t-1dyoimt` | span | main | — | ✅ | OpenAI |
+| 211 | `t-awuv25` | span | main | — | ✅ | api_key |
+| 212 | `t-1vjqw7j` | span | main | — | ✅ | environ |
+| 213 | `t-yqjmf0` | span | main | — | ✅ | get |
+| 214 | `t-kns5bc` | span | main | — | ✅ | "GROQ_API_KEY" |
+| 215 | `t-yny934` | span | main | — | ✅ | base_url |
+| 216 | `t-1esweqr` | span | main | — | ✅ | "https://api.groq.com/openai/v1" |
+| 217 | `t-khmbal` | span | main | — | ✅ | response |
+| 218 | `t-ow1q51` | span | main | — | ✅ | client |
+| 219 | `t-b7x4t6` | span | main | — | ✅ | responses |
+| 220 | `t-1ajsr7w` | span | main | — | ✅ | create |
+| 221 | `t-vi32s8` | span | main | — | ✅ | input |
+| 222 | `t-8nlgbd` | span | main | — | ✅ | "Explain the importance of fast language models" |
+| 223 | `t-1pxee07` | span | main | — | ✅ | model |
+| 224 | `t-q10qbd` | span | main | — | ✅ | "openai/gpt-oss-20b" |
+| 225 | `t-1lcie1h` | span | main | — | ✅ | print |
+| 226 | `t-khm75a` | span | main | — | ✅ | response |
+| 227 | `t-1cldwcy` | span | main | — | ✅ | output_text |
+| 228 | `t-ctdcnh` | h2 | main | — | ✅ | Getting Started |
+| 229 | `t-fe3juu` | p | main | — | ✅ | Take a quick video tour on how to get started building your  |
+| 230 | `t-hkqb0d` | h3 | main | — | ✅ | External API Compatibility |
+| 231 | `t-1yv4vrl` | div | main | — | ✅ | OpenAI base URL: |
+| 232 | `t-11ahu6u` | h3 | main | — | ✅ | Was this page helpful? |
+| 233 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 234 | `t-1dthcy1` | div | main | — | ✅ | Click orb to start |
+| 235 | `t-13eh5lo` | div | main | — | ✅ | Choose Mode |
+| 236 | `t-21kp2d` | div | main | — | ✅ | How should TARA assist you this session? |
+
+---
+## 📸 Scan — 2026-03-02 15:11:43
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/dashboard/metrics`  **Nodes:** 96  ⏱ 4ms
+
+| # | Node ID | Tag | Zone | Interactive | Visible | Text |
+|---|---------|-----|------|:-----------:|:-------:|------|
+| 1 | `t-1gsz026` | a | nav | ✅ | ✅ | Metrics |
+| 2 | `t-9mf5fy` | span | nav | ✅ | ✅ | Metrics |
+| 3 | `t-52i8rz` | a | nav | ✅ | ✅ | Usage |
+| 4 | `t-1vzey2l` | span | nav | ✅ | ✅ | Usage |
+| 5 | `t-1f26zn0` | a | nav | ✅ | ✅ | Logs |
+| 6 | `t-1qjdk18` | span | nav | ✅ | ✅ | Logs |
+| 7 | `t-9qjprh` | a | nav | ✅ | ✅ | Batch |
+| 8 | `t-i45hza` | span | nav | ✅ | ✅ | Batch |
+| 9 | `t-129de5m` | label | main | ✅ | ✅ | Show Limits |
+| 10 | `show-limits` | button | main | ✅ | ✅ | on |
+| 11 | `t-2icpyy` | span | main | ✅ | ✅ |  |
+| 12 | `t-1h3fam6` | button | main | ✅ | ✅ | Refresh |
+| 13 | `t-f2rdyz` | span | main | ✅ | ✅ | Refresh |
+| 14 | `t-7sl6nt` | button | main | ✅ | ✅ | Last 30 minutes |
+| 15 | `t-1fijjg2` | span | main | ✅ | ✅ | Last 30 minutes |
+| 16 | `t-82iyy7` | button | main | ✅ | ✅ | Show all Models |
+| 17 | `t-qwnri5` | span | main | ✅ | ✅ | Show all Models |
+| 18 | `t-118gear` | span | main | ✅ | ✅ | Show all Models |
+| 19 | `t-iuuudq` | button | main | ✅ | ✅ | Show all API Keys |
+| 20 | `t-25eh0c` | span | main | ✅ | ✅ | Show all API Keys |
+| 21 | `t-1wf6s8y` | span | main | ✅ | ✅ | Show all API Keys |
+| 22 | `t-1vf354m` | span | main | ✅ | ✅ | 200 |
+| 23 | `t-1r3ikrl` | button | main | ✅ | ✅ | Input Tokens |
+| 24 | `t-16o5w91` | span | main | ✅ | ✅ | Input Tokens |
+| 25 | `t-vpruuh` | button | main | ✅ | ✅ | Output Tokens |
+| 26 | `t-nflo3x` | span | main | ✅ | ✅ | Output Tokens |
+| 27 | `t-t3aw2f` | button | main | ✅ | ✅ | Total Tokens |
+| 28 | `t-x7v5pv` | span | main | ✅ | ✅ | Total Tokens |
+| 29 | `t-14empdu` | button | main | ✅ | ✅ | Input Tokens |
+| 30 | `t-5260km` | span | main | ✅ | ✅ | Input Tokens |
+| 31 | `t-16jhhm` | button | main | ✅ | ✅ | Output Tokens |
+| 32 | `t-1qdy23y` | span | main | ✅ | ✅ | Output Tokens |
+| 33 | `t-mj79ro` | button | main | ✅ | ✅ | Total Tokens |
+| 34 | `t-16j6428` | span | main | ✅ | ✅ | Total Tokens |
+| 35 | `t-ywfhf` | button | main | ✅ | ✅ | Input Tokens |
+| 36 | `t-7trebr` | span | main | ✅ | ✅ | Input Tokens |
+| 37 | `t-14m9rjf` | button | main | ✅ | ✅ | Output Tokens |
+| 38 | `t-1nmb85r` | span | main | ✅ | ✅ | Output Tokens |
+| 39 | `t-11zssut` | button | main | ✅ | ✅ | Total Tokens |
+| 40 | `t-1xehtkh` | span | main | ✅ | ✅ | Total Tokens |
+| 41 | `t-1db4m2s` | button | main | ✅ | ✅ | Input Tokens |
+| 42 | `t-12k9gdc` | span | main | ✅ | ✅ | Input Tokens |
+| 43 | `t-a31e6k` | button | main | ✅ | ✅ | Output Tokens |
+| 44 | `t-ouxfxk` | span | main | ✅ | ✅ | Output Tokens |
+| 45 | `t-1uutlki` | button | main | ✅ | ✅ | Total Tokens |
+| 46 | `t-7ouic6` | span | main | ✅ | ✅ | Total Tokens |
+| 47 | `t-1p24xqt` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 48 | `t-8pxdqj` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 49 | `t-9pefon` | h1 | main | — | ✅ | Metrics |
+| 50 | `t-8p3bls` | h2 | main | — | ✅ | HTTP Status Codes |
+| 51 | `t-7s6tvs` | span | main | — | ✅ | HTTP Status Codes |
+| 52 | `t-gj5uce` | h2 | main | — | ✅ | llama-3.1-8b-instant |
+| 53 | `t-1ubpw7q` | span | main | — | ✅ | llama-3.1-8b-instant |
+| 54 | `t-oq5wr3` | h3 | main | — | ✅ | Requests |
+| 55 | `t-1t80rae` | h3 | main | — | ✅ | Total Tokens |
+| 56 | `t-l4v8e` | h2 | main | — | ✅ | openai/gpt-oss-120b |
+| 57 | `t-i3swye` | span | main | — | ✅ | openai/gpt-oss-120b |
+| 58 | `t-190j4vg` | h3 | main | — | ✅ | Requests |
+| 59 | `t-d9ezwl` | h3 | main | — | ✅ | Total Tokens |
+| 60 | `t-1lx6c3y` | h2 | main | — | ✅ | openai/gpt-oss-20b |
+| 61 | `t-5pqlhi` | span | main | — | ✅ | openai/gpt-oss-20b |
+| 62 | `t-um87rh` | h3 | main | — | ✅ | Requests |
+| 63 | `t-2z0bo` | h3 | main | — | ✅ | Total Tokens |
+| 64 | `t-13tf4g4` | h2 | main | — | ✅ | qwen/qwen3-32b |
+| 65 | `t-1whco24` | span | main | — | ✅ | qwen/qwen3-32b |
+| 66 | `t-1ewlfvu` | h3 | main | — | ✅ | Requests |
+| 67 | `t-j5hawz` | h3 | main | — | ✅ | Total Tokens |
+| 68 | `recharts_measurement` | span | main | — | ✅ | 75K |
+| 69 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 70 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 71 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 72 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 73 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 74 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 75 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 76 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 77 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 78 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 79 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 80 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 81 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 82 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 83 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 84 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 85 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 86 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 87 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 88 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 89 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 90 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 91 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 92 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 93 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 94 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 95 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 96 | `t-1dthcy1` | div | main | — | ✅ | Executing action... |
+
+---
+## 📸 Scan — 2026-03-02 15:11:46
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/dashboard/usage`  **Nodes:** 65  ⏱ 4ms
+
+| # | Node ID | Tag | Zone | Interactive | Visible | Text |
+|---|---------|-----|------|:-----------:|:-------:|------|
+| 1 | `t-m92wvr` | button | main | ✅ | ✅ | Select projects |
+| 2 | `t-2ev0xw` | span | main | ✅ | ✅ | Default Project |
+| 3 | `date` | button | main | ✅ | ✅ | March 2026 |
+| 4 | `t-udp9x0` | span | main | ✅ | ✅ | March 2026 |
+| 5 | `t-lazxwe` | div | main | ✅ | ✅ | Cost Activity |
+| 6 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Cost |
+| 7 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Activity |
+| 8 | `radix-_r_1f_-content` | div | main | ✅ | ✅ | Total Spend $0.38 USD openai/gpt-oss-120b - on_demand $0.24  |
+| 9 | `t-1iitjqt` | h1 | main | — | ✅ | Usage |
+| 10 | `t-ckk2wd` | p | main | — | ✅ | Note: Data can be delayed by up to 15 minutes. All data show |
+| 11 | `t-1p01kta` | div | main | — | ✅ | Total Spend |
+| 12 | `t-1acejm` | div | main | — | ✅ | $0.38 USD |
+| 13 | `t-1icob3` | h3 | main | — | ✅ | openai/gpt-oss-120b - on_demand |
+| 14 | `t-bvjozr` | p | main | — | ✅ | $0.24 |
+| 15 | `t-126okxi` | h3 | main | — | ✅ | qwen/qwen3-32b - on_demand |
+| 16 | `t-hfp60w` | p | main | — | ✅ | $0.11 |
+| 17 | `t-10uiiew` | h3 | main | — | ✅ | openai/gpt-oss-20b - on_demand |
+| 18 | `t-11ue36q` | p | main | — | ✅ | $0.01 |
+| 19 | `t-1u4kruk` | h3 | main | — | ✅ | whisper-large-v3 - on_demand |
+| 20 | `t-12gbjwj` | p | main | — | ✅ | $0.01 |
+| 21 | `t-sqg3s6` | h3 | main | — | ✅ | llama-3.1-8b-instant - on_demand |
+| 22 | `t-clszph` | p | main | — | ✅ | $0.00 |
+| 23 | `t-153lin` | h3 | main | — | ✅ | llama-3.3-70b-versatile - on_demand |
+| 24 | `t-bzvizo` | p | main | — | ✅ | $0.00 |
+| 25 | `t-1phbuoc` | h3 | main | — | ✅ | whisper-large-v3-turbo - on_demand |
+| 26 | `t-be0yh3` | p | main | — | ✅ | $0.00 |
+| 27 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 28 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 29 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 30 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 31 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 32 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 33 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 34 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 35 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 36 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 37 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 38 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 39 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 40 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 41 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 42 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 43 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 44 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 45 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 46 | `t-1gsz026` | a | nav | ✅ | ✅ | Metrics |
+| 47 | `t-9mf5fy` | span | nav | ✅ | ✅ | Metrics |
+| 48 | `t-52i8rz` | a | nav | ✅ | ✅ | Usage |
+| 49 | `t-1vzey2l` | span | nav | ✅ | ✅ | Usage |
+| 50 | `t-1f26zn0` | a | nav | ✅ | ✅ | Logs |
+| 51 | `t-1qjdk18` | span | nav | ✅ | ✅ | Logs |
+| 52 | `t-9qjprh` | a | nav | ✅ | ✅ | Batch |
+| 53 | `t-i45hza` | span | nav | ✅ | ✅ | Batch |
+| 54 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 55 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 56 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 57 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 58 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 59 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 60 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 61 | `t-1p24xqt` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 62 | `t-8pxdqj` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 63 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 64 | `t-1dthcy1` | div | main | — | ✅ | Executing action... |
+| 65 | `recharts_measurement` | span | main | — | ✅ | $0.03 |
+
+---
+## 📸 Scan — 2026-03-02 15:11:50
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/dashboard/usage`  **Nodes:** 65  ⏱ 3ms
+
+| # | Node ID | Tag | Zone | Interactive | Visible | Text |
+|---|---------|-----|------|:-----------:|:-------:|------|
+| 1 | `t-m92wvr` | button | main | ✅ | ✅ | Select projects |
+| 2 | `t-2ev0xw` | span | main | ✅ | ✅ | Default Project |
+| 3 | `date` | button | main | ✅ | ✅ | March 2026 |
+| 4 | `t-udp9x0` | span | main | ✅ | ✅ | March 2026 |
+| 5 | `t-lazxwe` | div | main | ✅ | ✅ | Cost Activity |
+| 6 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Cost |
+| 7 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Activity |
+| 8 | `radix-_r_1f_-content` | div | main | ✅ | ✅ | Total Spend $0.38 USD openai/gpt-oss-120b - on_demand $0.24  |
+| 9 | `t-1iitjqt` | h1 | main | — | ✅ | Usage |
+| 10 | `t-ckk2wd` | p | main | — | ✅ | Note: Data can be delayed by up to 15 minutes. All data show |
+| 11 | `t-1p01kta` | div | main | — | ✅ | Total Spend |
+| 12 | `t-1acejm` | div | main | — | ✅ | $0.38 USD |
+| 13 | `t-1icob3` | h3 | main | — | ✅ | openai/gpt-oss-120b - on_demand |
+| 14 | `t-bvjozr` | p | main | — | ✅ | $0.24 |
+| 15 | `t-126okxi` | h3 | main | — | ✅ | qwen/qwen3-32b - on_demand |
+| 16 | `t-hfp60w` | p | main | — | ✅ | $0.11 |
+| 17 | `t-10uiiew` | h3 | main | — | ✅ | openai/gpt-oss-20b - on_demand |
+| 18 | `t-11ue36q` | p | main | — | ✅ | $0.01 |
+| 19 | `t-1u4kruk` | h3 | main | — | ✅ | whisper-large-v3 - on_demand |
+| 20 | `t-12gbjwj` | p | main | — | ✅ | $0.01 |
+| 21 | `t-sqg3s6` | h3 | main | — | ✅ | llama-3.1-8b-instant - on_demand |
+| 22 | `t-clszph` | p | main | — | ✅ | $0.00 |
+| 23 | `t-153lin` | h3 | main | — | ✅ | llama-3.3-70b-versatile - on_demand |
+| 24 | `t-bzvizo` | p | main | — | ✅ | $0.00 |
+| 25 | `t-1phbuoc` | h3 | main | — | ✅ | whisper-large-v3-turbo - on_demand |
+| 26 | `t-be0yh3` | p | main | — | ✅ | $0.00 |
+| 27 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 28 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 29 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 30 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 31 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 32 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 33 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 34 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 35 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 36 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 37 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 38 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 39 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 40 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 41 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 42 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 43 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 44 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 45 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 46 | `t-1gsz026` | a | nav | ✅ | ✅ | Metrics |
+| 47 | `t-9mf5fy` | span | nav | ✅ | ✅ | Metrics |
+| 48 | `t-52i8rz` | a | nav | ✅ | ✅ | Usage |
+| 49 | `t-1vzey2l` | span | nav | ✅ | ✅ | Usage |
+| 50 | `t-1f26zn0` | a | nav | ✅ | ✅ | Logs |
+| 51 | `t-1qjdk18` | span | nav | ✅ | ✅ | Logs |
+| 52 | `t-9qjprh` | a | nav | ✅ | ✅ | Batch |
+| 53 | `t-i45hza` | span | nav | ✅ | ✅ | Batch |
+| 54 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 55 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 56 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 57 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 58 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 59 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 60 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 61 | `t-1p24xqt` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 62 | `t-8pxdqj` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 63 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 64 | `t-1dthcy1` | div | main | — | ✅ | Executing action... |
+| 65 | `recharts_measurement` | span | main | — | ✅ | $0.03 |
+
+---
+## 📸 Scan — 2026-03-02 15:11:55
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/dashboard/usage`  **Nodes:** 65  ⏱ 3ms
+
+| # | Node ID | Tag | Zone | Interactive | Visible | Text |
+|---|---------|-----|------|:-----------:|:-------:|------|
+| 1 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 2 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 3 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 4 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 5 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 6 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 7 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 8 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 9 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 10 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 11 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 12 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 13 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 14 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 15 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 16 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 17 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 18 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 19 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 20 | `t-1gsz026` | a | nav | ✅ | ✅ | Metrics |
+| 21 | `t-9mf5fy` | span | nav | ✅ | ✅ | Metrics |
+| 22 | `t-52i8rz` | a | nav | ✅ | ✅ | Usage |
+| 23 | `t-1vzey2l` | span | nav | ✅ | ✅ | Usage |
+| 24 | `t-1f26zn0` | a | nav | ✅ | ✅ | Logs |
+| 25 | `t-1qjdk18` | span | nav | ✅ | ✅ | Logs |
+| 26 | `t-9qjprh` | a | nav | ✅ | ✅ | Batch |
+| 27 | `t-i45hza` | span | nav | ✅ | ✅ | Batch |
+| 28 | `t-m92wvr` | button | main | ✅ | ✅ | Select projects |
+| 29 | `t-2ev0xw` | span | main | ✅ | ✅ | Default Project |
+| 30 | `date` | button | main | ✅ | ✅ | March 2026 |
+| 31 | `t-udp9x0` | span | main | ✅ | ✅ | March 2026 |
+| 32 | `t-lazxwe` | div | main | ✅ | ✅ | Cost Activity |
+| 33 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Cost |
+| 34 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Activity |
+| 35 | `radix-_r_1f_-content` | div | main | ✅ | ✅ | Total Spend $0.38 USD openai/gpt-oss-120b - on_demand $0.24  |
+| 36 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 37 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 38 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 39 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 40 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 41 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 42 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 43 | `t-1p24xqt` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 44 | `t-8pxdqj` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 45 | `t-1iitjqt` | h1 | main | — | ✅ | Usage |
+| 46 | `t-ckk2wd` | p | main | — | ✅ | Note: Data can be delayed by up to 15 minutes. All data show |
+| 47 | `t-1p01kta` | div | main | — | ✅ | Total Spend |
+| 48 | `t-1acejm` | div | main | — | ✅ | $0.38 USD |
+| 49 | `t-1icob3` | h3 | main | — | ✅ | openai/gpt-oss-120b - on_demand |
+| 50 | `t-bvjozr` | p | main | — | ✅ | $0.24 |
+| 51 | `t-126okxi` | h3 | main | — | ✅ | qwen/qwen3-32b - on_demand |
+| 52 | `t-hfp60w` | p | main | — | ✅ | $0.11 |
+| 53 | `t-10uiiew` | h3 | main | — | ✅ | openai/gpt-oss-20b - on_demand |
+| 54 | `t-11ue36q` | p | main | — | ✅ | $0.01 |
+| 55 | `t-1u4kruk` | h3 | main | — | ✅ | whisper-large-v3 - on_demand |
+| 56 | `t-12gbjwj` | p | main | — | ✅ | $0.01 |
+| 57 | `t-sqg3s6` | h3 | main | — | ✅ | llama-3.1-8b-instant - on_demand |
+| 58 | `t-clszph` | p | main | — | ✅ | $0.00 |
+| 59 | `t-153lin` | h3 | main | — | ✅ | llama-3.3-70b-versatile - on_demand |
+| 60 | `t-bzvizo` | p | main | — | ✅ | $0.00 |
+| 61 | `t-1phbuoc` | h3 | main | — | ✅ | whisper-large-v3-turbo - on_demand |
+| 62 | `t-be0yh3` | p | main | — | ✅ | $0.00 |
+| 63 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 64 | `t-1dthcy1` | div | main | — | ✅ | Executing action... |
+| 65 | `recharts_measurement` | span | main | — | ✅ | $0.03 |
+
+---
+## 📸 Scan — 2026-03-02 15:11:59
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/dashboard/usage`  **Nodes:** 65  ⏱ 5ms
+
+| # | Node ID | Tag | Zone | Interactive | Visible | Text |
+|---|---------|-----|------|:-----------:|:-------:|------|
+| 1 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 2 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 3 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 4 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 5 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 6 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 7 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 8 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 9 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 10 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 11 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 12 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 13 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 14 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 15 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 16 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 17 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 18 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 19 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 20 | `t-1gsz026` | a | nav | ✅ | ✅ | Metrics |
+| 21 | `t-9mf5fy` | span | nav | ✅ | ✅ | Metrics |
+| 22 | `t-52i8rz` | a | nav | ✅ | ✅ | Usage |
+| 23 | `t-1vzey2l` | span | nav | ✅ | ✅ | Usage |
+| 24 | `t-1f26zn0` | a | nav | ✅ | ✅ | Logs |
+| 25 | `t-1qjdk18` | span | nav | ✅ | ✅ | Logs |
+| 26 | `t-9qjprh` | a | nav | ✅ | ✅ | Batch |
+| 27 | `t-i45hza` | span | nav | ✅ | ✅ | Batch |
+| 28 | `t-m92wvr` | button | main | ✅ | ✅ | Select projects |
+| 29 | `t-2ev0xw` | span | main | ✅ | ✅ | Default Project |
+| 30 | `date` | button | main | ✅ | ✅ | March 2026 |
+| 31 | `t-udp9x0` | span | main | ✅ | ✅ | March 2026 |
+| 32 | `t-lazxwe` | div | main | ✅ | ✅ | Cost Activity |
+| 33 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Cost |
+| 34 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Activity |
+| 35 | `radix-_r_1f_-content` | div | main | ✅ | ✅ | Total Spend $0.38 USD openai/gpt-oss-120b - on_demand $0.24  |
+| 36 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 37 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 38 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 39 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 40 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 41 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 42 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 43 | `t-1p24xqt` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 44 | `t-8pxdqj` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 45 | `t-1iitjqt` | h1 | main | — | ✅ | Usage |
+| 46 | `t-ckk2wd` | p | main | — | ✅ | Note: Data can be delayed by up to 15 minutes. All data show |
+| 47 | `t-1p01kta` | div | main | — | ✅ | Total Spend |
+| 48 | `t-1acejm` | div | main | — | ✅ | $0.38 USD |
+| 49 | `t-1icob3` | h3 | main | — | ✅ | openai/gpt-oss-120b - on_demand |
+| 50 | `t-bvjozr` | p | main | — | ✅ | $0.24 |
+| 51 | `t-126okxi` | h3 | main | — | ✅ | qwen/qwen3-32b - on_demand |
+| 52 | `t-hfp60w` | p | main | — | ✅ | $0.11 |
+| 53 | `t-10uiiew` | h3 | main | — | ✅ | openai/gpt-oss-20b - on_demand |
+| 54 | `t-11ue36q` | p | main | — | ✅ | $0.01 |
+| 55 | `t-1u4kruk` | h3 | main | — | ✅ | whisper-large-v3 - on_demand |
+| 56 | `t-12gbjwj` | p | main | — | ✅ | $0.01 |
+| 57 | `t-sqg3s6` | h3 | main | — | ✅ | llama-3.1-8b-instant - on_demand |
+| 58 | `t-clszph` | p | main | — | ✅ | $0.00 |
+| 59 | `t-153lin` | h3 | main | — | ✅ | llama-3.3-70b-versatile - on_demand |
+| 60 | `t-bzvizo` | p | main | — | ✅ | $0.00 |
+| 61 | `t-1phbuoc` | h3 | main | — | ✅ | whisper-large-v3-turbo - on_demand |
+| 62 | `t-be0yh3` | p | main | — | ✅ | $0.00 |
+| 63 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 64 | `t-1dthcy1` | div | main | — | ✅ | Executing action... |
+| 65 | `recharts_measurement` | span | main | — | ✅ | $0.03 |
+
+---
+## 📸 Scan — 2026-03-02 15:12:05
+**Session:** `9rYLvF3Y7dDO…`  **URL:** `https://console.groq.com/dashboard/usage?tab=activity`  **Nodes:** 75  ⏱ 6ms
+
+| # | Node ID | Tag | Zone | Interactive | Visible | Text |
+|---|---------|-----|------|:-----------:|:-------:|------|
+| 1 | `radix-_r_1f_-content` | div | main | ✅ | ✅ | openai/gpt-oss-120b - on_demand Requests Mar 1 Mar 2 0 75 15 |
+| 2 | `t-1rt8nj` | h3 | main | — | ✅ | openai/gpt-oss-120b - on_demand |
+| 3 | `t-1wet0fg` | h3 | main | — | ✅ | Requests |
+| 4 | `t-17rqnzb` | h3 | main | — | ✅ | Tokens |
+| 5 | `t-11u8ely` | h3 | main | — | ✅ | qwen/qwen3-32b - on_demand |
+| 6 | `t-gj9hsd` | h3 | main | — | ✅ | Requests |
+| 7 | `t-1ocy006` | h3 | main | — | ✅ | Tokens |
+| 8 | `t-uwi5sw` | h3 | main | — | ✅ | llama-3.1-8b-instant - on_demand |
+| 9 | `t-jjb3fy` | h3 | main | — | ✅ | Requests |
+| 10 | `t-lm4izp` | h3 | main | — | ✅ | Tokens |
+| 11 | `t-1skb470` | h3 | main | — | ✅ | whisper-large-v3 - on_demand |
+| 12 | `t-12ovmrz` | h3 | main | — | ✅ | Requests |
+| 13 | `t-14l2h67` | h3 | main | — | ✅ | Seconds |
+| 14 | `t-zdct1a` | h3 | main | — | ✅ | openai/gpt-oss-20b - on_demand |
+| 15 | `t-o3kqg8` | h3 | main | — | ✅ | Requests |
+| 16 | `t-1yhmfz7` | h3 | main | — | ✅ | Tokens |
+| 17 | `t-j4ma0f` | h3 | main | — | ✅ | whisper-large-v3-turbo - on_demand |
+| 18 | `t-17959s9` | h3 | main | — | ✅ | Requests |
+| 19 | `t-195c46h` | h3 | main | — | ✅ | Seconds |
+| 20 | `t-t4nbik` | h3 | main | — | ✅ | llama-3.3-70b-versatile - on_demand |
+| 21 | `t-1a96vfu` | h3 | main | — | ✅ | Requests |
+| 22 | `t-1cc0azl` | h3 | main | — | ✅ | Tokens |
+| 23 | `t-osf3mq` | h3 | main | — | ✅ | Request Count |
+| 24 | `t-1ozyl1q` | h3 | main | — | ✅ | Playground |
+| 25 | `t-enz1ui` | p | main | — | ✅ | No requests have been made in the playground this month. |
+| 26 | `t-yke00x` | h3 | main | — | ✅ | API Key |
+| 27 | `t-aqkvnl` | li | main | — | ✅ | TARA-new: 12 |
+| 28 | `t-1wqllit` | a | main | ✅ | ✅ | Groq |
+| 29 | `t-1lxngw9` | img | main | ✅ | ✅ |  |
+| 30 | `radix-_r_b_` | button | main | ✅ | ✅ | Personal |
+| 31 | `t-14lkqxq` | span | main | ✅ | ✅ | Personal |
+| 32 | `radix-_r_d_` | button | main | ✅ | ✅ | Default Project |
+| 33 | `t-r2bj16` | span | main | ✅ | ✅ | Default Project |
+| 34 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 35 | `t-1w4tfok` | span | nav | ✅ | ✅ | Playground |
+| 36 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 37 | `t-bmwawo` | span | nav | ✅ | ✅ | API Keys |
+| 38 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 39 | `t-1yokx2b` | span | nav | ✅ | ✅ | Dashboard |
+| 40 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 41 | `t-mzh0il` | span | nav | ✅ | ✅ | Docs |
+| 42 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
+| 43 | `t-vmguv5` | span | nav | ✅ | ✅ |  |
+| 44 | `radix-_r_k_` | button | main | ✅ | ✅ | Amar Sai |
+| 45 | `t-wahqaj` | span | main | ✅ | ✅ | Amar Sai |
+| 46 | `t-1vydtpm` | img | main | ✅ | ✅ |  |
+| 47 | `t-1gsz026` | a | nav | ✅ | ✅ | Metrics |
+| 48 | `t-9mf5fy` | span | nav | ✅ | ✅ | Metrics |
+| 49 | `t-52i8rz` | a | nav | ✅ | ✅ | Usage |
+| 50 | `t-1vzey2l` | span | nav | ✅ | ✅ | Usage |
+| 51 | `t-1f26zn0` | a | nav | ✅ | ✅ | Logs |
+| 52 | `t-1qjdk18` | span | nav | ✅ | ✅ | Logs |
+| 53 | `t-9qjprh` | a | nav | ✅ | ✅ | Batch |
+| 54 | `t-i45hza` | span | nav | ✅ | ✅ | Batch |
+| 55 | `t-m92wvr` | button | main | ✅ | ✅ | Select projects |
+| 56 | `t-2ev0xw` | span | main | ✅ | ✅ | Default Project |
+| 57 | `date` | button | main | ✅ | ✅ | March 2026 |
+| 58 | `t-udp9x0` | span | main | ✅ | ✅ | March 2026 |
+| 59 | `t-lazxwe` | div | main | ✅ | ✅ | Cost Activity |
+| 60 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Cost |
+| 61 | `radix-_r_1c_-trigger` | button | main | ✅ | ✅ | Activity |
+| 62 | `t-hwtmlf` | div | main | ✅ | ✅ | TARA |
+| 63 | `t-17fdhvh` | div | main | ✅ | ✅ | TARA |
+| 64 | `t-1u22i9n` | img | main | ✅ | ✅ |  |
+| 65 | `t-1h4acmr` | button | main | ✅ | ✅ | Mute Agent Voice |
+| 66 | `t-v1o6n7` | div | main | ✅ | ✅ |  |
+| 67 | `t-1xw2ym5` | div | main | ✅ | ✅ |  |
+| 68 | `t-1cozfdq` | nav | nav | — | ✅ | Playground API Keys Dashboard Docs |
+| 69 | `t-1p24xqt` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 70 | `t-8pxdqj` | nav | nav | — | ✅ | Metrics Usage Logs Batch |
+| 71 | `t-1iitjqt` | h1 | main | — | ✅ | Usage |
+| 72 | `t-ckk2wd` | p | main | — | ✅ | Note: Data can be delayed by up to 15 minutes. All data show |
+| 73 | `t-12bn7wy` | div | main | — | ✅ | TARA - Visual Co-pilot |
+| 74 | `t-1dthcy1` | div | main | — | ✅ | Executing action... |
+| 75 | `recharts_measurement` | span | main | — | ✅ | 0.25 |

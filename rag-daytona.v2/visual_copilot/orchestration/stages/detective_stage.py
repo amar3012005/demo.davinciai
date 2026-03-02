@@ -89,16 +89,15 @@ async def run_detective_stage(
             if is_type_compatible:
                 continue
             if not node_matches_expected_labels_fn(node, label_policy["label_candidates"], domain_name):
-                cand.final_score = max(0.0, cand.final_score * 0.2)
-                cand.hybrid_score = cand.final_score
+                cand.hybrid_score = max(0.0, cand.hybrid_score * 0.2)
                 if isinstance(getattr(cand, "score_breakdown", None), dict):
                     cand.score_breakdown["label_floor_penalty"] = 0.2
-                    cand.score_breakdown["final"] = cand.final_score
+                    cand.score_breakdown["final"] = cand.hybrid_score
                 if "label_floor_penalty" not in (cand.reasons or []):
                     cand.reasons.append("label_floor_penalty")
 
         detective_report.candidates.sort(
-            key=lambda c: getattr(c, "final_score", getattr(c, "hybrid_score", 0.0)),
+            key=lambda c: getattr(c, "hybrid_score", 0.0),
             reverse=True,
         )
         detective_report.best_match = detective_report.candidates[0] if detective_report.candidates else None
@@ -106,7 +105,7 @@ async def run_detective_stage(
     strong_detector_accept = False
     if detective_report.best_match:
         _best = detective_report.best_match
-        _score = getattr(_best, "final_score", _best.hybrid_score)
+        _score = _best.hybrid_score
         _zone_ok = (_best.zone or "").lower() in {"nav", "sidebar", "header", "main"}
         _compat = action_tag_compatible_fn(subgoal_mode, _best)
         if _score >= 0.70 and _compat and _zone_ok:
@@ -119,7 +118,7 @@ async def run_detective_stage(
     pre_rerank_best = detective_report.best_match
     pre_rerank_best_id = getattr(pre_rerank_best, "node_id", "") if pre_rerank_best else ""
     pre_rerank_best_score = (
-        getattr(pre_rerank_best, "final_score", getattr(pre_rerank_best, "hybrid_score", 0.0))
+        getattr(pre_rerank_best, "hybrid_score", 0.0)
         if pre_rerank_best
         else 0.0
     )
@@ -162,7 +161,7 @@ async def run_detective_stage(
         candidates_text = "\n".join(
             [
                 f"[{i}]: text='{c.text[:50]}' tag='{c.tag}' zone='{c.zone}' "
-                f"score={getattr(c, 'final_score', c.hybrid_score):.2f}"
+                f"score={c.hybrid_score:.2f}"
                 for i, c in enumerate(top_n)
             ]
         )
@@ -202,7 +201,7 @@ async def run_detective_stage(
                     logger.warning("   🛑 LLM Reranker REJECTED all candidates. Forcing V1 Fallback.")
                     if detective_report.best_match:
                         detective_report.best_match.hybrid_score = 0.1
-                        detective_report.best_match.final_score = 0.1
+                        detective_report.best_match.hybrid_score = 0.1
                         detective_report.confidence = "low"
                 elif 0 <= chosen_idx < len(top_n):
                     chosen_candidate = top_n[chosen_idx]
@@ -224,7 +223,7 @@ async def run_detective_stage(
                         )
                         detective_report.best_match = chosen_candidate
                         detective_report.best_match.hybrid_score = 0.1
-                        detective_report.best_match.final_score = 0.1
+                        detective_report.best_match.hybrid_score = 0.1
                         detective_report.confidence = "low"
                         _sig = candidate_signature_fn(
                             chosen_candidate.text, chosen_candidate.tag, chosen_candidate.zone
@@ -254,7 +253,7 @@ async def run_detective_stage(
                             f"   🤖 LLM ranked candidate {chosen_idx} as best: '{chosen_candidate.text}' (was original rank #{chosen_idx+1})"
                         )
                         detective_report.best_match = chosen_candidate
-                        if getattr(detective_report.best_match, "final_score", detective_report.best_match.hybrid_score) < 0.35:
+                        if detective_report.best_match.hybrid_score < 0.35:
                             detective_report.confidence = "low"
                 else:
                     logger.warning(f"   ⚠️ LLM returned out of bounds index: {chosen_idx}")
@@ -281,7 +280,7 @@ async def run_detective_stage(
                 )
             else:
                 detective_report.best_match.hybrid_score = 0.1
-                detective_report.best_match.final_score = 0.1
+                detective_report.best_match.hybrid_score = 0.1
                 detective_report.confidence = "low"
 
     _compat_ok = action_tag_compatible_fn(subgoal_mode, detective_report.best_match) if detective_report.best_match else False
@@ -297,7 +296,7 @@ async def run_detective_stage(
         )
         _reject_session[_sig] = _reject_session.get(_sig, 0) + 1
         detective_report.best_match.hybrid_score = 0.1
-        detective_report.best_match.final_score = 0.1
+        detective_report.best_match.hybrid_score = 0.1
         detective_report.confidence = "low"
 
     if detective_report.best_match and strategy_authoritative and subgoal_mode == "literal_click":
@@ -311,10 +310,10 @@ async def run_detective_stage(
                 f"query='{query[:80]}' candidate='{getattr(detective_report.best_match, 'text', '')[:80]}'"
             )
             detective_report.best_match.hybrid_score = 0.1
-            detective_report.best_match.final_score = 0.1
+            detective_report.best_match.hybrid_score = 0.1
             detective_report.confidence = "low"
         elif _strategy_node:
-            _score = getattr(detective_report.best_match, "final_score", detective_report.best_match.hybrid_score)
+            _score = detective_report.best_match.hybrid_score
             if _score >= detective_min_score and action_tag_compatible_fn(subgoal_mode, detective_report.best_match):
                 if detective_report.confidence == "low":
                     logger.info(
@@ -336,12 +335,12 @@ async def run_detective_stage(
                 f"count={_reject_session.get(_sig, 0)}. Forcing Tier 3."
             )
             detective_report.best_match.hybrid_score = 0.1
-            detective_report.best_match.final_score = 0.1
+            detective_report.best_match.hybrid_score = 0.1
             detective_report.confidence = "low"
 
     logger.info(
         f"   ✅ Final Best Match: {detective_report.best_match.text if detective_report.best_match else 'none'} "
-        f"(score: {getattr(detective_report.best_match, 'final_score', detective_report.best_match.hybrid_score) if detective_report.best_match else 0:.2f})"
+        f"(score: {detective_report.best_match.hybrid_score if detective_report.best_match else 0:.2f})"
     )
 
     explicit_label_lock = False
@@ -361,8 +360,8 @@ async def run_detective_stage(
             _delta = 1.0
         else:
             _delta = (
-                getattr(detective_report.best_match, "final_score", detective_report.best_match.hybrid_score)
-                - getattr(_next_other, "final_score", _next_other.hybrid_score)
+                detective_report.best_match.hybrid_score
+                - _next_other.hybrid_score
             )
         if (not strong_detector_accept) and _delta < detective_ambiguous_band:
             detective_report.confidence = "low"
@@ -376,7 +375,7 @@ async def run_detective_stage(
             (n for n in nodes if getattr(n, "id", "") == getattr(detective_report.best_match, "node_id", "")),
             None,
         )
-        _best_score = getattr(detective_report.best_match, "final_score", detective_report.best_match.hybrid_score)
+        _best_score = detective_report.best_match.hybrid_score
         if (
             _best_node
             and node_matches_expected_labels_fn(_best_node, label_policy["label_candidates"], domain_name)
@@ -392,7 +391,7 @@ async def run_detective_stage(
             explicit_label_lock = True
 
     if detective_report.best_match:
-        best_score = getattr(detective_report.best_match, "final_score", detective_report.best_match.hybrid_score)
+        best_score = detective_report.best_match.hybrid_score
         needs_tier3 = (
             (not explicit_label_lock and detective_report.confidence == "low")
             or best_score < detective_min_score
@@ -518,7 +517,7 @@ async def run_detective_stage(
         "gps_hints": hints,
         "router_mode": subgoal_mode,
         "detective_used": True,
-        "detective_score": getattr(detective_report.best_match, "final_score", detective_report.best_match.hybrid_score)
+        "detective_score": detective_report.best_match.hybrid_score
         if detective_report.best_match
         else 0.0,
         "fallback_tier": "detective",

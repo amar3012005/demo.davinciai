@@ -145,7 +145,7 @@ class HiveInterface:
             return False
         try:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
-            result = self.qdrant.scroll(
+            result = await self.qdrant.scroll(
                 collection_name=self.collection,
                 scroll_filter=Filter(
                     must=[
@@ -420,6 +420,67 @@ class HiveInterface:
             
         except Exception as e:
             logger.error(f"Visual hints query failed: {e}")
+            return []
+
+    async def retrieve_visual_hints_for_queries(
+        self,
+        schema: TacticalSchema,
+        queries: List[str],
+        use_cache: bool = True
+    ) -> List[VisualHint]:
+        """
+        Retrieves visual hints for a specific list of queries (e.g., subgoal titles or explicit user intent).
+        """
+        if not self.qdrant or not QDRANT_AVAILABLE:
+            return []
+
+        all_hints = []
+        try:
+            query_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="domain",
+                        match=MatchValue(value=schema.domain)
+                    ),
+                ]
+            )
+            
+            for query_text in queries:
+                vector = await self._embed(query_text) if self.embeddings else None
+                
+                results = await self._query_qdrant(
+                    vector=vector or [],
+                    query_filter=query_filter,
+                    limit=5,
+                    score_threshold=0.3
+                )
+                
+                for point in (results or []):
+                    payload = point.get('payload', {}) if isinstance(point, dict) else getattr(point, 'payload', {})
+                    score = point.get('score', 0.0) if isinstance(point, dict) else getattr(point, 'score', 0.0)
+                    
+                    selector = payload.get('selector', '')
+                    if selector:
+                        all_hints.append(VisualHint(
+                            selector=selector,
+                            element_type=payload.get('element_type', 'link'),
+                            text_pattern=payload.get('text_pattern'),
+                            zone=payload.get('zone', 'main'),
+                            confidence=score
+                        ))
+            
+            seen = set()
+            unique_hints = []
+            for hint in all_hints:
+                hint_key = f"{hint.selector}:{hint.element_type}:{hint.zone}"
+                if hint_key not in seen and hint.selector:
+                    seen.add(hint_key)
+                    unique_hints.append(hint)
+            
+            return unique_hints[:10]
+            
+        except Exception as e:
+            logger.error(f"Retrieve visual hints for queries failed: {e}")
             return []
 
     async def retrieve_cross_domain(

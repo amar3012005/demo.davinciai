@@ -555,12 +555,17 @@ class MissionBrain:
         await self._save_mission(mission)
         return True
 
-    async def advance_subgoal(self, mission_id: str) -> bool:
+    async def advance_subgoal(
+        self,
+        mission_id: str,
+        is_zero_shot: bool = False
+    ) -> bool:
         """
         Advance to next sub-goal.
         
         Args:
             mission_id: Mission identifier
+            is_zero_shot: Whether this was a zero-shot generated subgoal
         
         Returns:
             True if advanced successfully
@@ -577,6 +582,46 @@ class MissionBrain:
         else:
             logger.info(
                 f"📍 Advanced to subgoal {mission.current_subgoal_index}: "
+                f"{mission.subgoals[mission.current_subgoal_index]}"
+            )
+        
+        await self._save_mission(mission)
+        return True
+
+    async def advance_subgoal_verified(
+        self,
+        mission_id: str,
+        is_zero_shot: bool = False,
+        verification_reason: str = ""
+    ) -> bool:
+        """
+        Advance to next sub-goal upon verified action.
+        Clears pending action state.
+        
+        Args:
+            mission_id: Mission identifier
+            is_zero_shot: Whether this was a zero-shot generated subgoal
+            verification_reason: Reason why action was verified
+            
+        Returns:
+            True if advanced successfully
+        """
+        mission = await self._load_mission(mission_id)
+        if not mission:
+            return False
+        
+        # Clear pending verification state
+        mission.pending_action = None
+        mission.pending_verify_attempts = 0
+        
+        mission.current_subgoal_index += 1
+        
+        if mission.current_subgoal_index >= len(mission.subgoals):
+            mission.status = "completed"
+            logger.info(f"✅ Mission completed (verified: {verification_reason}): {mission_id}")
+        else:
+            logger.info(
+                f"📍 Advanced to subgoal {mission.current_subgoal_index} (verified: {verification_reason}): "
                 f"{mission.subgoals[mission.current_subgoal_index]}"
             )
         
@@ -615,6 +660,27 @@ class MissionBrain:
         else:
             # Failed action - might want to track separately
             logger.warning(f"❌ Failed action: {action_type} on {target_id}")
+        
+        await self._save_mission(mission)
+        return True
+
+    async def set_pending_action(
+        self,
+        mission_id: str,
+        pending_action: Dict[str, Any],
+        dom_signature: str,
+        current_url: str
+    ) -> bool:
+        """
+        Stage an action for verification on the next step.
+        """
+        mission = await self._load_mission(mission_id)
+        if not mission:
+            return False
+        
+        mission.pending_action = pending_action
+        mission.last_dom_signature = dom_signature
+        mission.last_url = current_url
         
         await self._save_mission(mission)
         return True

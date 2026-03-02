@@ -42,10 +42,6 @@ async def prepare_mission_and_query(
         session_id=session_id,
         schema=schema,
         strategy=hive_response.strategy,
-        nodes=nodes,
-        app=app,
-        zero_shot_mode=is_zero_shot,
-        mission_id=_effective_mission_id,
     )
 
     if getattr(hive_response, "strategy_accepted", False) and not getattr(mission, "strategy_locked", False):
