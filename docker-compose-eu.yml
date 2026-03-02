@@ -35,7 +35,7 @@ services:
   # ═══════════════════════════════════════════════════════════
   rag-eu:
     build:
-      context: ../rag-eu
+      context: ./rag-eu
       dockerfile: Dockerfile
     container_name: rag-eu
     command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001"
@@ -95,7 +95,7 @@ services:
   # ═══════════════════════════════════════════════════════════
   stt-eu:
     build:
-      context: ../stt_groq_whisper
+      context: ./stt_groq_whisper
       dockerfile: Dockerfile
     container_name: stt-eu
     command: >
@@ -147,7 +147,7 @@ services:
   # ═══════════════════════════════════════════════════════════
   tts-eu:
     build:
-      context: ../tts_cartesia
+      context: ./tts_cartesia
       dockerfile: Dockerfile
     container_name: tts-eu
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
@@ -185,7 +185,7 @@ services:
   # ═══════════════════════════════════════════════════════════
   orchestrator-eu:
     build:
-      context: ../Orchestrator-eu
+      context: ./Orchestrator-eu
       dockerfile: Dockerfile
     container_name: orchestrator-eu
     command: "uvicorn app:app --host 0.0.0.0 --port 4004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0"
