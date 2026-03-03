@@ -20,10 +20,15 @@ async def parse_schema(
     goal: str,
     current_url: str,
     previous_goal: Optional[str],
+    prefetched_nodes: Optional[list] = None,
     logger,
 ):
-    logger.info("👁️ Step 0: Live Graph getting DOM nodes for Mind Reader...")
-    nodes = await live_graph.get_visible_nodes(session_id)
+    if prefetched_nodes is not None:
+        nodes = prefetched_nodes
+        logger.info(f"👁️ Step 0: Live Graph using prefetched nodes for Mind Reader ({len(nodes)})")
+    else:
+        logger.info("👁️ Step 0: Live Graph getting DOM nodes for Mind Reader...")
+        nodes = await live_graph.get_visible_nodes(session_id)
     logger.info("🧠 Step 1: Mind Reader parsing intent...")
     try:
         schema = await mind_reader.translate(

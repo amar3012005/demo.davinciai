@@ -295,6 +295,81 @@ class MissionBrain:
             "Complete task"
         ]
 
+    async def _react_generate_subgoal(
+        self,
+        schema: TacticalSchema,
+        nodes: list,
+        app: Any,
+        mission: Optional[Any] = None,
+    ) -> List[str]:
+        """
+        Zero-shot ReAct subgoal generation using LLM + live DOM.
+
+        Called when no Hive strategy exists (unknown domain) or when
+        strategy subgoals are exhausted and replanning is needed.
+
+        Uses the ReAct navigator prompt to analyze the current DOM
+        and produce a grounded next-step subgoal.
+
+        Returns:
+            List of subgoal strings (typically 1 element), or empty list on failure.
+        """
+        try:
+            from visual_copilot.prompts.react.navigator_prompt import build_react_prompt
+        except ImportError:
+            logger.warning("ReAct prompt builder not available, falling back to heuristic subgoals")
+            return await self._generate_subgoals(schema, None)
+
+        llm = None
+        if app and hasattr(app, "state") and hasattr(app.state, "mind_reader"):
+            mr = app.state.mind_reader
+            if hasattr(mr, "llm"):
+                llm = mr.llm
+
+        if not llm or not hasattr(llm, "generate"):
+            logger.warning("LLM not available for ReAct, falling back to heuristic subgoals")
+            return await self._generate_subgoals(schema, None)
+
+        prompt = build_react_prompt(schema=schema, nodes=nodes, mission=mission, app=app)
+
+        try:
+            response = await llm.generate(
+                prompt,
+                model="llama-3.1-8b-instant",
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+
+            import json as _json
+            parsed = _json.loads(response)
+
+            # Check terminal states
+            if parsed.get("is_done"):
+                logger.info("ReAct: goal already visible on screen — signalling done")
+                return ["Extract and present the answer to the user"]
+
+            if parsed.get("is_impossible"):
+                logger.warning(f"ReAct: task impossible — {parsed.get('why', 'unknown reason')}")
+                return []
+
+            if parsed.get("decide") == "clarify":
+                next_step = parsed.get("next_step", "Ask user for clarification")
+                logger.info(f"ReAct: clarification needed — {next_step}")
+                return [next_step]
+
+            # Extract actionable subgoal
+            next_step = parsed.get("next_step", "").strip()
+            if not next_step:
+                logger.warning("ReAct returned empty next_step")
+                return []
+
+            logger.info(f"ReAct subgoal: '{next_step}' (confidence={parsed.get('confidence', '?')})")
+            return [next_step]
+
+        except Exception as e:
+            logger.error(f"ReAct subgoal generation failed: {e}")
+            return await self._generate_subgoals(schema, None)
+
     def _init_constraints(
         self,
         schema: TacticalSchema
@@ -633,7 +708,8 @@ class MissionBrain:
         mission_id: str,
         action_type: str,
         target_id: str,
-        success: bool
+        success: bool,
+        **kwargs
     ) -> bool:
         """
         Record action in mission history.
@@ -643,6 +719,7 @@ class MissionBrain:
             action_type: Type of action
             target_id: Target element ID
             success: Whether action succeeded
+            **kwargs: Extra action properties like text
         
         Returns:
             True if recorded successfully
@@ -651,7 +728,10 @@ class MissionBrain:
         if not mission:
             return False
         
-        action_key = f"{action_type}:{target_id}"
+        if action_type == "type" and "text" in kwargs:
+            action_key = f"{action_type}:{target_id}='{kwargs['text']}'"
+        else:
+            action_key = f"{action_type}:{target_id}"
         
         if success:
             # Add to history (to avoid repeating)

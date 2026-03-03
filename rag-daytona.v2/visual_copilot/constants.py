@@ -40,6 +40,12 @@ LAST_MILE_CANARY_DOMAINS = {
 ENABLE_KEYWORD_DIRECT_V3 = _env_bool("ENABLE_KEYWORD_DIRECT_V3", False)
 ENABLE_SUBGOAL_HINT_QUERY = _env_bool("ENABLE_SUBGOAL_HINT_QUERY", False)
 ENABLE_VERIFIED_ADVANCE = _env_bool("ENABLE_VERIFIED_ADVANCE", False)
+ENABLE_PRE_ROUTER_VISION = _env_bool("ENABLE_PRE_ROUTER_VISION", False)
+PRE_ROUTER_VISION_MIN_CONF = float(os.getenv("PRE_ROUTER_VISION_MIN_CONF", "0.75"))
+PRE_ROUTER_VISION_MODEL = os.getenv(
+    "PRE_ROUTER_VISION_MODEL",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+)
 DEBUG_TRACE_OUTPUTS = _env_bool("DEBUG_TRACE_OUTPUTS", False)
 _v3_canary_raw = os.getenv("V3_CANARY_DOMAINS")
 if not _v3_canary_raw:
@@ -146,8 +152,8 @@ def _is_last_mile_enabled_for_domain(host: str) -> bool:
     if ENABLE_LAST_MILE_REASONING:
         return True
     host = (host or "").lower().replace("www.", "")
-    if not host:
-        return False
+    if not host or host == "unknown":
+        return True
     if host in LAST_MILE_CANARY_DOMAINS:
         return True
     host_root = _root_domain(host)

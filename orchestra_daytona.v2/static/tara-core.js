@@ -294,6 +294,28 @@
                         data_tables: Scanner.extractVisibleTables()
                     });
                     this.ws.send(payload);
+
+                    // Also send a screenshot snapshot for backend pre-router vision gate.
+                    // This runs asynchronously so it does not block VAD flow.
+                    (async () => {
+                        try {
+                            const screenshotB64 = await Scanner.captureScreenshot();
+                            if (screenshotB64 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                                this.ws.send(JSON.stringify({
+                                    type: 'dom_update',
+                                    elements: blueprint,
+                                    url: window.location.href,
+                                    title: document.title,
+                                    active_states: Scanner.detectActiveStates(),
+                                    data_tables: Scanner.extractVisibleTables(),
+                                    screenshot_b64: screenshotB64
+                                }));
+                                console.log(`📸 Speech snapshot sent (${Math.round(screenshotB64.length / 1024)}KB)`);
+                            }
+                        } catch (snapErr) {
+                            console.warn('📸 Speech snapshot capture skipped:', snapErr);
+                        }
+                    })();
                 } else {
                     console.log('📸 Speech started — DOM Unchanged');
                 }
@@ -351,29 +373,13 @@
                 resume_step_count: this._resumeStepCount || 0
             };
 
-            // Persist for auto-resume
+            // 1. Persist for auto-resume
             sessionStorage.setItem('tara_mode', 'visual-copilot');
             sessionStorage.setItem('tara_interaction_mode', this.sessionMode);
             localStorage.setItem('tara_mode', 'visual-copilot');
             localStorage.setItem('tara_interaction_mode', this.sessionMode);
 
-            console.log('📤 Sending session_config:', JSON.stringify(sessionConfig));
-            this.ws.send(JSON.stringify(sessionConfig));
-            this.pendingMissionGoal = null;
-
-            // Show chat bar
-            this.showChatBar();
-            this.setOrbState('listening');
-
-            // Start mic for interactive mode
-            if (mode === 'interactive') {
-                const micOk = await this.startMicrophoneAndCollection();
-                if (micOk === false) {
-                    console.log('🔇 Mic failed — continuing in text mode');
-                }
-            }
-
-            // Start TaraSensor if available
+            // 2. Start TaraSensor immediately (if available) - This sends the initial 'full_scan'
             if (typeof window.TaraSensor !== 'undefined') {
                 try {
                     this.taraSensor = new window.TaraSensor(this.ws, {
@@ -385,6 +391,27 @@
                     console.log('📡 TaraSensor started for delta streaming');
                 } catch (e) {
                     console.warn('TaraSensor init failed:', e);
+                }
+            }
+
+            // 3. Send session_config (Trigger for mission planning)
+            console.log('📤 Sending session_config:', JSON.stringify(sessionConfig));
+            this.ws.send(JSON.stringify(sessionConfig));
+
+            // 3b. Phoenix: Send resume messages AFTER session_config so backend
+            //     has is_mission_active=true before execution_complete arrives
+            WS.sendPhoenixResume(this);
+            this.pendingMissionGoal = null;
+
+            // 4. Update UI
+            this.showChatBar();
+            this.setOrbState('listening');
+
+            // 5. Start mic for interactive mode (async)
+            if (mode === 'interactive') {
+                const micOk = await this.startMicrophoneAndCollection();
+                if (micOk === false) {
+                    console.log('🔇 Mic failed — continuing in text mode');
                 }
             }
         }

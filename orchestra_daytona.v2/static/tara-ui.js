@@ -3,7 +3,8 @@
  * Module: tara-ui.js
  *
  * Owns: Shadow DOM, orb, pill, chat bar, mode selector, overlay,
- *       visual state management, typing indicators, message rendering.
+ *       visual state management, typing indicators, message rendering,
+ *       and the "Analyse Page" quick-narrate strip.
  * Depends on: tara-config.js, tara-styles.js
  */
 (function () {
@@ -62,6 +63,97 @@
         `;
 
         widget.container.appendChild(widget.pillContainer);
+
+        // ─── Analyse Page Strip ──────────────────────────────────
+        // Appears below the pill when the orb is clicked in idle state
+        const analyseStrip = document.createElement('div');
+        analyseStrip.className = 'tara-analyse-strip';
+        analyseStrip.innerHTML = `
+            <div class="tara-analyse-header">
+                <span class="tara-analyse-eyebrow">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    TARA sees
+                </span>
+                <button class="tara-analyse-close" title="Close">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <p class="tara-analyse-label">Narrate what the agent sees on this page</p>
+            <div class="tara-analyse-options">
+                <button class="tara-analyse-btn dom" id="tara-analyse-dom">
+                    <span class="tara-analyse-btn-icon dom">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="3"/>
+                            <path d="M3 9h18M9 21V9"/>
+                        </svg>
+                    </span>
+                    <span class="tara-analyse-btn-text">
+                        <span class="tara-analyse-btn-title">DOM</span>
+                        <span class="tara-analyse-btn-desc">Structure &amp; content</span>
+                    </span>
+                    <span class="tara-analyse-btn-arrow">→</span>
+                </button>
+                <button class="tara-analyse-btn vision" id="tara-analyse-vision">
+                    <span class="tara-analyse-btn-icon vision">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </span>
+                    <span class="tara-analyse-btn-text">
+                        <span class="tara-analyse-btn-title">Vision</span>
+                        <span class="tara-analyse-btn-desc">Screenshot + AI sight</span>
+                    </span>
+                    <span class="tara-analyse-btn-arrow">→</span>
+                </button>
+            </div>
+            <div class="tara-analyse-divider">
+                <span class="tara-analyse-divider-line"></span>
+                <span class="tara-analyse-divider-text">or</span>
+                <span class="tara-analyse-divider-line"></span>
+            </div>
+            <button class="tara-analyse-start-session" id="tara-analyse-start">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                </svg>
+                Start full session
+            </button>
+        `;
+        widget.container.appendChild(analyseStrip);
+        widget.analyseStrip = analyseStrip;
+
+        // Strip event handlers
+        analyseStrip.querySelector('.tara-analyse-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            UI.hideAnalyseStrip(widget);
+        });
+
+        analyseStrip.querySelector('#tara-analyse-start').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            UI.hideAnalyseStrip(widget);
+            const mode = await UI.showModeSelector(widget);
+            await widget.startVisualCopilot(null, mode);
+        });
+
+        analyseStrip.querySelector('#tara-analyse-dom').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            UI.hideAnalyseStrip(widget);
+            await UI._startAnalyseChat(widget, 'dom');
+        });
+
+        analyseStrip.querySelector('#tara-analyse-vision').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            UI.hideAnalyseStrip(widget);
+            await UI._startAnalyseChat(widget, 'vision');
+        });
+
         widget.shadowRoot.appendChild(widget.container);
         document.body.appendChild(widget.host);
 
@@ -102,13 +194,18 @@
             widget.container.appendChild(widget.orbContainer);
         }
 
-        // Orb click handler
+        // Orb click handler — three states
         widget.orbContainer.addEventListener('click', async () => {
-            if (!widget.isActive) {
-                const mode = await UI.showModeSelector(widget);
-                await widget.startVisualCopilot(null, mode);
-            } else {
+            if (widget.isActive) {
+                // In session → stop
+                UI.hideAnalyseStrip(widget);
                 await widget.stopVisualCopilot();
+            } else if (widget.analyseStrip.classList.contains('visible')) {
+                // Strip open → close (toggle)
+                UI.hideAnalyseStrip(widget);
+            } else {
+                // Idle → show the Analyse strip
+                UI.showAnalyseStrip(widget);
             }
         });
 
@@ -226,7 +323,7 @@
             </div>
             <div>
               <div class="tara-mode-option-label">Interactive Mode</div>
-              <div class="tara-mode-option-desc">Full voice walkthrough with speech & actions</div>
+              <div class="tara-mode-option-desc">Full voice walkthrough with speech &amp; actions</div>
             </div>
         `;
 
@@ -284,6 +381,215 @@
             }, 300);
         },
 
+        // ─── Analyse Strip ───────────────────────────────────────
+        showAnalyseStrip(widget) {
+            widget.analyseStrip.style.display = 'flex';
+            requestAnimationFrame(() => {
+                widget.analyseStrip.classList.add('visible');
+            });
+        },
+
+        hideAnalyseStrip(widget) {
+            if (!widget.analyseStrip) return;
+            widget.analyseStrip.classList.remove('visible');
+            setTimeout(() => {
+                widget.analyseStrip.style.display = 'none';
+            }, 300);
+        },
+
+        /**
+         * Run a one-shot page analysis (DOM or Vision) and narrate through TTS.
+         * Does NOT start a full session — just a quick snapshot narration.
+         */
+        async _runPageAnalysis(widget, mode) {
+            const Scanner = window.TARA.Scanner;
+            const WS = window.TARA.WS;
+
+            // Visual feedback: orb into "thinking" state
+            widget.orbContainer.classList.remove('idle', 'listening', 'talking', 'executing');
+            widget.orbContainer.classList.add('executing');
+
+            const statusEl = widget.pillContainer.querySelector('.tara-pill-status');
+            const originalStatus = statusEl ? statusEl.textContent : '';
+            if (statusEl) statusEl.textContent = mode === 'vision' ? '👁️ Capturing...' : '🧠 Reading DOM...';
+
+            try {
+                let screenshotB64 = null;
+                let domElements = null;
+
+                if (mode === 'vision') {
+                    if (statusEl) statusEl.textContent = '📸 Capturing screenshot...';
+                    screenshotB64 = await Scanner.captureScreenshot();
+                    if (!screenshotB64) {
+                        // Vision capture failed — fall back to DOM analysis gracefully
+                        console.warn('[TARA] Vision capture failed, falling back to DOM analysis');
+                        mode = 'dom';
+                        if (statusEl) statusEl.textContent = '🧠 Falling back to DOM...';
+                    }
+                }
+
+                if (mode === 'dom') {
+                    domElements = Scanner.scanPageBlueprint(true);
+                }
+
+                if (statusEl) statusEl.textContent = '🤔 Analysing...';
+
+                // We need a WS connection for TTS streaming — spin up a temporary one
+                // if not already connected, or reuse existing.
+                const needsTempWs = !widget.ws || widget.ws.readyState !== WebSocket.OPEN;
+                if (needsTempWs) {
+                    await WS.connectWebSocket(widget);
+                    // Send a lightweight session config (no mode-trigger)
+                    widget.ws.send(JSON.stringify({
+                        type: 'session_config',
+                        mode: 'analyse_only',
+                        interaction_mode: 'interactive',
+                        current_url: window.location.href,
+                        title: document.title,
+                        viewport: { width: window.innerWidth, height: window.innerHeight }
+                    }));
+
+                    // Initialize audio manager for TTS playback
+                    if (!widget.audioManager) {
+                        await widget.initializeAudioManager();
+                    }
+                }
+
+                // Send the analyse_page request to backend
+                widget.ws.send(JSON.stringify({
+                    type: 'analyse_page',
+                    analysis_mode: mode,              // 'dom' or 'vision'
+                    screenshot_b64: screenshotB64,    // only set for vision
+                    dom_context: domElements,          // only set for dom
+                    current_url: window.location.href,
+                    page_title: document.title,
+                    timestamp: Date.now()
+                }));
+
+                if (statusEl) statusEl.textContent = '🔊 Narrating...';
+                console.log(`🔍 [TARA] Page analysis requested: mode=${mode}`);
+
+            } catch (err) {
+                console.error('[TARA] Page analysis failed:', err);
+                // Reset orb
+                widget.orbContainer.classList.remove('executing');
+                widget.orbContainer.classList.add('idle');
+                if (statusEl) statusEl.textContent = 'Analysis failed — try again';
+                setTimeout(() => {
+                    if (statusEl) statusEl.textContent = originalStatus;
+                }, 2500);
+            }
+        },
+
+        /**
+         * Open the chat bar in "analyse" mode — captures context, then lets
+         * the user type questions about the page (or press Enter for overview).
+         */
+        async _startAnalyseChat(widget, mode) {
+            const Scanner = window.TARA.Scanner;
+            const WS = window.TARA.WS;
+
+            // Visual feedback while capturing
+            widget.orbContainer.classList.remove('idle', 'listening', 'talking', 'executing');
+            widget.orbContainer.classList.add('executing');
+            const statusEl = widget.pillContainer.querySelector('.tara-pill-status');
+            if (statusEl) statusEl.textContent = mode === 'vision' ? '📸 Capturing...' : '🧠 Reading DOM...';
+
+            try {
+                let screenshotB64 = null;
+                let domElements = null;
+
+                if (mode === 'vision') {
+                    screenshotB64 = await Scanner.captureScreenshot();
+                    if (!screenshotB64) {
+                        console.warn('[TARA] Vision capture failed, falling back to DOM');
+                        mode = 'dom';
+                    }
+                }
+                if (mode === 'dom') {
+                    domElements = Scanner.scanPageBlueprint(true);
+                }
+
+                // Store captured context for re-use across follow-up questions
+                widget._analyseContext = {
+                    mode,
+                    screenshotB64,
+                    domElements,
+                    currentUrl: window.location.href,
+                    pageTitle: document.title
+                };
+
+                // Ensure WS + audio
+                const needsWs = !widget.ws || widget.ws.readyState !== WebSocket.OPEN;
+                if (needsWs) {
+                    await WS.connectWebSocket(widget);
+                    widget.ws.send(JSON.stringify({
+                        type: 'session_config',
+                        mode: 'analyse_only',
+                        interaction_mode: 'interactive',
+                        current_url: window.location.href,
+                        title: document.title,
+                        viewport: { width: window.innerWidth, height: window.innerHeight }
+                    }));
+                    if (!widget.audioManager) {
+                        await widget.initializeAudioManager();
+                    }
+                }
+
+                // Enter analyse mode and show chat bar
+                widget._analyseMode = true;
+                widget.orbContainer.classList.remove('executing');
+                widget.orbContainer.classList.add('idle');
+                if (statusEl) statusEl.textContent = 'Ask about this page';
+
+                widget.chatInput.placeholder = 'Ask about this page... (Enter for overview)';
+                UI.showChatBar(widget);
+                widget.chatInput.focus();
+
+                console.log(`🔍 [TARA] Analyse chat ready: mode=${mode}`);
+            } catch (err) {
+                console.error('[TARA] Analyse chat setup failed:', err);
+                widget.orbContainer.classList.remove('executing');
+                widget.orbContainer.classList.add('idle');
+                if (statusEl) statusEl.textContent = 'Setup failed — try again';
+                setTimeout(() => {
+                    if (statusEl && !widget.isActive) statusEl.textContent = 'Click orb to start';
+                }, 2500);
+            }
+        },
+
+        /**
+         * Send an analyse request (question or empty for overview) over WS
+         * using the previously captured context.
+         */
+        _sendAnalyseRequest(widget, question) {
+            const ctx = widget._analyseContext;
+            if (!ctx) return;
+
+            // Show user question in chat (if any)
+            if (question) {
+                UI.appendChatMessage(widget, question, 'user');
+            }
+
+            UI.showTypingIndicator(widget);
+            widget.orbContainer.classList.remove('idle', 'listening', 'talking');
+            widget.orbContainer.classList.add('executing');
+
+            if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                widget.ws.send(JSON.stringify({
+                    type: 'analyse_page',
+                    analysis_mode: ctx.mode,
+                    screenshot_b64: ctx.screenshotB64,
+                    dom_context: ctx.domElements,
+                    current_url: ctx.currentUrl,
+                    page_title: ctx.pageTitle,
+                    user_question: question || null,
+                    timestamp: Date.now()
+                }));
+                console.log(`🔍 [TARA] Analyse request sent: q="${question || '(overview)'}"`);
+            }
+        },
+
         showChatBar(widget) {
             if (!widget.chatBar) return;
             widget.chatBar.style.display = 'flex';
@@ -295,6 +601,11 @@
 
         hideChatBar(widget) {
             if (!widget.chatBar) return;
+            // Clean up analyse mode
+            widget._analyseMode = false;
+            widget._analyseContext = null;
+            widget.chatInput.placeholder = 'Ask TARA...';
+
             widget.chatBar.classList.remove('visible');
             setTimeout(() => {
                 widget.chatBar.style.display = 'none';
@@ -322,8 +633,17 @@
             if (existing) existing.remove();
         },
 
-        sendTextCommand(widget) {
+        async sendTextCommand(widget) {
             const text = widget.chatInput.value.trim();
+
+            // In analyse mode, route to _sendAnalyseRequest (empty = overview)
+            if (widget._analyseMode) {
+                widget.chatInput.value = '';
+                widget.sendButton.classList.remove('has-text');
+                UI._sendAnalyseRequest(widget, text);
+                return;
+            }
+
             if (!text) return;
 
             widget._currentMissionGoal = text;
@@ -333,10 +653,17 @@
             UI.showTypingIndicator(widget);
 
             if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                let screenshotB64 = null;
+                try {
+                    screenshotB64 = await window.TARA.Scanner.captureScreenshot();
+                } catch (err) {
+                    console.warn('[TARA] text_input screenshot capture failed:', err);
+                }
                 widget.ws.send(JSON.stringify({
                     type: 'text_input',
                     text: text,
-                    mode: widget.sessionMode
+                    mode: widget.sessionMode,
+                    screenshot_b64: screenshotB64
                 }));
             }
         },

@@ -287,6 +287,140 @@ class GroqProvider(LLMProvider):
             logger.error(f"Groq reasoning error [{model}]: {e}")
             raise
 
+    async def generate_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        *,
+        model: Optional[str] = None,
+        tool_choice: str = "auto",
+        max_tokens: int = 1024,
+        temperature: float = 0.1,
+        **kwargs
+    ) -> Any:
+        """
+        Generate a chat completion with native Groq tool calling.
+
+        Returns the raw `message` object from `choices[0].message` so the
+        caller can inspect `.tool_calls`, `.content`, etc.
+        """
+        if not self.is_available():
+            raise RuntimeError("Groq provider not initialized")
+
+        effective_model = model or self.model_name
+        try:
+            chat_completion = await self._client.chat.completions.create(
+                messages=messages,
+                model=effective_model,
+                tools=tools,
+                tool_choice=tool_choice,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+
+            # Log usage
+            if hasattr(chat_completion, "usage") and chat_completion.usage:
+                u = chat_completion.usage
+                cached_tokens = self._extract_cached_tokens(u)
+                self._last_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                    "cached_tokens": cached_tokens,
+                    "model": effective_model,
+                }
+                cache_suffix = f" | cached={cached_tokens}" if cached_tokens else ""
+                logger.info(
+                    f"🧬 Groq Tools Usage [{effective_model}]: "
+                    f"{u.prompt_tokens}→{u.completion_tokens} tokens{cache_suffix}"
+                )
+
+            return chat_completion.choices[0].message
+        except Exception as e:
+            logger.error(f"Groq tool-calling error [{effective_model}]: {e}")
+            raise
+
+    async def generate_vision(
+        self,
+        text_prompt: str,
+        image_b64: str,
+        *,
+        model: str = "meta-llama/llama-4-scout-17b-16e-instruct",
+        max_tokens: int = 1024,
+        temperature: float = 0.3,
+        image_mime: str = "image/jpeg",
+        **kwargs,
+    ) -> str:
+        """
+        Generate a response from a multimodal vision model using Groq.
+
+        Uses meta-llama/llama-4-scout-17b-16e-instruct which supports:
+        - Image + text understanding
+        - Tool use with images
+        - JSON mode with images
+        - Multi-turn visual conversations
+
+        Args:
+            text_prompt: The text question or instruction about the image.
+            image_b64: Base64-encoded image string (JPEG or PNG).
+            model: Vision-capable model ID.
+            max_tokens: Max completion tokens.
+            temperature: Sampling temperature.
+            image_mime: MIME type of the image (image/jpeg or image/png).
+
+        Returns:
+            The model's text response describing/analyzing the image.
+        """
+        if not self.is_available():
+            raise RuntimeError("Groq provider not initialized")
+
+        try:
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": text_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{image_mime};base64,{image_b64}",
+                            },
+                        },
+                    ],
+                }
+            ]
+
+            chat_completion = await self._client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_completion_tokens=max_tokens,
+                **kwargs,
+            )
+
+            # Log usage
+            if hasattr(chat_completion, "usage") and chat_completion.usage:
+                u = chat_completion.usage
+                cached_tokens = self._extract_cached_tokens(u)
+                self._last_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                    "cached_tokens": cached_tokens,
+                    "model": model,
+                }
+                cache_suffix = f" | cached={cached_tokens}" if cached_tokens else ""
+                logger.info(
+                    f"👁️ Groq Vision [{model}]: "
+                    f"{u.prompt_tokens}→{u.completion_tokens} tokens{cache_suffix}"
+                )
+
+            return chat_completion.choices[0].message.content or ""
+        except Exception as e:
+            logger.error(f"Groq vision error [{model}]: {e}")
+            raise
+
     async def _generate_stream(self, prompt: str, max_tokens: int, temperature: float, **kwargs) -> AsyncGenerator[str, None]:
         """Internal async generator for streaming."""
         try:

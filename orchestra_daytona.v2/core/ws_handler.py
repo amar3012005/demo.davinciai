@@ -170,6 +170,11 @@ class OrchestratorSession:
     metadata: Dict[str, Any] = field(default_factory=dict)
     map_status_checked: bool = False
 
+    # Barge-in validation (deferred VAD interrupt)
+    last_query_text: str = ""
+    last_query_language: str = "en"
+    barge_in_pending: bool = False  # True = VAD fired during SPEAKING, awaiting STT validation
+
     # Host-based configuration overrides
     agent_name: str = "tara"
     agent_id: Optional[str] = "tara"
@@ -470,6 +475,7 @@ class OrchestratorWSHandler:
         if session_id and session_id in self.sessions:
             session = self.sessions[session_id]
             session.websocket = websocket
+            session.is_closed = False  # Reset for new connection (Phoenix reconnect)
             # Update user_id if provided on reconnect
             if user_id:
                 session.user_id = user_id
@@ -600,10 +606,15 @@ class OrchestratorWSHandler:
                 # Log connection state for debugging
                 logger.warning(f"[{session_id}] ⚠️ Connection closed unexpectedly - check browser/client logs")
         finally:
-            # Mark session as closed to stop all ongoing operations
-            session.is_closed = True
-            
-            # Cancel all background tasks
+            # Check if session was reconnected (Phoenix) — another connection
+            # replaced our websocket while we were tearing down.
+            session_reconnected = (session.websocket is not websocket)
+
+            if not session_reconnected:
+                # Mark session as closed to stop all ongoing operations
+                session.is_closed = True
+
+            # Cancel background tasks that belong to THIS connection
             tasks_to_cancel = [
                 session.stt_receive_task,
                 session.tts_receive_task,
@@ -616,11 +627,11 @@ class OrchestratorWSHandler:
                 session.audio_playback_server_timer,
                 session.transcript_timeout_task
             ]
-            
+
             for task in tasks_to_cancel:
                 if task and not task.done():
                     task.cancel()
-            
+
             # Wait for tasks to complete cancellation
             for task in tasks_to_cancel:
                 if task:
@@ -630,8 +641,11 @@ class OrchestratorWSHandler:
                         pass
                     except Exception:
                         pass
-            
-            await self._cleanup_session(session)
+
+            if session_reconnected:
+                logger.info(f"[{session_id}] 🔥 Phoenix: Session reconnected — skipping cleanup")
+            else:
+                await self._cleanup_session(session)
 
     async def handle_audio_stream(self, websocket: WebSocket, session_id: Optional[str] = None):
         """
@@ -758,6 +772,8 @@ class OrchestratorWSHandler:
             await self._handle_session_config(session, msg)
         elif msg_type == "dom_update":
             await self._handle_dom_update(session, msg)
+        elif msg_type == "screenshot_response":
+            await self._handle_screenshot_response(session, msg)
         elif msg_type == "dom_delta":
             await self._handle_dom_delta(session, msg)
         elif msg_type == "execution_complete":
@@ -775,6 +791,8 @@ class OrchestratorWSHandler:
             # ── PHOENIX PROTOCOL: Cross-Domain Session Restoration ──
             # Frontend just woke up on a new domain and is asking for its memories
             await self._handle_request_history(session, msg)
+        elif msg_type == "analyse_page":
+            asyncio.create_task(self._handle_analyse_page(session, msg))
         else:
             logger.warning(f"[{session.session_id}] Unknown message type: {msg_type}")
     
@@ -869,9 +887,14 @@ class OrchestratorWSHandler:
             return
 
         text = msg.get("text", "").strip()
+        screenshot_b64 = msg.get("screenshot_b64") or None
         if not text:
             logger.warning(f"[{session.session_id}] Empty text input in mock mode")
             return
+
+        if screenshot_b64:
+            session._screenshot_b64 = screenshot_b64
+            logger.debug(f"[{session.session_id}] 📸 Text input screenshot stored ({len(screenshot_b64) // 1024}KB)")
 
         logger.info(f"[{session.session_id}] 📝 Mock STT input: '{text}'")
         session.last_activity = time.time()
@@ -1098,17 +1121,41 @@ class OrchestratorWSHandler:
                 "user_text": text
             }
         
-        # INTERRUPT LOGIC: If user speaks during SPEAKING state, trigger interrupt
+        # VALIDATED BARGE-IN: Check STT transcript to confirm real speech before interrupting
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING:
-            # Check if it looks like real speech (ignore very short fragments if they are not final)
-            if len(text.strip()) > 3 or is_final:
-                logger.info(f"[{session.session_id}] 🛑 Interruption detected via STT ({'FINAL' if is_final else 'Fragment'}): '{text}'")
-                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_activity"})
-                # After interrupt, we continue to process the final transcript in LISTENING state
-                # but we return here if it was a fragment to avoid duplicate processing later
+        if state_mgr.state == State.SPEAKING or session.barge_in_pending:
+            stripped = text.strip().rstrip(".!?,")
+            no_speech_prob = data.get("no_speech_prob")
+
+            # Filter out filler words / noise artifacts that STT commonly produces
+            NOISE_PHRASES = {
+                "mm-hmm", "mmhmm", "mm hmm", "uh-huh", "uh huh", "uhuh",
+                "hmm", "hm", "um", "uh", "ah", "oh", "mhm", "mm",
+                "yeah", "yep", "yup", "ok", "okay", "right",
+                "bye", "bye-bye", "goodbye",
+                "thank you", "thanks",
+            }
+            is_filler = stripped.lower() in NOISE_PHRASES
+
+            # Valid barge-in: meaningful text (>8 chars AND final) with low noise probability, not a filler
+            is_valid = (
+                not is_filler
+                and len(stripped) > 8
+                and is_final
+                and (no_speech_prob is None or no_speech_prob < 0.4)
+            )
+
+            if is_valid:
+                logger.info(f"[{session.session_id}] 🛑 VALID barge-in ({'FINAL' if is_final else 'Fragment'}): '{text}' (nsp={no_speech_prob})")
+                session.barge_in_pending = False
+                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_validated"})
+                # After interrupt, continue to process the final transcript in LISTENING state
+                # but return here if it was a fragment to avoid duplicate processing later
                 if not is_final:
                     return
+            else:
+                logger.info(f"[{session.session_id}] 🚫 Noise barge-in rejected: '{stripped}' (nsp={no_speech_prob})")
+                return  # Drop noise transcript entirely (both partial and final)
 
         # Store partial transcript for early processing
         if not is_final:
@@ -1245,22 +1292,45 @@ class OrchestratorWSHandler:
         
         if signal_type == "SPEECH_END":
             state_mgr = session.state_manager
-            # React immediately if we're listening or if we're in SPEAKING (interruption backup)
-            if state_mgr.state == State.LISTENING or state_mgr.state == State.SPEAKING:
-                if state_mgr.state == State.SPEAKING:
-                    logger.info(f"[{session.session_id}] 🛑 Interruption detected via VAD (SPEECH_END)")
-                    await self._handle_interrupt(session, {"type": "interrupt", "trigger": "vad_end"})
-                
+
+            # DEFERRED BARGE-IN: If SPEAKING, don't hard-interrupt — stay in SPEAKING,
+            # pause browser playback, and wait for STT to validate real speech vs noise.
+            if state_mgr.state == State.SPEAKING:
+                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_END) - deferring, waiting for STT validation")
+                session.barge_in_pending = True
+                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
+
+                # Start a timeout: if no valid STT transcript arrives, recover from noise
+                output_language = self._get_output_language(session.current_language, session)
+
+                async def barge_in_validation_timeout():
+                    try:
+                        await asyncio.sleep(5.0)
+                        if session.barge_in_pending:
+                            session.barge_in_pending = False
+                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after barge-in, resuming last response")
+                            await self._recover_from_noise_interrupt(session)
+                    except asyncio.CancelledError:
+                        pass  # STT transcript arrived and validated/rejected
+
+                # Cancel any existing timeout, start new one
+                if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                    session.transcript_timeout_task.cancel()
+                session.transcript_timeout_task = asyncio.create_task(barge_in_validation_timeout())
+                return  # Stay in SPEAKING — don't fall through to THINKING transition
+
+            # NORMAL PATH: LISTENING → THINKING (user finished speaking, wait for transcript)
+            if state_mgr.state == State.LISTENING:
                 # Mark that we're waiting for final transcript
                 session.pending_transcript = True
-                
+
                 # IMMEDIATE TRANSITION to THINKING
                 side_effects = await state_mgr.transition(State.THINKING, trigger="speech_end", data={})
                 await self._broadcast_state(session, State.THINKING)
-                
+
                 output_language = self._get_output_language(session.current_language, session)
                 await self._execute_side_effects(session, side_effects, output_language)
-                
+
                 # Start timeout task: if transcript doesn't arrive within 5 seconds, transition back to LISTENING
                 async def transcript_timeout():
                     try:
@@ -1269,20 +1339,20 @@ class OrchestratorWSHandler:
                             logger.warning(f"[{session.session_id}] ⏰ Transcript timeout - no transcript received after 5s, transitioning back to LISTENING")
                             session.pending_transcript = False
                             session.partial_transcript = ""
-                            
+
                             # Cancel tasks
                             if session.pipeline_task and not session.pipeline_task.done():
                                 session.pipeline_task.cancel()
                             if session.filler_task and not session.filler_task.done():
                                 session.filler_task.cancel()
-                            
+
                             # Transition back to LISTENING
                             listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="transcript_timeout")
                             await self._execute_side_effects(session, listening_side_effects, output_language)
                             await self._broadcast_state(session, State.LISTENING)
                     except asyncio.CancelledError:
                         pass  # Transcript arrived, timeout cancelled
-                
+
                 # Store timeout task (will be cancelled when transcript arrives)
                 session.transcript_timeout_task = asyncio.create_task(transcript_timeout())
         
@@ -1293,20 +1363,24 @@ class OrchestratorWSHandler:
                 session.is_mission_active = False
                 session.current_goal = None
 
-            # BARGE-IN DETECTION: Trigger immediate interrupt on speech start
+            # BARGE-IN DETECTION: Defer interrupt on speech start (wait for STT validation)
             state_mgr = session.state_manager
             if state_mgr.state == State.SPEAKING:
-                logger.info(f"[{session.session_id}] 🛑 Interruption detected via VAD (SPEECH_START)")
-                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "vad_start"})
+                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_START) - deferring, waiting for STT validation")
+                session.barge_in_pending = True
+                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
             elif state_mgr.state == State.THINKING:
-                # NEW: If we were thinking/waiting for a transcript and user starts speaking again,
-                # return to LISTENING to capture the new turn properly.
-                logger.info(f"[{session.session_id}] 🎤 New speech started during THINKING - returning to LISTENING")
-                if session.transcript_timeout_task and not session.transcript_timeout_task.done():
-                    session.transcript_timeout_task.cancel()
-                
-                await state_mgr.transition(State.LISTENING, trigger="barge_in_during_thinking")
-                await self._broadcast_state(session, State.LISTENING)
+                if session.barge_in_pending:
+                    logger.debug(f"[{session.session_id}] 🎤 Speech start during pending barge-in validation - waiting for STT")
+                else:
+                    # If we were thinking/waiting for a transcript and user starts speaking again,
+                    # return to LISTENING to capture the new turn properly.
+                    logger.info(f"[{session.session_id}] 🎤 New speech started during THINKING - returning to LISTENING")
+                    if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                        session.transcript_timeout_task.cancel()
+
+                    await state_mgr.transition(State.LISTENING, trigger="barge_in_during_thinking")
+                    await self._broadcast_state(session, State.LISTENING)
             
             # Reset pending transcript flag and clear partial transcript
             session.pending_transcript = False
@@ -1509,7 +1583,11 @@ class OrchestratorWSHandler:
 
         # Add user turn to conversation history
         session.history_manager.add_user_turn(text, metadata={"language": language})
-        
+
+        # Save last query for noise recovery (re-trigger after false barge-in)
+        session.last_query_text = text
+        session.last_query_language = language
+
         # NEW: Check for escalation
         if session.history_manager.should_escalate():
             logger.warning(
@@ -2261,10 +2339,25 @@ class OrchestratorWSHandler:
                 session.speaker_muted = True
             logger.info(f"[{session.session_id}] 🎛️ Interaction mode: {interaction_mode}")
 
-        if mode in ["voice", "visual-copilot"]:
+        if msg.get("url"):
+            session.current_url = msg.get("url")
+        elif msg.get("current_url"):
+            session.current_url = msg.get("current_url")
+
+        if mode in ["voice", "visual-copilot", "analyse_only"]:
             prev_mode = session.mode
             session.mode = mode
             logger.info(f"[{session.session_id}] 🛠️ Session mode changed from {prev_mode} to: {mode}")
+
+            # analyse_only: lightweight mode — just TTS + WebSocket, no intro, no mission
+            if mode == "analyse_only":
+                await self._send_json(session.websocket, {
+                    "type": "session_config_ack",
+                    "mode": mode,
+                    "timestamp": time.time()
+                }, session)
+                logger.info(f"[{session.session_id}] 🔍 Analyse-only session ready")
+                return  # Skip all visual-copilot intro logic
             
             await self._send_json(session.websocket, {
                 "type": "session_config_ack",
@@ -2276,44 +2369,48 @@ class OrchestratorWSHandler:
             is_resume = msg.get("session_id") is not None
             pending_goal = msg.get("pending_goal")
             
+            # Check if elements were sent together with the config
+            elements = msg.get("dom_elements") or msg.get("elements") or msg.get("visible_elements") or msg.get("payload")
+            if isinstance(elements, list) and elements:
+                session.dom_context = elements
+                logger.info(f"[{session.session_id}] 👁️ DOM elements found in session_config: {len(elements)} items")
+
             if mode == "visual-copilot" and is_resume and pending_goal:
                 # ── STICKY AGENT RESUME ────────────────────────────────────────
                 # Widget survived a full page navigation and wants to continue its mission.
-                # Skip intro, speak a brief resume message, and re-trigger the mission loop.
                 logger.info(f"[{session.session_id}] 🔁 STICKY AGENT: Resuming mission across navigation: '{pending_goal[:60]}'")
                 
-                # Update URL
-                if msg.get("current_url"):
-                    session.current_url = msg.get("current_url")
+                # Directly restore mission variables so the incoming 'execution_complete' can trigger the next step natively
+                session.current_goal = pending_goal
+                session.is_mission_active = True
                 
-                # Brief resume narration
-                async def sticky_resume():
-                    await asyncio.sleep(1.0)  # Wait for DOM to arrive
-                    if session.is_closed:
-                        return
-                    
-                    # Transition to THINKING for mission processing
-                    if session.state_manager.state in (State.IDLE, State.LISTENING):
-                        await session.state_manager.transition(State.THINKING, trigger="sticky_resume")
-                        await self._broadcast_state(session, State.THINKING)
-                    
-                    # Brief narration
-                    resume_speech = "Page loaded. Continuing where we left off."
-                    await self._stream_tts_to_browser(session, resume_speech, session.current_language)
-                    
-                    # Re-start mission with the saved goal
-                    await self._start_mission(session, pending_goal)
+                if msg.get("resume_step_count") is not None:
+                    try:
+                        session.goal_step_count = int(msg.get("resume_step_count"))
+                    except ValueError:
+                        pass
                 
-                asyncio.create_task(sticky_resume())
+                if msg.get("resume_mission_id"):
+                    session.mission_id = msg.get("resume_mission_id")
+                
+                # Fetch new map hints for the new URL in the background
+                async def bg_fetch_hints():
+                    try:
+                        session.map_hints = await self._fetch_map_hints(session, pending_goal)
+                        if session.map_hints:
+                            logger.info(f"[{session.session_id}] 🗺️ GPS Acquired on Resume: {session.map_hints}")
+                    except Exception as e:
+                        logger.warning(f"[{session.session_id}] Map hints fetch on resume failed: {e}")
+                
+                asyncio.create_task(bg_fetch_hints())
+                
+                # Stream a quick TTS if interactive
+                if session.interaction_mode != "turbo":
+                    asyncio.create_task(self._stream_tts_to_browser(session, "Page loaded.", session.current_language))
             
             elif mode == "visual-copilot" and prev_mode != "visual-copilot" and not is_resume:
                 logger.info(f"[{session.session_id}] 👋 Triggering Visual Co-Pilot Intro | Resume: {is_resume}")
                 
-                # Check if elements were sent together with the config
-                elements = msg.get("elements") or msg.get("visible_elements") or msg.get("payload")
-                if isinstance(elements, list):
-                    session.dom_context = elements
-                    logger.info(f"[{session.session_id}] 👁️ DOM elements found in session_config: {len(elements)} items")
 
                 # Ensure we move through valid states for the intro
                 # Go directly to SPEAKING (skip THINKING/Processing) so user can't interrupt
@@ -2404,10 +2501,14 @@ class OrchestratorWSHandler:
     async def _handle_dom_update(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Update the cached DOM context for visual mode"""
         elements = msg.get("elements") or msg.get("visible_elements") or msg.get("payload")
+        screenshot_b64 = msg.get("screenshot_b64") or None
         
         # Update current URL if provided
         if msg.get("url"):
             session.current_url = msg.get("url")
+        if screenshot_b64:
+            session._screenshot_b64 = screenshot_b64
+            logger.debug(f"[{session.session_id}] 📸 DOM update screenshot stored ({len(screenshot_b64) // 1024}KB)")
             
         # IMMEDIATE MAP MODE CHECK (First load only)
         if self.config.services.rag.enable_map and not getattr(session, 'map_status_checked', False) and session.current_url:
@@ -2430,7 +2531,13 @@ class OrchestratorWSHandler:
                             # 2. Fetch Hints Immediately
                             hints_resp = await client.post(
                                 f"{session.rag_url}/api/v1/get_map_hints",
-                                json={"goal": "sitemap", "client_id": "tara"},
+                                json={
+                                    "goal": "sitemap",
+                                    "client_id": "tara",
+                                    "session_id": session.session_id,
+                                    "current_url": session.current_url,
+                                    "screenshot_b64": getattr(session, "_screenshot_b64", None),
+                                },
                                 timeout=3.0
                             )
                             if hints_resp.status_code == 200 and hints_resp.json().get("hints"):
@@ -2625,6 +2732,133 @@ class OrchestratorWSHandler:
         # Reset timeout timer (keep session alive during navigation)
         session.last_activity = time.time()
 
+    async def _handle_screenshot_response(self, session: OrchestratorSession, msg: Dict[str, Any]):
+        """Handle one-shot screenshot reply from frontend (vision pre-router / tools)."""
+        image_b64 = msg.get("image_b64") or msg.get("screenshot_b64") or None
+        if image_b64:
+            session._screenshot_b64 = image_b64
+            logger.info(f"[{session.session_id}] 📸 Screenshot response stored ({len(image_b64) // 1024}KB)")
+        else:
+            err = msg.get("error", "unknown")
+            logger.info(f"[{session.session_id}] 📸 Screenshot response missing image ({err})")
+
+    async def _handle_analyse_page(self, session: OrchestratorSession, msg: Dict[str, Any]):
+        """
+        🔍 Analyse Page — one-shot page narration feature.
+
+        Delegates to the RAG visual_copilot /api/v1/analyse_page endpoint,
+        which owns all Groq interaction. The orchestrator handles:
+         - TTS connection
+         - Forwarding context to RAG
+         - Streaming narration audio to browser
+         - Sending analyse_complete / analyse_error back to frontend
+
+        analysis_mode: 'dom' | 'vision'
+        """
+        analysis_mode = msg.get("analysis_mode", "dom")
+        screenshot_b64 = msg.get("screenshot_b64")
+        dom_context = msg.get("dom_context") or session.dom_context or []
+        current_url = msg.get("current_url") or session.current_url or ""
+        page_title = msg.get("page_title") or ""
+        user_question = msg.get("user_question")
+
+        logger.info(
+            f"[{session.session_id}] 🔍 Analyse Page: mode={analysis_mode}, "
+            f"url={current_url[:60]}"
+        )
+
+        try:
+            # ── Ensure TTS is ready (needed for non-active sessions) ──────
+            if not session.tts_client.ws or session.tts_client.ws.closed:
+                try:
+                    await session.tts_client.connect(session.session_id)
+                except Exception as tts_err:
+                    logger.warning(
+                        f"[{session.session_id}] TTS connect for analyse failed: {tts_err}"
+                    )
+
+            # Transition the orb to THINKING state while we wait for RAG and LLM narration
+            await session.state_manager.transition(State.THINKING, trigger="analyse_request")
+            await self._broadcast_state(session, State.THINKING)
+
+            # ── Delegate narration to RAG visual_copilot ──────────────────
+            rag_url = getattr(self.config, 'rag_service_url', None)
+            
+            if not rag_url and hasattr(self.config, 'services'):
+                services = self.config.services
+                if hasattr(services, 'get'):
+                    rag_conf = services.get('rag', {})
+                    rag_url = rag_conf.get('url') if isinstance(rag_conf, dict) else getattr(rag_conf, 'url', None)
+                else:
+                    rag_conf = getattr(services, 'rag', None)
+                    rag_url = getattr(rag_conf, 'url', None)
+
+            if not rag_url:
+                import os
+                rag_url = os.environ.get('RAG_SERVICE_URL', 'http://rag:8003')
+
+            payload = {
+                "session_id": session.session_id,
+                "analysis_mode": analysis_mode,
+                "current_url": current_url,
+                "page_title": page_title,
+                "screenshot_b64": screenshot_b64,   # None for DOM mode
+                "dom_context": dom_context,           # None for Vision mode
+                "user_question": user_question,       # None → overview narration
+            }
+
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{rag_url}/api/v1/analyse_page",
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            narration = data.get("narration", "")
+            logger.info(
+                f"[{session.session_id}] 🗣️ Narration received from RAG "
+                f"({analysis_mode}, {len(narration)} chars): \"{narration[:80]}...\""
+            )
+
+            # ── Stream narration through TTS ──────────────────────────────
+            if narration:
+                # Transition the orb to SPEAKING state for the narration
+                await session.state_manager.transition(State.SPEAKING, trigger="analyse_response")
+                await self._broadcast_state(session, State.SPEAKING)
+
+                output_language = self._get_output_language(session.current_language, session)
+                await self._stream_tts_to_browser(session, narration, output_language)
+            else:
+                # Transition back to LISTENING once narration is done (or IDLE if strictly in analyse mode)
+                final_state = State.LISTENING if session.mode != "analyse_only" else State.IDLE
+                listening_side_effects = await session.state_manager.transition(final_state, trigger="analyse_no_narration")
+                await self._execute_side_effects(session, listening_side_effects, self._get_output_language(session.current_language, session))
+                await self._broadcast_state(session, final_state)
+
+            # ── Signal completion to frontend ─────────────────────────────
+            await self._send_json(session.websocket, {
+                "type": "analyse_complete",
+                "analysis_mode": analysis_mode,
+                "narration": narration,
+                "timestamp": time.time()
+            }, session)
+
+        except Exception as e:
+            logger.error(
+                f"[{session.session_id}] ❌ Analyse Page failed: {e}", exc_info=True
+            )
+            try:
+                await self._send_json(session.websocket, {
+                    "type": "analyse_error",
+                    "analysis_mode": analysis_mode,
+                    "error": str(e),
+                    "timestamp": time.time()
+                }, session)
+            except Exception:
+                pass
+
     async def _handle_execution_complete(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle completion signal for visual actions"""
         session.is_executing_action = False
@@ -2645,6 +2879,12 @@ class OrchestratorWSHandler:
         session._active_states = msg.get("active_states")
         session._data_tables = msg.get("data_tables")
         session._page_title = msg.get("title", "")
+
+        # 📸 v6: Store screenshot for Groq Vision in the next plan_next_step call
+        screenshot_b64 = msg.get("screenshot_b64") or None
+        if screenshot_b64:
+            session._screenshot_b64 = screenshot_b64
+            logger.info(f"[{session.session_id}] 📸 Screenshot stored ({len(screenshot_b64) // 1024}KB) for vision")
 
         # Update URL from execution outcome (CRITICAL for sub-goal advancement)
         outcome = msg.get("outcome", {})
@@ -3322,11 +3562,22 @@ class OrchestratorWSHandler:
                         f"[{session.session_id}] ⏰ Playback watchdog fired after {watchdog_delay:.2f}s "
                         f"(turn={playback_turn_id}) — recovering to LISTENING"
                     )
+                    # Recover to LISTENING (or IDLE if strictly in analyse mode)
+                    target_state = State.LISTENING
+                    if hasattr(session, 'mode') and session.mode == "analyse_only":
+                        target_state = State.IDLE
+                        
                     output_language = self._get_output_language(session.current_language, session)
-                    listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="playback_watchdog_timeout")
+
+                    # Clear barge-in state before transitioning (prevents stale noise recovery)
+                    session.barge_in_pending = False
+                    if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                        session.transcript_timeout_task.cancel()
+
+                    listening_side_effects = await state_mgr.transition(target_state, trigger="playback_watchdog_timeout")
                     await self._execute_side_effects(session, listening_side_effects, output_language)
-                    await self._broadcast_state(session, State.LISTENING)
-                    
+                    await self._broadcast_state(session, target_state)
+
                     # Clear playback tracking
                     self._clear_playback_tracking(session)
             except asyncio.CancelledError:
@@ -3407,12 +3658,13 @@ class OrchestratorWSHandler:
         # Transition back to LISTENING
         logger.info(f"[{session.session_id}] 🔄 LISTENING: Response complete, ready for next input")
         output_language = self._get_output_language(session.current_language, session)
-        
+
         # Reset transcript tracking flags when returning to LISTENING
         session.pending_transcript = False
         session.partial_transcript = ""
-        
-        # Cancel transcript timeout task if running
+        session.barge_in_pending = False  # Clear any pending barge-in validation
+
+        # Cancel transcript timeout task if running (includes barge-in validation timeout)
         if session.transcript_timeout_task and not session.transcript_timeout_task.done():
             session.transcript_timeout_task.cancel()
             try:
@@ -3420,9 +3672,14 @@ class OrchestratorWSHandler:
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
         
-        playback_side_effects = await state_mgr.transition(State.LISTENING, trigger="playback_done")
+        # Determine target state after speaking
+        target_state = State.LISTENING
+        if hasattr(session, 'mode') and session.mode == "analyse_only":
+            target_state = State.IDLE
+            
+        playback_side_effects = await state_mgr.transition(target_state, trigger="playback_done")
         await self._execute_side_effects(session, playback_side_effects, output_language)
-        await self._broadcast_state(session, State.LISTENING)
+        await self._broadcast_state(session, target_state)
     
     async def _handle_interrupt(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle user interrupt"""
@@ -3485,7 +3742,56 @@ class OrchestratorWSHandler:
                 await self._execute_side_effects(session, listening_side_effects, output_language)
         
         await self._broadcast_state(session, State.LISTENING)
-    
+
+    async def _recover_from_noise_interrupt(self, session: OrchestratorSession):
+        """Recover from noise barge-in by narrating disturbance and re-triggering last query."""
+        sid = session.session_id
+        state_mgr = session.state_manager
+
+        # Guard: skip if session closed or barge-in was already resolved
+        if session.is_closed:
+            logger.debug(f"[{sid}] Noise recovery skipped - session closed")
+            return
+
+        # Cancel any pending tasks from the interrupted state
+        for task in [session.pipeline_task, session.tts_task, session.filler_task]:
+            if task and not task.done():
+                task.cancel()
+        if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+            session.audio_playback_server_timer.cancel()
+        self._clear_playback_tracking(session)
+
+        # Transition to LISTENING first
+        if state_mgr.state not in (State.LISTENING, State.IDLE):
+            await state_mgr.transition(State.LISTENING, trigger="noise_recovery")
+        await self._broadcast_state(session, State.LISTENING)
+
+        if session.last_query_text:
+            output_lang = self._get_output_language(session.current_language, session)
+            disturbance_text = "Oh, there was a little disturbance. Let me continue."
+
+            # Speak disturbance narration
+            speaking_fx = await state_mgr.transition(State.SPEAKING, trigger="noise_narration")
+            await self._execute_side_effects(session, speaking_fx, output_lang)
+            await self._broadcast_state(session, State.SPEAKING)
+            await self._stream_tts_to_browser(session, disturbance_text, output_lang)
+
+            # Wait for playback to finish (same pattern as _handle_end_session)
+            wait_cycles = 0
+            while state_mgr.state == State.SPEAKING and not session.is_closed and wait_cycles < 100:
+                await asyncio.sleep(0.1)
+                wait_cycles += 1
+
+            # Back to LISTENING, re-trigger original query
+            if state_mgr.state == State.SPEAKING:
+                await state_mgr.transition(State.LISTENING, trigger="noise_narration_done")
+            await self._broadcast_state(session, State.LISTENING)
+
+            logger.info(f"[{sid}] 🔄 Re-triggering last query after noise: '{session.last_query_text[:50]}...'")
+            await self._process_user_input(session, session.last_query_text, session.last_query_language)
+        else:
+            logger.info(f"[{sid}] 🔄 Noise recovery but no previous query to resume - staying in LISTENING")
+
     async def _handle_start_session(self, session: OrchestratorSession, msg: Dict[str, Any] = None):
         """Handle session start with mode configuration and metadata"""
         if not msg:
@@ -3588,9 +3894,14 @@ class OrchestratorWSHandler:
             return
 
         text = msg.get("text", "").strip()
+        screenshot_b64 = msg.get("screenshot_b64") or None
         if not text:
             logger.warning(f"[{session.session_id}] Empty text input in mock mode")
             return
+
+        if screenshot_b64:
+            session._screenshot_b64 = screenshot_b64
+            logger.debug(f"[{session.session_id}] 📸 Text input screenshot stored ({len(screenshot_b64) // 1024}KB)")
 
         logger.info(f"[{session.session_id}] 📝 Mock STT input: '{text}'")
         session.last_activity = time.time()
@@ -4261,13 +4572,36 @@ class OrchestratorWSHandler:
         """Fetch navigation hints from Qdrant (called ONCE at mission start)."""
         base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
         current_url = session.current_url or ""
+        screenshot_b64 = getattr(session, "_screenshot_b64", None)
+
+        # If screenshot is missing, request one-shot capture from frontend and wait briefly.
+        if not screenshot_b64 and session.websocket:
+            try:
+                await self._send_json(session.websocket, {
+                    "type": "request_screenshot",
+                    "reason": "map_hints_pre_router",
+                    "timestamp": time.time(),
+                }, session)
+                for _ in range(15):  # wait up to ~1500ms
+                    await asyncio.sleep(0.1)
+                    screenshot_b64 = getattr(session, "_screenshot_b64", None)
+                    if screenshot_b64:
+                        logger.info(f"[{session.session_id}] 📸 Map hints screenshot received ({len(screenshot_b64) // 1024}KB)")
+                        break
+                if not screenshot_b64:
+                    logger.info(f"[{session.session_id}] 📸 Map hints screenshot not available; continuing without vision")
+            except Exception as e:
+                logger.debug(f"[{session.session_id}] request_screenshot failed: {e}")
+
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(
                 f"{base_rag_url}/api/v1/get_map_hints",
                 json={
                     "goal": goal,
                     "client_id": session.tenant_id or "tara",
-                    "current_url": current_url
+                    "session_id": session.session_id,
+                    "current_url": current_url,
+                    "screenshot_b64": screenshot_b64,
                 }
             )
             if response.status_code == 200:
@@ -4311,6 +4645,19 @@ class OrchestratorWSHandler:
 
         # Get latest DOM
         dom = session.dom_context or []
+        
+        # Robustness: If DOM is empty (first step race), wait briefly for sensor/full scan
+        if not dom and session.goal_step_count == 0:
+            logger.info(f"[{session.session_id}] ⏳ Initial DOM empty, waiting 2s for sensor check...")
+            for _wait_i in range(8):
+                await asyncio.sleep(0.25)
+                dom = session.dom_context or []
+                if dom:
+                    logger.info(f"[{session.session_id}] ✅ DOM arrived after {(_wait_i + 1) * 0.25:.1f}s ({len(dom)} elements)")
+                    break
+        
+        if not dom:
+            logger.warning(f"[{session.session_id}] ⚠️ DOM is still empty. Planning might fail.")
 
         # Stagnation Detection
         dom_str = json.dumps(dom, sort_keys=True)
@@ -4425,15 +4772,23 @@ class OrchestratorWSHandler:
             # Narrate the wait
             wait_speech = plan.get("speech", "Just a moment while this loads...")
             await self._stream_tts_to_browser(session, wait_speech, session.current_language)
-            
+
             # Wait for TTS to finish before proceeding
             if session.tts_task and not session.tts_task.done():
                 try:
                     await session.tts_task
                 except asyncio.CancelledError:
                     pass
-            
-            await asyncio.sleep(1.0)
+
+            # Poll for DOM to arrive from frontend (up to 5s)
+            for _wait_i in range(10):
+                await asyncio.sleep(0.5)
+                if session.dom_context:
+                    logger.info(f"[{session.session_id}] ✅ DOM arrived after {(_wait_i + 1) * 0.5:.1f}s ({len(session.dom_context)} elements)")
+                    break
+            else:
+                logger.warning(f"[{session.session_id}] ⚠️ DOM still empty after 5s wait")
+
             await self._execute_next_step(session)
 
         else:
@@ -4663,6 +5018,9 @@ class OrchestratorWSHandler:
         data_tables = getattr(session, '_data_tables', None)
         page_title = getattr(session, '_page_title', '')
 
+        # 📸 v6: Retrieve screenshot stored from the previous execution_complete message
+        screenshot_b64 = getattr(session, '_screenshot_b64', None)
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 f"{base_rag_url}/api/v1/plan_next_step",
@@ -4686,6 +5044,8 @@ class OrchestratorWSHandler:
                     "active_states": active_states,
                     "data_tables": data_tables,
                     "page_title": page_title,
+                    # v6: Vision — screenshot from widget (for Groq Vision in last mile)
+                    "screenshot_b64": screenshot_b64,
                 }
             )
 

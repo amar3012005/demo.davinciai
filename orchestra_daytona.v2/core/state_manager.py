@@ -95,7 +95,7 @@ class StateManager:
 
         # Valid state transitions
         self.valid_transitions = {
-            State.IDLE: [State.LISTENING, State.SPEAKING],
+            State.IDLE: [State.LISTENING, State.SPEAKING, State.THINKING],
             State.LISTENING: [State.THINKING, State.INTERRUPT, State.IDLE, State.SPEAKING],
             State.THINKING: [State.SPEAKING, State.IDLE, State.LISTENING],
             State.SPEAKING: [State.LISTENING, State.INTERRUPT, State.IDLE],

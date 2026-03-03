@@ -1,0 +1,1 @@
+docker compose -f docker-compose.local-eu.yml up -d --build

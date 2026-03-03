@@ -97,7 +97,6 @@ class GroqWhisperSession:
         
         # Silence detection
         self.consecutive_silent_chunks = 0
-        self.SILENCE_CHUNKS_THRESHOLD = 3  # ~300ms * 3 = 900ms silence
     
     async def start(self) -> bool:
         """Start session and initialize Groq client"""
@@ -138,6 +137,8 @@ class GroqWhisperSession:
         self.chunks_received += 1
         self.last_audio_time = time.time()
         
+        now = time.time()
+
         # Local VAD gate - check energy level
         try:
             energy = audioop.rms(audio_chunk, 2)  # 2 bytes per sample for PCM16
@@ -148,7 +149,7 @@ class GroqWhisperSession:
         
         if is_speech:
             self.consecutive_silent_chunks = 0
-            self.last_speech_time = time.time()
+            self.last_speech_time = now
             self.silence_start_time = None
             
             # Emit SPEECH_START if not already active
@@ -160,7 +161,7 @@ class GroqWhisperSession:
             self.consecutive_silent_chunks += 1
             
             if self.silence_start_time is None:
-                self.silence_start_time = time.time()
+                self.silence_start_time = now
         
         # Add audio to buffer (always, for both modes)
         self.audio_buffer.extend(audio_chunk)
@@ -181,13 +182,21 @@ class GroqWhisperSession:
                 self.overlap_buffer = self.audio_buffer[chunk_end - self.config.overlap_bytes:chunk_end]
                 self.audio_buffer = self.audio_buffer[chunk_end:]
                 
-                # Process chunk if speech is active (or was recently active)
-                if self.speech_active or self.consecutive_silent_chunks < self.SILENCE_CHUNKS_THRESHOLD:
+                # Process chunk if speech is active (or we are within the configurable
+                # post-speech silence window before considering the utterance complete).
+                silence_ms = self._current_silence_ms()
+                if self.speech_active or silence_ms < self.config.min_silence_duration_ms:
                     asyncio.create_task(self._process_chunk(chunk_to_process))
-        
+
         # Check for speech end (both modes)
-        if self.speech_active and self.consecutive_silent_chunks >= self.SILENCE_CHUNKS_THRESHOLD:
+        if self.speech_active and self._current_silence_ms() >= self.config.min_silence_duration_ms:
             await self._handle_speech_end()
+
+    def _current_silence_ms(self) -> float:
+        """Return elapsed silence duration in milliseconds."""
+        if self.silence_start_time is None:
+            return 0.0
+        return (time.time() - self.silence_start_time) * 1000.0
     
     async def _process_chunk(self, audio_bytes: bytes):
         """
@@ -215,7 +224,7 @@ class GroqWhisperSession:
             
             if result and not result.is_empty:
                 if result.is_hallucination or result.is_low_quality:
-                    logger.info(f"🚫 [{self.session_id}] Filtered micro-chunk hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob:.3f})")
+                    logger.info(f"🚫 [{self.session_id}] Filtered micro-chunk hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
                     return
                 
                 text = result.text
@@ -320,7 +329,7 @@ class GroqWhisperSession:
             
             if result and not result.is_empty:
                 if result.is_hallucination or result.is_low_quality:
-                    logger.info(f"🚫 [{self.session_id}] Filtered full hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob:.3f})")
+                    logger.info(f"🚫 [{self.session_id}] Filtered full hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
                 else:
                     final_text = result.text.strip()
                     if final_text:

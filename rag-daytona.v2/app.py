@@ -151,11 +151,18 @@ class PlanStepRequest(BaseModel):
     active_states: Optional[Dict[str, Any]] = Field(None, description="Active nav/tab states from widget")
     data_tables: Optional[List[Dict[str, Any]]] = Field(None, description="Extracted table data from widget")
     page_title: Optional[str] = Field("", description="Document title from widget")
+    # v6: Vision — base64-encoded JPEG screenshot of the current viewport (optional)
+    screenshot_b64: Optional[str] = Field(None, description="Base64 JPEG screenshot of current page (for Groq Vision in last mile)")
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
     client_id: Optional[str] = Field("tara", description="Client/Tenant ID")
     current_url: Optional[str] = Field("", description="Current page URL for domain filtering")
+    session_id: Optional[str] = Field("", description="Session ID for screenshot cache fallback")
+    screenshot_b64: Optional[str] = Field(
+        None,
+        description="Optional base64 JPEG screenshot for vision pre-routing",
+    )
 
 class FastSenseRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
@@ -618,6 +625,52 @@ async def visual_orchestrate(request: VisualOrchestrateRequest):
 # ULTIMATE TARA ENDPOINTS (Primary Pipeline)
 # ═══════════════════════════════════════════════════════════
 
+# ── Analyse Page ─────────────────────────────────────────────────────────────
+
+class AnalysePageRequest(BaseModel):
+    session_id: str = Field(..., description="Orchestra session ID")
+    analysis_mode: str = Field("dom", description="'dom' or 'vision'")
+    current_url: str = Field("", description="Current page URL")
+    page_title: str = Field("", description="Page title")
+    screenshot_b64: Optional[str] = Field(None, description="Base64 JPEG for vision mode")
+    dom_context: Optional[List[Dict[str, Any]]] = Field(None, description="DOM elements for dom mode")
+    user_question: Optional[str] = Field(None, description="User's specific question about the page (None = overview narration)")
+
+
+@app.post("/api/v1/analyse_page")
+async def analyse_page_endpoint(request: AnalysePageRequest):
+    """
+    🔍 Analyse Page — one-shot page narration via Visual Co-pilot.
+
+    Accepts DOM elements or a screenshot, returns a natural-language narration
+    of what TARA sees on the page. Called by the Orchestrator when the user
+    clicks DOM or Vision in the Analyse strip.
+    """
+    logger.info(
+        f"🔍 Analyse Page | Session: {request.session_id} | "
+        f"mode={request.analysis_mode} | url={request.current_url[:60]}"
+    )
+    try:
+        from visual_copilot.api.analyse_page import analyse_page
+        narration = await analyse_page(
+            analysis_mode=request.analysis_mode,
+            current_url=request.current_url,
+            page_title=request.page_title,
+            session_id=request.session_id,
+            screenshot_b64=request.screenshot_b64,
+            dom_context=request.dom_context,
+            user_question=request.user_question,
+        )
+        return {
+            "success": True,
+            "narration": narration,
+            "analysis_mode": request.analysis_mode,
+            "session_id": request.session_id,
+        }
+    except Exception as e:
+        logger.error(f"❌ Analyse Page failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/v1/plan_next_step")
 async def plan_next_step(request: PlanStepRequest):
     """
@@ -633,6 +686,12 @@ async def plan_next_step(request: PlanStepRequest):
     Falls back to legacy if Ultimate TARA modules unavailable.
     """
     logger.info(f"🚀 Ultimate TARA Plan | Session: {request.session_id} | Goal: '{request.goal}' | Step: {request.step_number}")
+    if request.screenshot_b64:
+        cache = getattr(app.state, "latest_screenshots", None)
+        if cache is None:
+            cache = {}
+            app.state.latest_screenshots = cache
+        cache[request.session_id] = request.screenshot_b64
     
     # Check if Ultimate TARA modules are available
     if not all([
@@ -667,17 +726,24 @@ async def plan_next_step(request: PlanStepRequest):
             goal=request.goal,
             current_url=request.current_url,
             step_number=request.step_number,
-            action_history=request.action_history or []
+            action_history=request.action_history or [],
+            screenshot_b64=request.screenshot_b64 or "",
         )
-        
-        if result and result.get("success"):
-            logger.info(f"✅ Ultimate TARA success: {result.get('action', {}).get('type')} on {result.get('action', {}).get('target_id', 'none')}")
+
+        if isinstance(result, dict):
+            logger.info(
+                f"✅ Ultimate TARA { 'success' if result.get('success') else 'failure' }: "
+                f"{result.get('action', {}).get('type')} on {result.get('action', {}).get('target_id', 'none')}"
+            )
             return result
-        
+
         # ═══════════════════════════════════════════════════════════
         # Fallback to legacy — but INJECT hive context so the LLM
         # doesn't hallucinate navigation steps
         # ═══════════════════════════════════════════════════════════
+        if isinstance(result, dict) and result.get("no_legacy_fallback"):
+            logger.info("⏩ Ultimate TARA returned no_legacy_fallback, skipping legacy")
+            return result
         logger.warning("⚠️ Ultimate TARA returned no result, falling back to legacy with hive context")
         try:
             from tara_models import TacticalSchema, ActionIntent
@@ -799,24 +865,23 @@ async def fast_sense(request: FastSenseRequest):
 @app.post("/api/v1/get_map_hints")
 async def get_map_hints(request: MapHintsRequest):
     """
-    Fetch GPS navigation hints from Qdrant for a given goal.
-    Called ONCE at mission start, then cached by orchestrator.
+    Fetch modular Hive hints for a given goal.
+    Called once at mission start by the widget.
     """
-    if visual_orchestrator is None:
-        return {"hints": ""}
-    
-    logger.info(f"🗺️ Map Hints Request | Goal: '{request.goal}' | Client: {request.client_id}")
-    
-    try:
-        hints = await visual_orchestrator.get_navigation_hints(
-            goal=request.goal,
-            client_id=request.client_id,
-            current_url=request.current_url or ""
-        )
-        return {"hints": hints}
-    except Exception as e:
-        logger.warning(f"Map hints fetch failed: {e}")
-        return {"hints": ""}
+    from visual_copilot.api.map_hints import build_map_hints
+    screenshot_b64 = request.screenshot_b64
+    if not screenshot_b64 and request.session_id:
+        cache = getattr(app.state, "latest_screenshots", {}) or {}
+        screenshot_b64 = cache.get(request.session_id)
+
+    return await build_map_hints(
+        goal=request.goal,
+        client_id=request.client_id or "tara",
+        current_url=request.current_url or "",
+        screenshot_b64=screenshot_b64,
+        mind_reader=app.state.mind_reader,
+        hive_interface=app.state.hive_interface,
+    )
 
 @app.post("/api/v1/generate_exit")
 async def generate_exit(request_data: DynamicExitRequest):
@@ -837,18 +902,13 @@ async def generate_exit(request_data: DynamicExitRequest):
 @app.post("/api/v1/check_domain_status")
 async def check_domain_status(request: CheckDomainRequest):
     """Check if domain is Mapped or Explorer mode."""
-    if visual_orchestrator is None:
-        return {"mode": "explorer", "reason": "Visual Orchestrator not ready"}
-    
-    try:
-        status = await visual_orchestrator.check_hivemind_status(
-            current_url=request.url,
-            client_id=request.client_id
-        )
-        return status
-    except Exception as e:
-        logger.error(f"Domain status check failed: {e}")
-        return {"mode": "explorer", "reason": str(e)}
+    from visual_copilot.api.domain_status import check_domain_status_modular
+
+    return await check_domain_status_modular(
+        url=request.url,
+        client_id=request.client_id,
+        visual_orchestrator=visual_orchestrator,
+    )
 
 @app.post("/api/v1/embed", response_model=EmbedResponse)
 async def embed_text(request_data: EmbedRequest):

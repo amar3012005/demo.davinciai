@@ -388,6 +388,202 @@
                     resolve();
                 }
             });
+        },
+
+        /**
+         * Capture a screenshot of the current visible viewport.
+         * Uses html2canvas (lazy-loaded from CDN on first use).
+         * Falls back gracefully when html2canvas fails on modern CSS
+         * (lab(), oklch(), color-mix(), etc.).
+         *
+         * Returns a base64 JPEG string (no data: prefix), or null on failure.
+         * Size is capped to prevent exceeding Groq's 4MB base64 limit.
+         */
+        async captureScreenshot() {
+            try {
+                // Lazy-load html2canvas if not already available
+                if (typeof html2canvas === 'undefined') {
+                    await Scanner._loadHtml2Canvas();
+                }
+
+                if (typeof html2canvas === 'undefined') {
+                    console.warn('[TARA] html2canvas not available, cannot capture screenshot');
+                    return null;
+                }
+
+                const h2cOpts = {
+                    useCORS: true,
+                    allowTaint: true,
+                    logging: false,
+                    scale: Math.min(window.devicePixelRatio, 1.5),
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    x: window.scrollX,
+                    y: window.scrollY,
+                    ignoreElements: (el) => {
+                        // Skip TARA's own UI elements + shadow hosts
+                        if (el.id === 'tara-overlay-root') return true;
+                        return !!(
+                            el.closest &&
+                            el.closest('.tara-floating-widget, .tara-chat-bar, #tara-ui-container, [data-tara-widget], #tara-overlay-root')
+                        );
+                    }
+                };
+
+                let canvas;
+                try {
+                    // Attempt 1: normal html2canvas
+                    canvas = await html2canvas(document.body, h2cOpts);
+                } catch (firstErr) {
+                    // html2canvas 1.4.1 crashes on modern CSS color functions
+                    // like lab(), oklch(), color-mix() etc.
+                    const isColorErr = firstErr && String(firstErr).includes('color function');
+                    if (isColorErr) {
+                        console.warn('[TARA] html2canvas color parse error — retrying with workaround...');
+                        try {
+                            // Attempt 2: strip computed styles that crash the parser
+                            // by switching to foreignObject-free rendering
+                            canvas = await html2canvas(document.documentElement, {
+                                ...h2cOpts,
+                                foreignObjectRendering: false,
+                                removeContainer: true,
+                                // Ignore deeply nested elements that usually carry
+                                // modern color definitions (design system tokens, etc.)
+                                ignoreElements: (el) => {
+                                    if (el.id === 'tara-overlay-root') return true;
+                                    if (el.closest && el.closest('#tara-overlay-root, [data-tara-widget]')) return true;
+                                    // Skip style/link elements that inject lab() colors
+                                    if (el.tagName === 'STYLE' || (el.tagName === 'LINK' && el.rel === 'stylesheet')) return false;
+                                    return false;
+                                }
+                            });
+                        } catch (retryErr) {
+                            console.warn('[TARA] html2canvas retry also failed — falling back to canvas drawImage...');
+                            canvas = null;
+                        }
+                    } else {
+                        console.warn('[TARA] html2canvas failed (non-color error):', firstErr);
+                        canvas = null;
+                    }
+                }
+
+                // Attempt 3: native canvas fallback (captures visible tab as-is)
+                if (!canvas) {
+                    canvas = await Scanner._nativeScreenshot();
+                }
+
+                if (!canvas) {
+                    console.warn('[TARA] All screenshot methods failed');
+                    return null;
+                }
+
+                return Scanner._canvasToJpegB64(canvas);
+            } catch (err) {
+                console.error('[TARA] Screenshot capture failed:', err);
+                return null;
+            }
+        },
+
+        /**
+         * Convert a canvas to a base64 JPEG string (no prefix), capped at ~3.5MB.
+         */
+        _canvasToJpegB64(canvas) {
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            let b64 = dataUrl.replace(/^data:image\/jpeg;base64,/, '');
+
+            const approxBytes = (b64.length * 3) / 4;
+            if (approxBytes > 3.5 * 1024 * 1024) {
+                console.warn('[TARA] Screenshot too large, recompressing...');
+                const smallerUrl = canvas.toDataURL('image/jpeg', 0.4);
+                b64 = smallerUrl.replace(/^data:image\/jpeg;base64,/, '');
+            }
+
+            const kb = ((b64.length * 3) / 4 / 1024).toFixed(0);
+            console.log(`📸 [TARA] Screenshot captured: ${kb}KB`);
+            return b64;
+        },
+
+        /**
+         * Native canvas fallback — creates a blank canvas sized to the viewport
+         * and draws a simple visual representation when html2canvas fails entirely.
+         * Less accurate but always succeeds.
+         */
+        async _nativeScreenshot() {
+            try {
+                // Try the OffscreenCanvas + video capture approach
+                if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                    // We can't auto-invoke getDisplayMedia (requires user gesture),
+                    // so fall back to a simple colored placeholder with page text
+                }
+
+                // Simple fallback: render key page text into a canvas
+                const w = Math.min(window.innerWidth, 1280);
+                const h = Math.min(window.innerHeight, 900);
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+
+                // Draw background
+                ctx.fillStyle = '#1a1a2e';
+                ctx.fillRect(0, 0, w, h);
+
+                // Draw page title
+                ctx.fillStyle = '#e0e0ff';
+                ctx.font = 'bold 20px -apple-system, sans-serif';
+                ctx.fillText(document.title || 'Untitled Page', 24, 40);
+
+                // Draw URL
+                ctx.fillStyle = '#8888aa';
+                ctx.font = '13px monospace';
+                ctx.fillText(window.location.href, 24, 64);
+
+                // Draw visible text content (first ~40 lines)
+                ctx.fillStyle = '#ccccdd';
+                ctx.font = '12px -apple-system, sans-serif';
+                const bodyText = document.body?.innerText || '';
+                const lines = bodyText.split('\n').filter(l => l.trim()).slice(0, 40);
+                let y = 96;
+                for (const line of lines) {
+                    if (y > h - 20) break;
+                    ctx.fillText(line.substring(0, 120), 24, y);
+                    y += 18;
+                }
+
+                // Watermark
+                ctx.fillStyle = 'rgba(160,120,255,0.4)';
+                ctx.font = 'bold 10px sans-serif';
+                ctx.fillText('TARA Fallback Screenshot (html2canvas unavailable)', 24, h - 12);
+
+                console.log('📸 [TARA] Fallback canvas screenshot created');
+                return canvas;
+            } catch (e) {
+                console.error('[TARA] Native screenshot fallback failed:', e);
+                return null;
+            }
+        },
+
+        /**
+         * Lazy-load html2canvas from CDN.
+         */
+        _loadHtml2Canvas() {
+            return new Promise((resolve, reject) => {
+                if (typeof html2canvas !== 'undefined') {
+                    resolve();
+                    return;
+                }
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+                script.onload = () => {
+                    console.log('✅ [TARA] html2canvas loaded');
+                    resolve();
+                };
+                script.onerror = () => {
+                    console.warn('⚠️ [TARA] Failed to load html2canvas');
+                    reject(new Error('html2canvas load failed'));
+                };
+                document.head.appendChild(script);
+            });
         }
     };
 

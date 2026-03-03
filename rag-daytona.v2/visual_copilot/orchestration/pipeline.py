@@ -22,6 +22,7 @@ async def run_pipeline(
     action_history: list[str],
     previous_goal: Optional[str] = None,
     mission_id: Optional[str] = None,
+    screenshot_b64: str = "",
 ):
     trace_id = str(uuid.uuid4())
     ctx: PlanningContext = build_context(
@@ -82,6 +83,7 @@ async def run_pipeline(
             action_history=ctx.action_history,
             previous_goal=ctx.previous_goal,
             mission_id=ctx.mission_id,
+            screenshot_b64=screenshot_b64,
         )
         emit_event(
             logger,

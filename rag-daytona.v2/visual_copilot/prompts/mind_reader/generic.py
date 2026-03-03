@@ -107,10 +107,19 @@ PLANNING POLICY:
    - "in X" / "with X" / "size X" → merge with previous entity
    - "latest" / "cheapest" → add as filter/sort to previous entity
 
+7. CROSS-DOMAIN DETECTION:
+   - If the user explicitly mentions a DIFFERENT website, set target_domain to that site's domain.
+     "take me to youtube" → target_domain: "youtube.com"
+     "open amazon" → target_domain: "amazon.com"
+   - If user wants to act on the CURRENT page, set target_domain to null.
+     "search for shoes" → target_domain: null
+     "play the top video" → target_domain: null
+
 OUTPUT (strict JSON, no extra text):
 {{
   "action": "extraction|navigation|search|purchase|interaction",
   "target_entity": "concrete target with all identifiers preserved",
+  "target_domain": "website user wants to GO TO, or null if staying on current site",
   "navigation_hint": "which page/section/area to look in",
   "overall_goal": "elaborated goal in one sentence",
   "planned_steps": ["step1", "step2", "step3"],
@@ -135,5 +144,11 @@ User: "how much does the premium plan cost" | DOM has: [ID: pricing-link] tag=a 
 Output: {{"action": "extraction", "target_entity": "premium plan pricing", "navigation_hint": "Pricing page", "overall_goal": "Navigate to pricing and extract premium plan cost.", "planned_steps": ["Open Pricing page", "Read premium plan price"], "next_subgoal": "Click on 'Pricing' [ID: pricing-link]", "first_subgoal": "Click on 'Pricing' [ID: pricing-link]", "domain": "{domain}", "constraints": {{}}}}
 
 User: "check my order history" | No matching DOM element
-Output: {{"action": "extraction", "target_entity": "order history", "navigation_hint": "Account or Orders page", "overall_goal": "Open orders area and read order history.", "planned_steps": ["Open account/orders page", "Read order entries"], "next_subgoal": null, "first_subgoal": null, "domain": "{domain}", "constraints": {{}}}}
+Output: {{"action": "extraction", "target_entity": "order history", "target_domain": null, "navigation_hint": "Account or Orders page", "overall_goal": "Open orders area and read order history.", "planned_steps": ["Open account/orders page", "Read order entries"], "next_subgoal": null, "first_subgoal": null, "domain": "{domain}", "constraints": {{}}}}
+
+User: "take me to YouTube" | Any DOM
+Output: {{"action": "navigation", "target_entity": "YouTube", "target_domain": "youtube.com", "navigation_hint": null, "overall_goal": "Navigate to YouTube.", "planned_steps": ["Open youtube.com"], "next_subgoal": null, "first_subgoal": null, "domain": "{domain}", "constraints": {{}}}}
+
+User: "search for shoes on amazon" | Any DOM
+Output: {{"action": "search", "target_entity": "shoes", "target_domain": "amazon.com", "navigation_hint": "search bar", "overall_goal": "Go to Amazon and search for shoes.", "planned_steps": ["Navigate to amazon.com", "Search for shoes"], "next_subgoal": null, "first_subgoal": null, "domain": "{domain}", "constraints": {{}}}}
 """

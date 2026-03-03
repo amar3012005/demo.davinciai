@@ -564,6 +564,9 @@ class MissionState:
     last_url: Optional[str] = None
     last_dom_signature: Optional[str] = None
     pending_verify_attempts: int = 0
+    main_goal: Optional[str] = None
+    phase: str = "strategy"
+    last_mile_started_at: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary for Redis storage."""
@@ -583,7 +586,10 @@ class MissionState:
             "pending_action": self.pending_action,
             "last_url": self.last_url,
             "last_dom_signature": self.last_dom_signature,
-            "pending_verify_attempts": self.pending_verify_attempts
+            "pending_verify_attempts": self.pending_verify_attempts,
+            "main_goal": self.main_goal,
+            "phase": self.phase,
+            "last_mile_started_at": self.last_mile_started_at
         }
 
     @classmethod
@@ -611,7 +617,10 @@ class MissionState:
             pending_action=data.get("pending_action"),
             last_url=data.get("last_url"),
             last_dom_signature=data.get("last_dom_signature"),
-            pending_verify_attempts=data.get("pending_verify_attempts", 0)
+            pending_verify_attempts=data.get("pending_verify_attempts", 0),
+            main_goal=data.get("main_goal"),
+            phase=data.get("phase", "strategy"),
+            last_mile_started_at=data.get("last_mile_started_at")
         )
 
     def to_json(self) -> str:

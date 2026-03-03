@@ -1,5 +1,6 @@
 """Extracted plan_next_step flow from legacy_core for modular orchestration."""
 
+import asyncio
 import logging
 import time
 from typing import Any, Dict, Optional
@@ -18,6 +19,8 @@ from visual_copilot.constants import (
     ENABLE_KEYWORD_DIRECT_V3,
     ENABLE_SUBGOAL_HINT_QUERY,
     ENABLE_VERIFIED_ADVANCE,
+    ENABLE_PRE_ROUTER_VISION,
+    PRE_ROUTER_VISION_MIN_CONF,
     _TYPE_TAGS,
     _is_v3_feature_enabled,
     _register_v3_pending_drop,
@@ -104,6 +107,8 @@ from visual_copilot.orchestration.stages.hive_stage import (
     compute_location_guard_candidate,
 )
 from visual_copilot.orchestration.stages.cross_domain_stage import run_cross_domain_gate
+from visual_copilot.orchestration.stages.pre_router_stage import run_pre_router_gate
+from visual_copilot.orchestration.stages.page_relevance_gate import run_page_relevance_gate
 from visual_copilot.orchestration.stages.terminal_stage import handle_terminal_mission_state
 from visual_copilot.orchestration.stages.router_stage import build_router_context
 from visual_copilot.orchestration.stages.mission_stage import prepare_mission_and_query
@@ -119,8 +124,9 @@ async def ultimate_plan_next_step_impl(
     current_url: str,
     step_number: int = 0,
     action_history: Optional[list] = None,
-    previous_goal: Optional[str] = None,  # 🔗 Previous mission goal for follow-up context resolution
+    previous_goal: Optional[str] = None,
     mission_id: Optional[str] = None,
+    screenshot_b64: str = "",
 ) -> Dict[str, Any]:
     """
     Ultimate TARA pipeline for planning next step.
@@ -172,6 +178,32 @@ async def ultimate_plan_next_step_impl(
             effective_step=effective_step,
         )
 
+        pre_router_decision = None
+        skip_hive_prefetch = False
+        if ENABLE_PRE_ROUTER_VISION:
+            pre_router_response, pre_router_decision = await run_pre_router_gate(
+                goal=goal,
+                current_url=current_url,
+                screenshot_b64=screenshot_b64 or "",
+                session_id=session_id,
+                logger=cross_domain_stage_logger,
+            )
+            if pre_router_response:
+                return pre_router_response
+            if (
+                isinstance(pre_router_decision, dict)
+                and pre_router_decision.get("route") == "current_domain_last_mile"
+                and float(pre_router_decision.get("confidence") or 0.0) >= PRE_ROUTER_VISION_MIN_CONF
+            ):
+                skip_hive_prefetch = True
+                logger.info(
+                    f"PRE_ROUTER_VISION_GATE: skipping Hive prefetch "
+                    f"(route=current_domain_last_mile conf={float(pre_router_decision.get('confidence') or 0.0):.2f})"
+                )
+
+        nodes_task = asyncio.create_task(live_graph.get_visible_nodes(session_id))
+        logger.info("👁️ Step 0: Live Graph prefetch started...")
+
         schema, schema_cached = resolve_schema_cached(
             app_state=app.state,
             session_id=session_id,
@@ -181,6 +213,14 @@ async def ultimate_plan_next_step_impl(
         if schema_cached:
             logger.info(f"🧠 Step 1: CACHED → {schema.action.value} on '{schema.target_entity}' (0 LLM calls)")
         else:
+            prefetched_nodes = None
+            try:
+                prefetched_nodes = await nodes_task
+                nodes = prefetched_nodes
+                logger.info(f"   ✅ DOM nodes (prefetch): {len(nodes)}")
+            except Exception as prefetch_err:
+                logger.warning(f"DOM prefetch failed before intent parse, falling back: {prefetch_err}")
+
             schema = await parse_schema(
                 mind_reader=mind_reader,
                 live_graph=live_graph,
@@ -188,9 +228,17 @@ async def ultimate_plan_next_step_impl(
                 goal=goal,
                 current_url=current_url,
                 previous_goal=previous_goal,
+                prefetched_nodes=prefetched_nodes,
                 logger=logger,
             )
             cache_schema(app_state=app.state, session_id=session_id, goal=goal, schema=schema)
+
+        # Stage 0d: Page Relevance Gate — short-circuit cross-domain before Hive
+        page_relevance_response, preserved_target_domain = run_page_relevance_gate(
+            schema=schema, current_url=current_url, goal=goal, logger=logger,
+        )
+        if page_relevance_response:
+            return page_relevance_response
 
         schema = normalize_schema_domain(schema=schema, current_url=current_url, logger=logger)
 
@@ -227,6 +275,7 @@ async def ultimate_plan_next_step_impl(
             schema=schema,
             session_id=session_id,
             effective_step=effective_step,
+            skip_hive_prefetch=skip_hive_prefetch,
         )
         if effective_step == 0:
             logger.info(f"   ✅ Strategy: {bool(hive_response.strategy)}, Hints: {len(hive_response.visual_hints)}")
@@ -264,17 +313,22 @@ async def ultimate_plan_next_step_impl(
         # Step 4: Get DOM from Live Graph (Moved up for zero-shot!)
         # (Nodes are now fetched before Step 1 to feed the generic Mind Reader)
         if 'nodes' not in locals():
-            nodes = await live_graph.get_visible_nodes(session_id)
+            try:
+                nodes = await nodes_task
+            except Exception as prefetch_err:
+                logger.warning(f"DOM prefetch failed, refetching live graph: {prefetch_err}")
+                nodes = await live_graph.get_visible_nodes(session_id)
             logger.info(f"   ✅ DOM nodes: {len(nodes)}")
 
         # 🛡️ THE PHANTOM FIRE FIX: Prevent acting on an empty page transition
         if len(nodes) == 0:
             logger.warning("   🚫 DOM is empty! Frontend fired prematurely during navigation. Forcing a wait.")
             return {
-                "success": False,
-                "blocked": True,
-                "reason": "Waiting for the page to finish loading...",
-                "action": {"type": "wait"}
+                "success": True,
+                "action": {"type": "wait", "speech": "Waiting for the page to finish loading..."},
+                "speech": "Waiting for the page to finish loading...",
+                "pipeline": "ultimate_tara",
+                "no_legacy_fallback": True,
             }
         current_dom_signature = _build_dom_signature(nodes)
         excluded_ids = _drop_reclick_safe_exclusions(excluded_ids, nodes)
@@ -379,6 +433,8 @@ async def ultimate_plan_next_step_impl(
             goal_completion_guard_fn=_goal_completion_guard,
             extract_model_usage_evidence_fn=_extract_model_usage_evidence,
             extract_visible_goal_evidence_fn=_extract_visible_goal_evidence,
+            session_id=session_id,
+            screenshot_b64=screenshot_b64,
         )
         if last_mile_response:
             return last_mile_response

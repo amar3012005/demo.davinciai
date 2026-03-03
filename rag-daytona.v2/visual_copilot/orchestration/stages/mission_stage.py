@@ -261,5 +261,5 @@ async def prepare_mission_and_query(
         await mission_brain._save_mission(mission)
         query = mission.main_goal or schema.target_entity
 
-    enter_last_mile, last_mile_reason = should_enter_last_mile_fn(mission, query, schema)
+    enter_last_mile, last_mile_reason = should_enter_last_mile_fn(mission, query, schema, is_zero_shot=is_zero_shot)
     return mission, query, domain_name, excluded_ids, enter_last_mile, last_mile_reason, None

@@ -24,6 +24,11 @@ def is_reclick_safe_node(node: Any) -> bool:
     if tag not in _CLICK_TAGS and role not in _CLICK_ROLES:
         return False
 
+    # Already-selected/active nav items should not be considered re-click safe.
+    # Re-clicking these is a common source of no-op loops.
+    if aria_selected == "true" or state in {"active", "selected", "open", "expanded"}:
+        return False
+
     trigger_words = {"menu", "dropdown", "tab", "tabs", "trigger", "developers", "docs", "documentation", "usage", "activity"}
     has_trigger_signal = any(w in text for w in trigger_words) or any(w in node_id for w in trigger_words)
     has_state_signal = any(v in {"true", "false"} for v in {aria_expanded, aria_selected}) or state in {

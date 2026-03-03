@@ -3,8 +3,29 @@ from typing import Any, Optional
 from tara_models import HiveResponse
 
 
-async def resolve_hive_response(*, app_state: Any, hive_interface: Any, schema: Any, session_id: str, effective_step: int):
+async def resolve_hive_response(
+    *,
+    app_state: Any,
+    hive_interface: Any,
+    schema: Any,
+    session_id: str,
+    effective_step: int,
+    skip_hive_prefetch: bool = False,
+):
     domain_known_for_hive = True
+    if skip_hive_prefetch:
+        hive_response = HiveResponse(
+            strategy=None,
+            visual_hints=[],
+            cached=False,
+            query_time_ms=0,
+        )
+        cache_hive = getattr(app_state, "_hive_cache", {})
+        if not hasattr(app_state, "_hive_cache"):
+            app_state._hive_cache = cache_hive
+        cache_hive[session_id] = hive_response
+        return hive_response, False
+
     if effective_step == 0:
         domain_known_for_hive = await hive_interface.is_domain_indexed(getattr(schema, "domain", "") or "")
         if domain_known_for_hive:

@@ -170,6 +170,11 @@ class OrchestratorSession:
     metadata: Dict[str, Any] = field(default_factory=dict)
     map_status_checked: bool = False
 
+    # Barge-in validation (deferred VAD interrupt)
+    last_query_text: str = ""
+    last_query_language: str = "en"
+    barge_in_pending: bool = False  # True = VAD fired during SPEAKING, awaiting STT validation
+
     # Host-based configuration overrides
     agent_name: str = "agent"
     agent_id: Optional[str] = "agent"
@@ -1094,17 +1099,41 @@ class OrchestratorWSHandler:
                 "user_text": text
             }
         
-        # INTERRUPT LOGIC: If user speaks during SPEAKING state, trigger interrupt
+        # VALIDATED BARGE-IN: Check STT transcript to confirm real speech before interrupting
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING:
-            # Check if it looks like real speech (ignore very short fragments if they are not final)
-            if len(text.strip()) > 3 or is_final:
-                logger.info(f"[{session.session_id}] 🛑 Interruption detected via STT ({'FINAL' if is_final else 'Fragment'}): '{text}'")
-                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_activity"})
-                # After interrupt, we continue to process the final transcript in LISTENING state
-                # but we return here if it was a fragment to avoid duplicate processing later
+        if state_mgr.state == State.SPEAKING or session.barge_in_pending:
+            stripped = text.strip().rstrip(".!?,")
+            no_speech_prob = data.get("no_speech_prob")
+
+            # Filter out filler words / noise artifacts that STT commonly produces
+            NOISE_PHRASES = {
+                "mm-hmm", "mmhmm", "mm hmm", "uh-huh", "uh huh", "uhuh",
+                "hmm", "hm", "um", "uh", "ah", "oh", "mhm", "mm",
+                "yeah", "yep", "yup", "ok", "okay", "right",
+                "bye", "bye-bye", "goodbye",
+                "thank you", "thanks",
+            }
+            is_filler = stripped.lower() in NOISE_PHRASES
+
+            # Valid barge-in: meaningful text (>8 chars AND final) with low noise probability, not a filler
+            is_valid = (
+                not is_filler
+                and len(stripped) > 8
+                and is_final
+                and (no_speech_prob is None or no_speech_prob < 0.4)
+            )
+
+            if is_valid:
+                logger.info(f"[{session.session_id}] 🛑 VALID barge-in ({'FINAL' if is_final else 'Fragment'}): '{text}' (nsp={no_speech_prob})")
+                session.barge_in_pending = False
+                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_validated"})
+                # After interrupt, continue to process the final transcript in LISTENING state
+                # but return here if it was a fragment to avoid duplicate processing later
                 if not is_final:
                     return
+            else:
+                logger.info(f"[{session.session_id}] 🚫 Noise barge-in rejected: '{stripped}' (nsp={no_speech_prob})")
+                return  # Drop noise transcript entirely (both partial and final)
 
         # Store partial transcript for early processing
         if not is_final:
@@ -1241,22 +1270,45 @@ class OrchestratorWSHandler:
         
         if signal_type == "SPEECH_END":
             state_mgr = session.state_manager
-            # React immediately if we're listening or if we're in SPEAKING (interruption backup)
-            if state_mgr.state == State.LISTENING or state_mgr.state == State.SPEAKING:
-                if state_mgr.state == State.SPEAKING:
-                    logger.info(f"[{session.session_id}] 🛑 Interruption detected via VAD (SPEECH_END)")
-                    await self._handle_interrupt(session, {"type": "interrupt", "trigger": "vad_end"})
-                
+
+            # DEFERRED BARGE-IN: If SPEAKING, don't hard-interrupt — stay in SPEAKING,
+            # pause browser playback, and wait for STT to validate real speech vs noise.
+            if state_mgr.state == State.SPEAKING:
+                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_END) - deferring, waiting for STT validation")
+                session.barge_in_pending = True
+                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
+
+                # Start a timeout: if no valid STT transcript arrives, recover from noise
+                output_language = self._get_output_language(session.current_language, session)
+
+                async def barge_in_validation_timeout():
+                    try:
+                        await asyncio.sleep(5.0)
+                        if session.barge_in_pending:
+                            session.barge_in_pending = False
+                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after barge-in, resuming last response")
+                            await self._recover_from_noise_interrupt(session)
+                    except asyncio.CancelledError:
+                        pass  # STT transcript arrived and validated/rejected
+
+                # Cancel any existing timeout, start new one
+                if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                    session.transcript_timeout_task.cancel()
+                session.transcript_timeout_task = asyncio.create_task(barge_in_validation_timeout())
+                return  # Stay in SPEAKING — don't fall through to THINKING transition
+
+            # NORMAL PATH: LISTENING → THINKING (user finished speaking, wait for transcript)
+            if state_mgr.state == State.LISTENING:
                 # Mark that we're waiting for final transcript
                 session.pending_transcript = True
-                
+
                 # IMMEDIATE TRANSITION to THINKING
                 side_effects = await state_mgr.transition(State.THINKING, trigger="speech_end", data={})
                 await self._broadcast_state(session, State.THINKING)
-                
+
                 output_language = self._get_output_language(session.current_language, session)
                 await self._execute_side_effects(session, side_effects, output_language)
-                
+
                 # Start timeout task: if transcript doesn't arrive within 5 seconds, transition back to LISTENING
                 async def transcript_timeout():
                     try:
@@ -1265,20 +1317,20 @@ class OrchestratorWSHandler:
                             logger.warning(f"[{session.session_id}] ⏰ Transcript timeout - no transcript received after 5s, transitioning back to LISTENING")
                             session.pending_transcript = False
                             session.partial_transcript = ""
-                            
+
                             # Cancel tasks
                             if session.pipeline_task and not session.pipeline_task.done():
                                 session.pipeline_task.cancel()
                             if session.filler_task and not session.filler_task.done():
                                 session.filler_task.cancel()
-                            
+
                             # Transition back to LISTENING
                             listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="transcript_timeout")
                             await self._execute_side_effects(session, listening_side_effects, output_language)
                             await self._broadcast_state(session, State.LISTENING)
                     except asyncio.CancelledError:
                         pass  # Transcript arrived, timeout cancelled
-                
+
                 # Store timeout task (will be cancelled when transcript arrives)
                 session.transcript_timeout_task = asyncio.create_task(transcript_timeout())
         
@@ -1289,20 +1341,24 @@ class OrchestratorWSHandler:
                 session.is_mission_active = False
                 session.current_goal = None
 
-            # BARGE-IN DETECTION: Trigger immediate interrupt on speech start
+            # BARGE-IN DETECTION: Defer interrupt on speech start (wait for STT validation)
             state_mgr = session.state_manager
             if state_mgr.state == State.SPEAKING:
-                logger.info(f"[{session.session_id}] 🛑 Interruption detected via VAD (SPEECH_START)")
-                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "vad_start"})
+                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_START) - deferring, waiting for STT validation")
+                session.barge_in_pending = True
+                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
             elif state_mgr.state == State.THINKING:
-                # NEW: If we were thinking/waiting for a transcript and user starts speaking again,
-                # return to LISTENING to capture the new turn properly.
-                logger.info(f"[{session.session_id}] 🎤 New speech started during THINKING - returning to LISTENING")
-                if session.transcript_timeout_task and not session.transcript_timeout_task.done():
-                    session.transcript_timeout_task.cancel()
-                
-                await state_mgr.transition(State.LISTENING, trigger="barge_in_during_thinking")
-                await self._broadcast_state(session, State.LISTENING)
+                if session.barge_in_pending:
+                    logger.debug(f"[{session.session_id}] 🎤 Speech start during pending barge-in validation - waiting for STT")
+                else:
+                    # If we were thinking/waiting for a transcript and user starts speaking again,
+                    # return to LISTENING to capture the new turn properly.
+                    logger.info(f"[{session.session_id}] 🎤 New speech started during THINKING - returning to LISTENING")
+                    if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                        session.transcript_timeout_task.cancel()
+
+                    await state_mgr.transition(State.LISTENING, trigger="barge_in_during_thinking")
+                    await self._broadcast_state(session, State.LISTENING)
             
             # Reset pending transcript flag and clear partial transcript
             session.pending_transcript = False
@@ -1505,7 +1561,11 @@ class OrchestratorWSHandler:
 
         # Add user turn to conversation history
         session.history_manager.add_user_turn(text, metadata={"language": language})
-        
+
+        # Save last query for noise recovery (re-trigger after false barge-in)
+        session.last_query_text = text
+        session.last_query_language = language
+
         # NEW: Check for escalation
         if session.history_manager.should_escalate():
             logger.warning(
@@ -3318,10 +3378,16 @@ class OrchestratorWSHandler:
                         f"(turn={playback_turn_id}) — recovering to LISTENING"
                     )
                     output_language = self._get_output_language(session.current_language, session)
+
+                    # Clear barge-in state before transitioning (prevents stale noise recovery)
+                    session.barge_in_pending = False
+                    if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                        session.transcript_timeout_task.cancel()
+
                     listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="playback_watchdog_timeout")
                     await self._execute_side_effects(session, listening_side_effects, output_language)
                     await self._broadcast_state(session, State.LISTENING)
-                    
+
                     # Clear playback tracking
                     self._clear_playback_tracking(session)
             except asyncio.CancelledError:
@@ -3402,12 +3468,13 @@ class OrchestratorWSHandler:
         # Transition back to LISTENING
         logger.info(f"[{session.session_id}] 🔄 LISTENING: Response complete, ready for next input")
         output_language = self._get_output_language(session.current_language, session)
-        
+
         # Reset transcript tracking flags when returning to LISTENING
         session.pending_transcript = False
         session.partial_transcript = ""
-        
-        # Cancel transcript timeout task if running
+        session.barge_in_pending = False  # Clear any pending barge-in validation
+
+        # Cancel transcript timeout task if running (includes barge-in validation timeout)
         if session.transcript_timeout_task and not session.transcript_timeout_task.done():
             session.transcript_timeout_task.cancel()
             try:
@@ -3480,7 +3547,38 @@ class OrchestratorWSHandler:
                 await self._execute_side_effects(session, listening_side_effects, output_language)
         
         await self._broadcast_state(session, State.LISTENING)
-    
+
+    async def _recover_from_noise_interrupt(self, session: OrchestratorSession):
+        """Recover from noise barge-in by silently re-triggering the last query."""
+        sid = session.session_id
+        state_mgr = session.state_manager
+
+        # Guard: skip if session closed or barge-in was already resolved
+        if session.is_closed:
+            logger.debug(f"[{sid}] Noise recovery skipped - session closed")
+            return
+
+        # Cancel any pending tasks from the interrupted state
+        for task in [session.pipeline_task, session.tts_task, session.filler_task]:
+            if task and not task.done():
+                task.cancel()
+        if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+            session.audio_playback_server_timer.cancel()
+        self._clear_playback_tracking(session)
+        # Drop any buffered outbound audio frames to avoid stale overlap on recovery.
+        session.fg_buffer.clear()
+
+        # Transition to LISTENING first
+        if state_mgr.state not in (State.LISTENING, State.IDLE):
+            await state_mgr.transition(State.LISTENING, trigger="noise_recovery")
+        await self._broadcast_state(session, State.LISTENING)
+
+        if session.last_query_text:
+            logger.info(f"[{sid}] 🔄 Silent noise recovery; re-triggering last query: '{session.last_query_text[:50]}...'")
+            await self._process_user_input(session, session.last_query_text, session.last_query_language)
+        else:
+            logger.info(f"[{sid}] 🔄 Noise recovery but no previous query to resume - staying in LISTENING")
+
     async def _handle_start_session(self, session: OrchestratorSession, msg: Dict[str, Any] = None):
         """Handle session start with mode configuration and metadata"""
         if not msg:

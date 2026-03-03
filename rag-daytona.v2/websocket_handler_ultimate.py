@@ -40,6 +40,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from visual_copilot.mission.screenshot_broker import resolve_screenshot
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,8 +88,48 @@ async def handle_ultimate_messages(
     # ── NEW: Cross-domain bridge trigger ──
     elif msg_type == "cross_domain_trigger":
         return await handle_cross_domain_trigger(websocket, session_id, message, orchestrator)
-    
+
+    # ── Vision: Screenshot response from browser ──
+    elif msg_type == "screenshot_response":
+        return await handle_screenshot_response(websocket, session_id, message, orchestrator)
+
     return False
+
+
+async def handle_screenshot_response(
+    websocket: Any,
+    session_id: str,
+    message: Dict[str, Any],
+    orchestrator: Any,
+) -> bool:
+    """
+    Handle screenshot_response from the browser widget.
+
+    Message format:
+    {
+        "type": "screenshot_response",
+        "request_id": "abc12345",
+        "image_b64": "<base64 JPEG>",   # null on capture failure
+        "image_mime": "image/jpeg",
+        "error": null,
+        "url": "https://...",
+        "timestamp": 1234567890
+    }
+    """
+    request_id = message.get("request_id") or ""
+    image_b64 = message.get("image_b64") or None
+    error = message.get("error")
+
+    if error:
+        logger.warning(f"📸 Screenshot capture error from browser: {error} rid={request_id}")
+
+    resolved = resolve_screenshot(session_id, request_id, image_b64)
+    if resolved:
+        logger.info(f"📸 SCREENSHOT resolved for session={session_id} rid={request_id}")
+    else:
+        logger.warning(f"📸 No pending screenshot future for rid={request_id} — ignoring")
+
+    return True
 
 
 async def handle_dom_delta(

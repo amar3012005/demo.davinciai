@@ -16,6 +16,7 @@ async def ultimate_plan_next_step(
     current_url: str,
     step_number: int = 0,
     action_history: Optional[list] = None,
+    screenshot_b64: str = "",
 ) -> Dict[str, Any]:
     return await run_pipeline(
         app=app,
@@ -24,6 +25,7 @@ async def ultimate_plan_next_step(
         current_url=current_url,
         step_number=step_number,
         action_history=action_history or [],
+        screenshot_b64=screenshot_b64,
     )
 
 

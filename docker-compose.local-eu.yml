@@ -8,7 +8,7 @@ services:
       - redis_eu_local_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -17,7 +17,7 @@ services:
 
   rag-eu-local:
     build:
-      context: ../rag-eu
+      context: ./rag-eu
       dockerfile: Dockerfile
     command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001"
     ports:
@@ -56,18 +56,14 @@ services:
     networks:
       - eu-local
     env_file:
-      - ../.env
-      - .env
+      - .env-eu
 
   orchestrator-eu-local:
     build:
-      context: ../Orchestrator-eu
+      context: ./Orchestrator-eu
       dockerfile: Dockerfile
     command: >
-      uvicorn app:app
-      --host 0.0.0.0
-      --port 4004
-      --ws-ping-interval 0
+      uvicorn app:app --host 0.0.0.0 --port 4004 --ws-ping-interval 0
     ports:
       - "5004:4004"
     environment:
@@ -108,16 +104,14 @@ services:
     networks:
       - eu-local
     env_file:
-      - ../.env
-      - .env
+      - .env-eu
 
   stt-eu-local:
     build:
-      context: ../stt_groq_whisper
+      context: ./stt_groq_whisper
       dockerfile: Dockerfile
     command: >
-      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}";
-      uvicorn app:app --host 0.0.0.0 --port 4002'
+      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; uvicorn app:app --host 0.0.0.0 --port 4002'
     ports:
       - "5002:4002"
     environment:
@@ -151,12 +145,11 @@ services:
     networks:
       - eu-local
     env_file:
-      - ../.env
-      - .env
+      - .env-eu
 
   tts-eu-local:
     build:
-      context: ../tts_cartesia
+      context: ./tts_cartesia
       dockerfile: Dockerfile
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
     ports:
@@ -171,7 +164,7 @@ services:
       TTS_CARTESIA_PORT: 4003
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4003/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:4003/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -179,12 +172,12 @@ services:
     networks:
       - eu-local
     env_file:
-      - ../.env
-      - .env
+      - .env-eu
 
 volumes:
   redis_eu_local_data:
   rag_eu_local_index:
+
 
 networks:
   eu-local:

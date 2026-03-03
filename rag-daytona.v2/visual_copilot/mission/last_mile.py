@@ -23,14 +23,21 @@ class LastMilePlan:
     completion_answer: str = ""
 
 
-def _should_enter_last_mile(mission: Any, query: str, schema: Any) -> Tuple[bool, str]:
+def _should_enter_last_mile(mission: Any, query: str, schema: Any, is_zero_shot: bool = False) -> Tuple[bool, str]:
     if not mission:
         return False, "no_mission"
+
     phase = getattr(mission, "phase", "strategy")
     if phase == "last_mile":
         return True, "phase_last_mile"
     subgoals = getattr(mission, "subgoals", []) or []
     idx = int(getattr(mission, "current_subgoal_index", 0) or 0)
+
+    # Zero-shot should not bypass strategy execution when strategy subgoals still exist.
+    # Only prioritize last-mile once strategy is exhausted / terminal.
+    if is_zero_shot and idx >= len(subgoals):
+        return True, "zero_shot_vision_priority"
+
     if idx >= len(subgoals):
         return True, "strategy_exhausted"
     q = (query or "").lower().strip()
@@ -424,3 +431,346 @@ Reply in strict JSON:
             thought=f"Planner exception: {e}",
             final_sequence=[],
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ⚡ COMPOUND AGENTIC LAST MILE — Multi-turn Tool Calling Loop
+# ═══════════════════════════════════════════════════════════════════════
+
+COMPOUND_MAX_INTERNAL_ITERATIONS = 10
+COMPOUND_STAGNANCY_THRESHOLD = 3  # consecutive unchanged DOM hashes before forcing stop
+
+COMPOUND_SYSTEM_PROMPT = """You are TARA's Last-Mile Execution Agent. The navigation phase is COMPLETE — you are now ON the target page.
+
+Your job: Complete the user's goal through precise DOM interactions using the tools provided.
+
+## Chain-of-Thought Strategy:
+1. Carefully read the provided DOM elements to understand the current page state.
+2. Reason step-by-step: What does the goal require? What elements are available? What is the single best next action?
+3. Execute ONE action at a time via tool calls — never assume success without verification.
+4. If an element is not visible in the provided DOM, use scroll_page to reveal more content.
+5. Use request_vision ONLY when the DOM text is ambiguous or you need to interpret visual elements (charts, icons).
+6. Call complete_mission when you have gathered enough evidence to answer the user OR when you are stuck.
+
+## Anti-Loop & Amnesia Rules:
+- READ BEFORE CLICK: If you just arrived at a new page (Action History shows a recent click), you MUST read and analyze the "Current Readable Page Content" to see if your goal is already met before you click anything else.
+- DO NOT CLICK THE SAME ID TWICE: If your action history shows you just clicked an element, or if your internal tool call history shows you clicked an element and the page state did not change, you MUST NOT click it again. Try a different approach or call complete_mission.
+
+## Decision Rules:
+- ONLY use target_id values that appear in the DOM list provided. NEVER invent IDs.
+- Prefer answering from visible readable content when the user asked an information question.
+- If the page is loading, use wait_for_ui before attempting actions.
+- Be efficient — do not repeat actions that already worked.
+
+## You MUST reason before every tool call.
+"""
+
+
+def _compress_dom_for_compound(nodes: list) -> str:
+    """Build a compact DOM representation for the compound loop context."""
+    interactive = [
+        n for n in nodes
+        if getattr(n, "interactive", False)
+        and (getattr(n, "text", None) or getattr(n, "tag", "") in ("input", "textarea", "select"))
+    ][:120]
+    lines = []
+    for n in interactive:
+        text = (getattr(n, "text", "") or "")[:80]
+        tag = getattr(n, "tag", "")
+        zone = getattr(n, "zone", "")
+        role = getattr(n, "role", "")
+        parts = f"[ID: {n.id}] tag={tag}"
+        if zone:
+            parts += f" zone={zone}"
+        if role:
+            parts += f" role={role}"
+        if text:
+            parts += f" text='{text}'"
+        lines.append(parts)
+    return "\n".join(lines) or "(no interactive elements found)"
+
+
+def _compress_readable_for_compound(nodes: list) -> str:
+    """Build a compact readable-content representation."""
+    readable = [
+        n for n in nodes
+        if getattr(n, "text", None)
+        and len((getattr(n, "text", "") or "").strip()) >= 8
+        and getattr(n, "zone", "") in {"main", "content"}
+    ][:60]
+    lines = []
+    for n in readable:
+        text = (getattr(n, "text", "") or "").strip()[:180]
+        zone = getattr(n, "zone", "")
+        lines.append(f"[zone={zone}] {text}")
+    return "\n".join(lines) or "(no substantial readable content found)"
+
+
+def _dom_signature_hash(nodes: list) -> str:
+    """Quick hash of DOM state for stagnancy detection."""
+    parts = []
+    for n in nodes[:300]:
+        parts.append(
+            f"{getattr(n, 'id', '')}|{getattr(n, 'tag', '')}|{(getattr(n, 'text', '') or '')[:40]}"
+        )
+    raw = "||".join(parts)
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _prune_old_dom_context(messages: list) -> list:
+    """
+    Context Pruning: Remove old large DOM/readable content injections from
+    tool result messages, keeping only the most recent one. This prevents
+    token bloat as the loop iterates.
+    """
+    dom_result_indices = []
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "tool" and "[ID:" in (msg.get("content") or ""):
+            dom_result_indices.append(i)
+    # Keep only the last DOM injection, truncate older ones
+    if len(dom_result_indices) > 1:
+        for idx in dom_result_indices[:-1]:
+            old_content = messages[idx].get("content", "")
+            # Replace with a short summary instead of deleting (to keep conversation flow)
+            messages[idx]["content"] = "(previous DOM state — pruned for context efficiency)"
+    return messages
+
+
+async def run_compound_last_mile(
+    *,
+    schema: Any,
+    mission: Any,
+    nodes: list,
+    app: Any = None,
+    screenshot_b64: str = "",
+    session_id: str = "",
+    excluded_ids: set = None,
+) -> Dict[str, Any]:
+    """
+    Compound Agentic Last-Mile Loop.
+
+    Instead of a single-pass JSON plan, this function runs an internal
+    multi-turn tool-calling loop with the Groq LLM. The LLM reasons,
+    picks a tool, gets feedback (or an error for hallucinated IDs), and
+    re-reasons until it either:
+      - Issues a physical browser action (click/type/scroll/wait) → returned to frontend
+      - Calls complete_mission → final answer returned
+      - Hits the iteration limit → graceful fallback
+
+    Returns a dict with keys:
+      action: dict describing the browser action or answer
+      thought: str of the LLM's last reasoning
+      iterations: int of internal loop turns used
+      status: "action" | "complete" | "impossible" | "max_iterations"
+    """
+    from visual_copilot.mission.last_mile_tools import LAST_MILE_TOOLS
+    from visual_copilot.mission.tool_executor import execute_internal_tool
+
+    main_goal = (
+        getattr(mission, "main_goal", "")
+        or getattr(schema, "raw_utterance", "")
+        or getattr(schema, "target_entity", "")
+    )
+    history = getattr(mission, "action_history", [])[-8:] if mission else []
+    history_str = "\n".join([f"- {h}" for h in history]) if history else "None"
+
+    # Build excluded IDs warning for the LLM
+    excluded_ids = excluded_ids or set()
+    excluded_str = ""
+    if excluded_ids:
+        excluded_str = (
+            f"\n**⚠️ ALREADY-CLICKED IDs (DO NOT click these again):**\n"
+            + ", ".join(sorted(excluded_ids))
+            + "\n"
+        )
+
+    compressed_dom = _compress_dom_for_compound(nodes)
+    readable_content = _compress_readable_for_compound(nodes)
+    current_dom_hash = _dom_signature_hash(nodes)
+
+    target_entity = getattr(schema, "target_entity", "")
+    action_type_str = str(
+        getattr(getattr(schema, "action", None), "value", getattr(schema, "action", ""))
+    )
+
+    messages = [
+        {"role": "system", "content": COMPOUND_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"## Mission Brief\n"
+                f"**Main Goal:** {main_goal}\n"
+                f"**Target Entity:** {target_entity}\n"
+                f"**Action Type:** {action_type_str}\n\n"
+                f"**Recent Action History:**\n{history_str}\n"
+                f"{excluded_str}\n"
+                f"**Current Interactable DOM:**\n{compressed_dom}\n\n"
+                f"**Current Readable Page Content:**\n{readable_content}\n\n"
+                f"Begin executing the goal. Analyze the DOM, then take the best next action."
+            ),
+        },
+    ]
+
+    # Resolve the LLM client
+    llm = None
+    if app and hasattr(app.state, "mind_reader") and hasattr(app.state.mind_reader, "llm"):
+        llm = app.state.mind_reader.llm
+
+    if not llm or not hasattr(llm, "generate_with_tools"):
+        logger.warning("⚠️ LLM does not support generate_with_tools, falling back to legacy plan_last_mile")
+        plan = await plan_last_mile(schema=schema, mission=mission, nodes=nodes, app=app)
+        return {
+            "action": {
+                "type": "answer" if plan.is_done else ("scroll" if not plan.is_impossible else "clarify"),
+                "speech": plan.completion_answer or plan.thought,
+                "text": plan.completion_answer or plan.thought,
+            },
+            "thought": plan.thought,
+            "iterations": 1,
+            "status": "complete" if plan.is_done else ("impossible" if plan.is_impossible else "action"),
+            "final_sequence": plan.final_sequence,
+        }
+
+    # ── Internal Compound Loop ──
+    stagnancy_counter = 0
+    last_dom_hash = current_dom_hash
+    last_thought = ""
+
+    for iteration in range(1, COMPOUND_MAX_INTERNAL_ITERATIONS + 1):
+        try:
+            message = await llm.generate_with_tools(
+                messages=messages,
+                tools=LAST_MILE_TOOLS,
+                model="llama-3.3-70b-versatile",
+                tool_choice="auto",
+                max_tokens=1024,
+                temperature=0.1,
+            )
+        except Exception as e:
+            logger.error(f"🔴 Compound LLM call failed at iteration {iteration}: {e}")
+            return {
+                "action": {"type": "scroll", "speech": "Internal reasoning error, scrolling to retry."},
+                "thought": f"LLM error: {e}",
+                "iterations": iteration,
+                "status": "action",
+            }
+
+        # Extract content for logging
+        content = getattr(message, "content", None) or ""
+        tool_calls = getattr(message, "tool_calls", None)
+        last_thought = content
+
+        if content:
+            logger.info(f"🧠 COMPOUND iter={iteration} thought: {content[:300]}")
+
+        # No tool calls → model decided it's done reasoning
+        if not tool_calls:
+            logger.info(f"🏁 COMPOUND EXIT iter={iteration} reason=no_tool_calls")
+            # Attempt to parse the content as a completion answer
+            return {
+                "action": {"type": "answer", "speech": content, "text": content},
+                "thought": content,
+                "iterations": iteration,
+                "status": "complete",
+            }
+
+        # Serialize the assistant message for history
+        assistant_msg = {"role": "assistant", "content": content}
+        if tool_calls:
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in tool_calls
+            ]
+        messages.append(assistant_msg)
+
+        # Process each tool call
+        for tc in tool_calls:
+            tool_name = tc.function.name
+            try:
+                tool_args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                tool_args = {}
+
+            logger.info(f"⚙️ COMPOUND TOOL iter={iteration} name={tool_name} args={tool_args}")
+
+            is_terminal, tool_result_str, frontend_action = await execute_internal_tool(
+                tool_name=tool_name,
+                args=tool_args,
+                nodes=nodes,
+                screenshot_b64=screenshot_b64 or None,
+                app=app,
+                session_id=session_id,
+                excluded_ids=excluded_ids,
+            )
+
+            if is_terminal and frontend_action:
+                # This is a physical action to send to the browser
+                action_type = frontend_action.get("type", "")
+
+                if action_type == "answer":
+                    status = frontend_action.get("status", "success")
+                    return {
+                        "action": frontend_action,
+                        "thought": last_thought,
+                        "iterations": iteration,
+                        "status": "complete" if status == "success" else "impossible",
+                    }
+
+                # For click/type/scroll/wait → return to frontend for execution
+                logger.info(
+                    f"🎯 COMPOUND ACTION iter={iteration} type={action_type} "
+                    f"target={frontend_action.get('target_id', 'N/A')}"
+                )
+                return {
+                    "action": frontend_action,
+                    "thought": last_thought,
+                    "iterations": iteration,
+                    "status": "action",
+                }
+
+            # Non-terminal: feed the tool result back into the conversation
+            messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "content": tool_result_str}
+            )
+
+        # ── Stagnancy Guard ──
+        new_dom_hash = _dom_signature_hash(nodes)
+        if new_dom_hash == last_dom_hash:
+            stagnancy_counter += 1
+        else:
+            stagnancy_counter = 0
+            last_dom_hash = new_dom_hash
+
+        if stagnancy_counter >= COMPOUND_STAGNANCY_THRESHOLD:
+            logger.warning(
+                f"🛡️ COMPOUND STAGNANCY iter={iteration} "
+                f"unchanged_turns={stagnancy_counter} → forcing exit"
+            )
+            return {
+                "action": {
+                    "type": "clarify",
+                    "speech": f"I've been trying to progress on '{main_goal}' but the page isn't changing. Could you help guide me?",
+                },
+                "thought": f"Stagnancy detected after {stagnancy_counter} unchanged turns.",
+                "iterations": iteration,
+                "status": "impossible",
+            }
+
+        # ── Context Pruning ──
+        messages = _prune_old_dom_context(messages)
+
+    # Max iterations reached
+    logger.warning(f"⏱️ COMPOUND MAX_ITER reached ({COMPOUND_MAX_INTERNAL_ITERATIONS})")
+    return {
+        "action": {
+            "type": "clarify",
+            "speech": f"I spent {COMPOUND_MAX_INTERNAL_ITERATIONS} reasoning steps on '{main_goal}' but couldn't complete it. Would you like me to try a different approach?",
+        },
+        "thought": last_thought or "Max iterations reached without resolution.",
+        "iterations": COMPOUND_MAX_INTERNAL_ITERATIONS,
+        "status": "max_iterations",
+    }

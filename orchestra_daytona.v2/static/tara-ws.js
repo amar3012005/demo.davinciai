@@ -48,60 +48,19 @@
                         console.log('📦 Requesting orb SVG via WebSocket...');
                     }
 
-                    // Phoenix Protocol: Resume mission
+                    // Phoenix Protocol: Hydrate goal from storage (actual resume
+                    // messages are sent by startVisualCopilot AFTER session_config,
+                    // so the backend has mission state before execution_complete).
                     if (widget.wasNavigating || widget.isRestoredSession) {
-                        const sessionId = sessionStorage.getItem('tara_session_id') ||
-                            localStorage.getItem('tara_session_id');
-
                         const restoredGoal = sessionStorage.getItem('tara_goal') || localStorage.getItem('tara_goal');
                         if (restoredGoal && !widget.pendingMissionGoal) {
                             widget.pendingMissionGoal = restoredGoal;
                             widget._currentMissionGoal = restoredGoal;
                             console.log('🎯 Phoenix: Restored goal:', restoredGoal);
                         }
-
-                        console.log('📡 Universal Phoenix: Resuming mission flow...', sessionId);
-                        widget.wasNavigating = false;
-
-                        // Phase 1: Request History (for chat turns + bridging)
-                        if (sessionId) {
-                            widget.ws.send(JSON.stringify({
-                                type: 'request_history',
-                                session_id: sessionId,
-                                mission_goal: widget.pendingMissionGoal || ''
-                            }));
-                        }
-
-                        // Phase 2: Signal Execution Complete (to trigger next step)
-                        const restoreCmd = {
-                            type: 'execution_complete',
-                            session_id: sessionId,
-                            current_url: window.location.href,
-                            mission_goal: widget.pendingMissionGoal || '',
-                            mission_id: sessionStorage.getItem('tara_mission_id') || localStorage.getItem('tara_mission_id') || null,
-                            subgoal_index: parseInt(sessionStorage.getItem('tara_subgoal_index') || localStorage.getItem('tara_subgoal_index') || '0', 10),
-                            step_count: parseInt(sessionStorage.getItem('tara_step_count') || localStorage.getItem('tara_step_count') || '0', 10),
-                            dom_context: window.TARA.Scanner.scanPageBlueprint(true) || []
-                        };
-                        widget.ws.send(JSON.stringify(restoreCmd));
-
-                        // Fresh DOM scan
-                        try {
-                            const blueprint = window.TARA.Scanner.scanPageBlueprint(true);
-                            if (blueprint) {
-                                widget.ws.send(JSON.stringify({
-                                    type: 'dom_update',
-                                    elements: blueprint,
-                                    url: window.location.href,
-                                    title: document.title
-                                }));
-                                console.log('📡 Phoenix: Fresh DOM sent');
-                            }
-                        } catch (e) {
-                            console.warn('Phoenix DOM scan failed:', e);
-                        }
-
-                        widget.isRestoredSession = false;
+                        // Flag that resume messages still need to be sent
+                        widget._phoenixResumeNeeded = true;
+                        console.log('📡 Phoenix: Resume deferred until after session_config');
                     }
 
                     resolve();
@@ -154,15 +113,10 @@
                     console.log('🔌 WebSocket closed');
                     if (widget.screenOverlay) widget.screenOverlay.classList.remove('active');
                     if (widget.isActive) {
-                        // ONLY preserve Phoenix data if a navigation is actively in progress
-                        // (tara_is_navigating is set by plantSessionSeeds right before a click)
-                        const isNavigating = sessionStorage.getItem('tara_is_navigating') === 'true';
-                        if (isNavigating) {
-                            console.log('🛡️ WS closed during navigation — preserving Phoenix data');
-                            widget.stopVisualCopilot(true); // keepPhoenixData=true
-                        } else {
-                            widget.stopVisualCopilot(false);
-                        }
+                        // Always preserve Phoenix data during WS closes (reloads, unexpected drops)
+                        // Manual deliberate stops (UI button) will call stopVisualCopilot(false) directly
+                        console.log('🛡️ WS closed — preserving Phoenix data for resilience');
+                        widget.stopVisualCopilot(true); // keepPhoenixData=true
                     }
                 };
 
@@ -236,6 +190,63 @@
         },
 
         /**
+         * Send Phoenix resume messages (request_history + execution_complete).
+         * Called by startVisualCopilot AFTER session_config is sent, so the
+         * backend has is_mission_active=true before execution_complete arrives.
+         */
+        sendPhoenixResume(widget) {
+            if (!widget._phoenixResumeNeeded) return;
+            widget._phoenixResumeNeeded = false;
+
+            const sessionId = sessionStorage.getItem('tara_session_id') ||
+                localStorage.getItem('tara_session_id');
+
+            console.log('📡 Phoenix: Sending resume messages after session_config...', sessionId);
+
+            // Phase 1: Request History (for chat turns + bridging)
+            if (sessionId && widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                widget.ws.send(JSON.stringify({
+                    type: 'request_history',
+                    session_id: sessionId,
+                    mission_goal: widget.pendingMissionGoal || widget._currentMissionGoal || ''
+                }));
+            }
+
+            // Phase 2: Signal Execution Complete (to trigger next step)
+            if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                widget.ws.send(JSON.stringify({
+                    type: 'execution_complete',
+                    session_id: sessionId,
+                    current_url: window.location.href,
+                    mission_goal: widget.pendingMissionGoal || widget._currentMissionGoal || '',
+                    mission_id: sessionStorage.getItem('tara_mission_id') || localStorage.getItem('tara_mission_id') || null,
+                    subgoal_index: parseInt(sessionStorage.getItem('tara_subgoal_index') || localStorage.getItem('tara_subgoal_index') || '0', 10),
+                    step_count: parseInt(sessionStorage.getItem('tara_step_count') || localStorage.getItem('tara_step_count') || '0', 10),
+                    dom_context: window.TARA.Scanner.scanPageBlueprint(true) || []
+                }));
+            }
+
+            // Fresh DOM scan
+            try {
+                const blueprint = window.TARA.Scanner.scanPageBlueprint(true);
+                if (blueprint && widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                    widget.ws.send(JSON.stringify({
+                        type: 'dom_update',
+                        elements: blueprint,
+                        url: window.location.href,
+                        title: document.title
+                    }));
+                    console.log('📡 Phoenix: Fresh DOM sent');
+                }
+            } catch (e) {
+                console.warn('Phoenix DOM scan failed:', e);
+            }
+
+            widget.wasNavigating = false;
+            widget.isRestoredSession = false;
+        },
+
+        /**
          * Route all backend messages to appropriate handlers.
          */
         async handleBackendMessage(widget, msg) {
@@ -261,6 +272,52 @@
                 console.log('💾 Session ID saved:', msg.session_id);
                 if (widget.sessionMode === 'interactive') {
                     WS.connectAudioWebSocket(widget, msg.session_id);
+                }
+                // Proactively seed backend with one screenshot so pre-router map hints
+                // can use vision even before first execution_complete.
+                (async () => {
+                    try {
+                        const screenshotB64 = await Scanner.captureScreenshot();
+                        const elements = Scanner.scanPageBlueprint(true) || [];
+                        if (widget.ws && widget.ws.readyState === WebSocket.OPEN && screenshotB64) {
+                            widget.ws.send(JSON.stringify({
+                                type: 'dom_update',
+                                elements,
+                                url: window.location.href,
+                                title: document.title,
+                                active_states: Scanner.detectActiveStates(),
+                                data_tables: Scanner.extractVisibleTables(),
+                                screenshot_b64: screenshotB64,
+                                source: 'session_ready_bootstrap'
+                            }));
+                            console.log(`📸 Session bootstrap screenshot sent (${Math.round(screenshotB64.length / 1024)}KB)`);
+                        }
+                    } catch (snapErr) {
+                        console.warn('📸 Session bootstrap screenshot failed:', snapErr);
+                    }
+                })();
+            }
+            else if (msg.type === 'request_screenshot') {
+                try {
+                    const screenshotB64 = await Scanner.captureScreenshot();
+                    const elements = Scanner.scanPageBlueprint(true) || [];
+                    if (widget.ws && widget.ws.readyState === WebSocket.OPEN && screenshotB64) {
+                        widget.ws.send(JSON.stringify({
+                            type: 'dom_update',
+                            elements,
+                            url: window.location.href,
+                            title: document.title,
+                            active_states: Scanner.detectActiveStates(),
+                            data_tables: Scanner.extractVisibleTables(),
+                            screenshot_b64: screenshotB64,
+                            source: 'request_screenshot'
+                        }));
+                        console.log(`📸 Screenshot response sent (${Math.round(screenshotB64.length / 1024)}KB)`);
+                    } else {
+                        console.warn('📸 request_screenshot: capture failed or WS closed');
+                    }
+                } catch (snapErr) {
+                    console.warn('📸 request_screenshot failed:', snapErr);
                 }
             }
             else if (msg.type === 'history_restore') {
@@ -402,6 +459,14 @@
                 const newElements = freshDOM ? freshDOM.filter(el => el.isNew).length : 0;
                 const domChanged = freshDOM !== null || Scanner.lastDOMHash !== preActionHash;
 
+                // 📸 Capture post-action screenshot for Groq Vision (non-blocking)
+                let screenshotB64 = null;
+                try {
+                    screenshotB64 = await Scanner.captureScreenshot();
+                } catch (snapErr) {
+                    console.warn('📸 Screenshot capture skipped:', snapErr);
+                }
+
                 widget.ws.send(JSON.stringify({
                     type: 'execution_complete',
                     status: 'success',
@@ -422,10 +487,11 @@
                     active_states: Scanner.detectActiveStates(),
                     data_tables: Scanner.extractVisibleTables(),
                     title: document.title,
+                    screenshot_b64: screenshotB64,  // 👁️ for Groq Vision in last mile
                     timestamp: Date.now()
                 }));
 
-                console.log(`✅ Execution complete (${settleTime}ms, ${newElements} new, url_changed=${urlChanged})`);
+                console.log(`✅ Execution complete (${settleTime}ms, ${newElements} new, url_changed=${urlChanged}, screenshot=${screenshotB64 ? Math.round(screenshotB64.length / 1024) + 'KB' : 'none'})`);
                 widget.waitingForExecution = false;
                 widget.setOrbState('listening');
             }
@@ -462,6 +528,97 @@
                             statusEl.textContent = originalText;
                         }
                     }, 2000);
+                }
+            }
+            // ═══════════════════════════════════════════════════════════
+            // 👁️ VISION: Backend requests a page screenshot for Groq Vision
+            // ═══════════════════════════════════════════════════════════
+            else if (msg.type === 'request_screenshot') {
+                const reason = msg.reason || 'visual analysis';
+                const requestId = msg.request_id || null;
+                console.log(`📸 [TARA Vision] Screenshot requested by backend: "${reason}"`);
+
+                widget.setOrbState('thinking');
+
+                try {
+                    const b64 = await Scanner.captureScreenshot();
+
+                    if (b64 && widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                        widget.ws.send(JSON.stringify({
+                            type: 'screenshot_response',
+                            request_id: requestId,
+                            image_b64: b64,
+                            image_mime: 'image/jpeg',
+                            url: window.location.href,
+                            timestamp: Date.now()
+                        }));
+                        console.log(`✅ [TARA Vision] Screenshot sent (${(b64.length / 1024).toFixed(0)}KB)`);
+                    } else {
+                        // Screenshot failed — tell the backend so it can proceed without vision
+                        if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                            widget.ws.send(JSON.stringify({
+                                type: 'screenshot_response',
+                                request_id: requestId,
+                                image_b64: null,
+                                error: 'capture_failed',
+                                url: window.location.href,
+                                timestamp: Date.now()
+                            }));
+                        }
+                        console.warn('⚠️ [TARA Vision] Screenshot capture returned null');
+                    }
+                } catch (err) {
+                    console.error('❌ [TARA Vision] Screenshot error:', err);
+                    if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                        widget.ws.send(JSON.stringify({
+                            type: 'screenshot_response',
+                            request_id: requestId,
+                            image_b64: null,
+                            error: String(err),
+                            url: window.location.href,
+                            timestamp: Date.now()
+                        }));
+                    }
+                } finally {
+                    widget.setOrbState('listening');
+                }
+            }
+            // ═══════════════════════════════════════════════════════════
+            // 🔍 ANALYSE PAGE: Backend finished narrating — reset orb
+            // ═══════════════════════════════════════════════════════════
+            else if (msg.type === 'analyse_complete') {
+                console.log(`✅ [TARA Analyse] Narration complete (mode=${msg.analysis_mode})`);
+                widget.orbContainer.classList.remove('executing', 'listening', 'talking');
+                widget.orbContainer.classList.add('idle');
+
+                if (widget._analyseMode && msg.narration) {
+                    // Show answer in chat bar, keep it open for follow-ups
+                    UI.hideTypingIndicator(widget);
+                    UI.appendChatMessage(widget, msg.narration, 'ai');
+                    widget.chatInput.placeholder = 'Ask another question...';
+                    widget.chatInput.focus();
+                    const statusEl = widget.pillContainer?.querySelector('.tara-pill-status');
+                    if (statusEl) statusEl.textContent = 'Ask about this page';
+                } else {
+                    const statusEl = widget.pillContainer?.querySelector('.tara-pill-status');
+                    if (statusEl) {
+                        statusEl.textContent = '✓ Done';
+                        setTimeout(() => {
+                            if (!widget.isActive) statusEl.textContent = 'Click orb to start';
+                        }, 2000);
+                    }
+                }
+            }
+            else if (msg.type === 'analyse_error') {
+                console.error(`❌ [TARA Analyse] Error:`, msg.error);
+                widget.orbContainer.classList.remove('executing', 'listening', 'talking');
+                widget.orbContainer.classList.add('idle');
+                const statusEl = widget.pillContainer?.querySelector('.tara-pill-status');
+                if (statusEl) {
+                    statusEl.textContent = '⚠️ Analysis failed';
+                    setTimeout(() => {
+                        if (!widget.isActive) statusEl.textContent = 'Click orb to start';
+                    }, 3000);
                 }
             }
         }

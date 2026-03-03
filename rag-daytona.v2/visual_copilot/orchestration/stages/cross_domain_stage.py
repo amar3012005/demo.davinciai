@@ -23,10 +23,15 @@ async def run_cross_domain_gate(
 ) -> Tuple[Any, bool, Optional[Dict[str, Any]]]:
     is_zero_shot = False
     cache_hive = getattr(app_state, "_hive_cache", {})
+    is_mid_mission = bool(action_history) or effective_step > 0
 
     if not hive_response.strategy:
         if not domain_known_for_hive:
-            if schema.first_subgoal:
+            first_sg = getattr(schema, 'first_subgoal', None)
+            if is_mid_mission:
+                logger.info("⏩ Mid-mission with unknown domain strategy: keeping mission mode (no zero-shot reset).")
+                return hive_response, False, None
+            if first_sg:
                 logger.info("🧭 ZERO-SHOT MODE: Hive bypassed (unknown domain), using Mind Reader first_subgoal.")
             else:
                 logger.info("🧭 ZERO-SHOT MODE: Hive bypassed (unknown domain), no first_subgoal.")
@@ -36,7 +41,6 @@ async def run_cross_domain_gate(
         cross_domain_triggers = [r"\bgo to\b", r"\bopen\b", r"\bnavigate to\b", r"\btake me to\b", r"\bswitch to\b"]
         is_explicit_jump = any(re.search(t, goal.lower()) for t in cross_domain_triggers)
 
-        is_mid_mission = bool(action_history) or effective_step > 0
         cross_response = None
         if not is_mid_mission or is_explicit_jump:
             cross_response = await hive_interface.retrieve_cross_domain(schema)
@@ -101,10 +105,15 @@ async def run_cross_domain_gate(
                     "confidence": 0.90,
                 }
 
-        if schema.first_subgoal:
-            logger.info("🧭 ZERO-SHOT MODE: Mind Reader provided first_subgoal → fast path (no ReAct needed)")
+        if is_mid_mission and not is_explicit_jump:
+            logger.info("⏩ Mid-mission strategy miss: staying in mission mode (skip zero-shot).")
+            is_zero_shot = False
         else:
-            logger.info("🧭 ZERO-SHOT MODE: No first_subgoal → will use ReAct LLM Router.")
-        is_zero_shot = True
+            first_sg = getattr(schema, 'first_subgoal', None)
+            if first_sg:
+                logger.info("🧭 ZERO-SHOT MODE: Mind Reader provided first_subgoal → fast path (no ReAct needed)")
+            else:
+                logger.info("🧭 ZERO-SHOT MODE: No first_subgoal → will use ReAct LLM Router.")
+            is_zero_shot = True
 
     return hive_response, is_zero_shot, None

@@ -100,11 +100,19 @@ CRITICAL RULES:
 - If a constraint is mentioned but no value given, mark it as null
 - Be conservative: only extract constraints that are explicitly mentioned
 
+CRITICAL RULE — target_domain:
+- target_domain: Extract ONLY when user explicitly mentions a different website.
+  "take me to youtube" → "youtube.com"
+  "open amazon" → "amazon.com"
+  "search for shoes" → null (no site mentioned)
+  "play the top video" → null (action on current page)
+
 OUTPUT FORMAT (JSON only, no extra text):
 {{
   "action": "extraction|navigation|search|purchase|interaction",
   "target_entity": "string - EXACT specificity from user input, preserve all model/product names",
   "domain": "example.com",
+  "target_domain": "specific website the user wants to GO TO, or null if staying on current site",
   "constraints": {{
     "key": "value or null"
   }}
@@ -137,7 +145,13 @@ User: "show me GPT-4 usage stats"
 Output: {{"action": "extraction", "target_entity": "GPT-4 usage stats", "domain": "current", "constraints": {{}}}}
 
 User: "find Mixtral 8x7B pricing"
-Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain": "current", "constraints": {{}}}}
+Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain": "current", "target_domain": null, "constraints": {{}}}}
+
+User: "take me to YouTube"
+Output: {{"action": "navigation", "target_entity": "YouTube", "domain": "current", "target_domain": "youtube.com", "constraints": {{}}}}
+
+User: "search for shoes on amazon"
+Output: {{"action": "search", "target_entity": "shoes", "domain": "current", "target_domain": "amazon.com", "constraints": {{}}}}
 """
 
     def __init__(self, llm_provider: Any):
@@ -185,22 +199,59 @@ Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain":
         """
         # 1. Sanitize input
         cleaned = self._sanitize_input(user_input)
-        
+
         # 2. Extract domain
         domain = self._extract_domain(current_url)
-        
-        # 3. Build prompt
-        prompt = self.TRANSLATION_PROMPT.format(
-            user_input=cleaned,
-            current_url=current_url or "unknown",
-            domain=domain
-        )
-        
+
+        # 3. Build prompt — try domain-specific first, then generic with DOM, then legacy
+        prompt = None
+        previous_goal_section = ""
+        if previous_goal:
+            previous_goal_section = f"PREVIOUS GOAL: {previous_goal}"
+
+        # 3a. Check for domain-specific prompt
+        domain_prompt_fn = self._get_domain_prompt(domain)
+        if domain_prompt_fn:
+            try:
+                prompt = domain_prompt_fn(
+                    user_input=cleaned,
+                    current_url=current_url or "unknown",
+                    domain=domain,
+                    previous_goal_section=previous_goal_section,
+                    nodes=nodes,
+                )
+                logger.info(f"🧠 Using domain-specific prompt for {domain}")
+            except Exception as e:
+                logger.warning(f"Domain prompt for {domain} failed: {e}, falling back to generic")
+                prompt = None
+
+        # 3b. Try generic DOM-aware prompt
+        if not prompt and nodes:
+            try:
+                from mind_reader_domain_prompts.generic import get_prompt as generic_get_prompt
+                prompt = generic_get_prompt(
+                    user_input=cleaned,
+                    current_url=current_url or "unknown",
+                    domain=domain,
+                    previous_goal_section=previous_goal_section,
+                    nodes=nodes,
+                )
+            except Exception as e:
+                logger.debug(f"Generic DOM prompt failed: {e}, using legacy prompt")
+
+        # 3c. Fall back to legacy prompt (no DOM context)
+        if not prompt:
+            prompt = self.TRANSLATION_PROMPT.format(
+                user_input=cleaned,
+                current_url=current_url or "unknown",
+                domain=domain
+            )
+
         # 4. Call LLM (fast model)
         try:
             if self.llm is None:
                 raise ValueError("No LLM provider available")
-            
+
             response = await self.llm.generate(
                 prompt,
                 model="llama-3.1-8b-instant",  # Fast model for intent parsing
@@ -214,13 +265,26 @@ Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain":
             
             # 6. Validate and construct schema
             schema = self._build_schema(data, user_input, domain)
-            
+
+            # 6b. Attach extra planning fields from domain/generic prompts
+            # (frozen dataclass → use object.__setattr__)
+            for extra_key in ("first_subgoal", "next_subgoal", "overall_goal", "planned_steps", "navigation_hint", "target_domain"):
+                val = data.get(extra_key)
+                if val:
+                    try:
+                        object.__setattr__(schema, extra_key, val)
+                    except Exception:
+                        pass
+
             logger.info(
                 f"🧠 Mind Reader: '{user_input}' → "
                 f"{schema.action.value} on '{schema.target_entity}' "
                 f"(missing: {schema.missing_constraints()})"
             )
-            
+            first_sg = getattr(schema, "first_subgoal", None)
+            if first_sg:
+                logger.info(f"🧠 Mind Reader first_subgoal: {first_sg}")
+
             return schema
             
         except Exception as e:
@@ -371,6 +435,25 @@ Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain":
                 
         return target_entity.strip()
 
+    def _get_domain_prompt(self, domain: str):
+        """
+        Look up a domain-specific prompt function.
+        Returns the get_prompt callable or None.
+        """
+        if not domain or domain == "unknown":
+            return None
+        # Normalize domain to module name: "pornpics.de" → "pornpics_de"
+        module_name = domain.replace(".", "_").replace("-", "_")
+        try:
+            import importlib
+            mod = importlib.import_module(f"mind_reader_domain_prompts.{module_name}")
+            fn = getattr(mod, "get_prompt", None)
+            if fn:
+                return fn
+        except (ImportError, ModuleNotFoundError):
+            pass
+        return None
+
     def _sanitize_input(self, text: str) -> str:
         """
         Remove filler words and clean input.
@@ -492,13 +575,76 @@ Output: {{"action": "search", "target_entity": "Mixtral 8x7B pricing", "domain":
             raw_utterance=user_input,
             timestamp=time.time()
         )
-        
+
+        # Attach target_domain from heuristic
+        td = self._extract_target_domain_heuristic(user_input)
+        if td:
+            try:
+                object.__setattr__(schema, "target_domain", td)
+            except Exception:
+                pass
+
         logger.info(
             f"🧠 Mind Reader (fallback): '{user_input}' → "
             f"{schema.action.value} on '{schema.target_entity}'"
         )
-        
+
         return schema
+
+
+    def _extract_target_domain_heuristic(self, user_input: str) -> Optional[str]:
+        """
+        Regex-based fallback to extract target domain from user input.
+        Used when LLM call fails and _fallback_schema is invoked.
+
+        Returns:
+            Domain string (e.g. 'youtube.com') or None
+        """
+        input_lower = user_input.lower().strip()
+
+        # Known site name → domain mappings
+        known_sites = {
+            "youtube": "youtube.com",
+            "amazon": "amazon.com",
+            "google": "google.com",
+            "facebook": "facebook.com",
+            "twitter": "twitter.com",
+            "instagram": "instagram.com",
+            "reddit": "reddit.com",
+            "netflix": "netflix.com",
+            "spotify": "spotify.com",
+            "linkedin": "linkedin.com",
+            "github": "github.com",
+            "flipkart": "flipkart.com",
+            "myntra": "myntra.com",
+            "ajio": "ajio.com",
+            "zalando": "zalando.com",
+            "ebay": "ebay.com",
+            "walmart": "walmart.com",
+        }
+
+        # Patterns: "go to X", "open X", "take me to X", "navigate to X", "switch to X"
+        patterns = [
+            r"(?:go\s+to|open|take\s+me\s+to|navigate\s+to|switch\s+to)\s+(.+?)(?:\s+and\b|\s+then\b|$)",
+        ]
+
+        for pattern in patterns:
+            m = re.search(pattern, input_lower)
+            if m:
+                site_mention = m.group(1).strip().rstrip(".")
+                # Check known sites first
+                for name, dom in known_sites.items():
+                    if name in site_mention:
+                        return dom
+                # If it already looks like a domain (has a dot)
+                if "." in site_mention:
+                    return site_mention
+                # Append .com for single-word site names
+                site_words = site_mention.split()
+                if len(site_words) == 1 and site_words[0].isalpha():
+                    return f"{site_words[0]}.com"
+
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════

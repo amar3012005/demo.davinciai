@@ -6,17 +6,17 @@
  * Depends on: tara-config.js (window.TARA.Config)
  */
 (function () {
-    'use strict';
+  'use strict';
 
-    window.TARA = window.TARA || {};
+  window.TARA = window.TARA || {};
 
-    /**
-     * Returns the full CSS string for the TARA widget.
-     * @param {Object} config - TARA config with orbSize, colors, etc.
-     * @returns {string} CSS text
-     */
-    function getStyles(config) {
-        return `
+  /**
+   * Returns the full CSS string for the TARA widget.
+   * @param {Object} config - TARA config with orbSize, colors, etc.
+   * @returns {string} CSS text
+   */
+  function getStyles(config) {
+    return `
         :host { all: initial; }
         #tara-container { isolation: isolate; }
 
@@ -514,9 +514,228 @@
             font-size: 12px;
             margin-top: 2px;
         }
-      `;
-    }
 
-    window.TARA.Styles = { getStyles };
-    console.log('✅ [TARA] Styles module loaded');
+        /* === ANALYSE PAGE STRIP === */
+        .tara-analyse-strip {
+            display: none;
+            flex-direction: column;
+            gap: 0;
+            margin-top: 10px;
+            width: 240px;
+            background: rgba(12, 12, 22, 0.88);
+            backdrop-filter: blur(40px) saturate(1.6);
+            -webkit-backdrop-filter: blur(40px) saturate(1.6);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 18px;
+            padding: 16px;
+            box-shadow:
+                0 20px 60px rgba(0, 0, 0, 0.5),
+                0 4px 24px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            opacity: 0;
+            transform: translateY(-8px) scale(0.97);
+            transition:
+                opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: auto;
+        }
+        .tara-analyse-strip.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        /* Header row */
+        .tara-analyse-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .tara-analyse-eyebrow {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(160, 120, 255, 0.85);
+        }
+        .tara-analyse-close {
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 0;
+        }
+        .tara-analyse-close:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* Label */
+        .tara-analyse-label {
+            font-size: 12.5px;
+            color: rgba(255, 255, 255, 0.55);
+            margin: 0 0 14px 0;
+            line-height: 1.4;
+        }
+
+        /* Option buttons row */
+        .tara-analyse-options {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .tara-analyse-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 11px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.04);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+        }
+        .tara-analyse-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            border-radius: 12px;
+        }
+        .tara-analyse-btn.dom::before {
+            background: linear-gradient(135deg, rgba(80, 200, 255, 0.08), rgba(60, 120, 255, 0.06));
+        }
+        .tara-analyse-btn.vision::before {
+            background: linear-gradient(135deg, rgba(160, 80, 255, 0.10), rgba(200, 60, 200, 0.06));
+        }
+        .tara-analyse-btn:hover::before { opacity: 1; }
+        .tara-analyse-btn:hover {
+            border-color: rgba(255, 255, 255, 0.14);
+            transform: translateX(2px);
+        }
+        .tara-analyse-btn.dom:hover {
+            border-color: rgba(80, 200, 255, 0.25);
+            box-shadow: 0 4px 16px rgba(80, 180, 255, 0.1);
+        }
+        .tara-analyse-btn.vision:hover {
+            border-color: rgba(160, 80, 255, 0.3);
+            box-shadow: 0 4px 16px rgba(140, 60, 255, 0.12);
+        }
+
+        /* Icon badge */
+        .tara-analyse-btn-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: transform 0.2s ease;
+        }
+        .tara-analyse-btn:hover .tara-analyse-btn-icon {
+            transform: scale(1.08);
+        }
+        .tara-analyse-btn-icon.dom {
+            background: rgba(80, 200, 255, 0.12);
+            color: rgba(100, 210, 255, 0.9);
+        }
+        .tara-analyse-btn-icon.vision {
+            background: rgba(160, 80, 255, 0.14);
+            color: rgba(180, 100, 255, 0.9);
+        }
+
+        /* Text block */
+        .tara-analyse-btn-text {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+        .tara-analyse-btn-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.92);
+            letter-spacing: -0.1px;
+        }
+        .tara-analyse-btn-desc {
+            font-size: 10.5px;
+            color: rgba(255, 255, 255, 0.38);
+        }
+
+        /* Arrow indicator */
+        .tara-analyse-btn-arrow {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+        .tara-analyse-btn:hover .tara-analyse-btn-arrow {
+            color: rgba(255, 255, 255, 0.55);
+            transform: translateX(2px);
+        }
+
+        /* Divider */
+        .tara-analyse-divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .tara-analyse-divider-line {
+            flex: 1;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.07);
+        }
+        .tara-analyse-divider-text {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.25);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        /* "Start full session" button */
+        .tara-analyse-start-session {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 11px;
+            border: 1px solid rgba(242, 90, 41, 0.25);
+            background: rgba(242, 90, 41, 0.08);
+            color: rgba(242, 130, 80, 0.92);
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.01em;
+        }
+        .tara-analyse-start-session:hover {
+            background: rgba(242, 90, 41, 0.16);
+            border-color: rgba(242, 90, 41, 0.45);
+            color: rgba(255, 150, 100, 1);
+            box-shadow: 0 4px 20px rgba(242, 90, 41, 0.15);
+        }
+      `;
+  }
+
+  window.TARA.Styles = { getStyles };
+  console.log('✅ [TARA] Styles module loaded');
 })();
