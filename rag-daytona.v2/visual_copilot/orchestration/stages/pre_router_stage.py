@@ -1,8 +1,6 @@
 import json
 import os
-import re
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urlparse
 
 import httpx
 
@@ -12,69 +10,8 @@ from visual_copilot.constants import PRE_ROUTER_VISION_MODEL
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
 
-def _root_domain(host_or_url: str) -> str:
-    raw = (host_or_url or "").strip().lower()
-    if "://" in raw:
-        try:
-            raw = urlparse(raw).netloc
-        except Exception:
-            pass
-    raw = raw.replace("www.", "").split("/")[0]
-    parts = [p for p in raw.split(".") if p]
-    if len(parts) >= 2:
-        return ".".join(parts[-2:])
-    return raw
-
-
 def _get_api_key() -> Optional[str]:
     return os.getenv("GROQ_API_KEY") or os.getenv("LLM_API_KEY")
-
-
-def _goal_mentions_target_domain(goal: str, target_domain: str) -> bool:
-    g = (goal or "").lower()
-    root = _root_domain(target_domain or "")
-    if not root:
-        return False
-    tokens = [t for t in root.replace(".", " ").split() if len(t) > 2]
-    return any(t in g for t in tokens)
-
-
-def _has_explicit_domain_intent(goal: str) -> bool:
-    """
-    Returns True only when user explicitly asks for a specific site/domain.
-    Examples: 'go to docs.cartesia.ai', 'open wikipedia.org', full URL present.
-    """
-    g = (goal or "").lower().strip()
-    if not g:
-        return False
-
-    if "http://" in g or "https://" in g:
-        return True
-
-    # Explicit domain-like token in utterance
-    if re.search(r"\b[a-z0-9-]+\.[a-z]{2,}(?:/[^\s]*)?\b", g):
-        return True
-
-    explicit_site_verbs = ("go to", "open", "visit", "navigate to")
-    if any(v in g for v in explicit_site_verbs):
-        # Only count as explicit if a known site marker/domain token is present too.
-        if re.search(r"\b(docs|console|dashboard|wikipedia|reddit|stackoverflow|github|groq|cartesia)\b", g):
-            return True
-
-    return False
-
-
-def _is_generic_external_domain(target_domain: str) -> bool:
-    root = _root_domain(target_domain or "")
-    generic = {
-        "wikipedia.org",
-        "stackoverflow.com",
-        "stackexchange.com",
-        "medium.com",
-        "reddit.com",
-        "quora.com",
-    }
-    return root in generic
 
 
 def _safe_json_parse(text: str) -> Dict[str, Any]:
@@ -84,6 +21,30 @@ def _safe_json_parse(text: str) -> Dict[str, Any]:
     if start != -1 and end != -1 and end > start:
         text = text[start : end + 1]
     return json.loads(text)
+
+
+def _parse_confidence(raw: Any) -> float:
+    """
+    Parse model confidence robustly.
+    Accepts floats, numeric strings, and percentage-like strings.
+    Returns clamped [0.0, 1.0].
+    """
+    if raw is None:
+        return 0.0
+    try:
+        if isinstance(raw, str):
+            s = raw.strip().replace("%", "")
+            if not s:
+                return 0.0
+            val = float(s)
+            # If model returns 80 for 80%, normalize.
+            if val > 1.0:
+                val = val / 100.0
+        else:
+            val = float(raw)
+        return max(0.0, min(1.0, val))
+    except Exception:
+        return 0.0
 
 
 async def run_pre_router_gate(
@@ -120,8 +81,7 @@ async def run_pre_router_gate(
         "3) Is this page clearly unrelated to the goal?\n"
         "Return ONLY valid JSON with this exact schema:\n"
         "{\n"
-        '  "route": "cross_domain_navigate | current_domain_hive | current_domain_last_mile",\n'
-        '  "target_domain": "https://domain/path or null",\n'
+        '  "route": "current_domain_hive | current_domain_last_mile",\n'
         '  "confidence": 0.0,\n'
         '  "reason": "short reason",\n'
         '  "goal_evidence_visible": true,\n'
@@ -132,11 +92,8 @@ async def run_pre_router_gate(
         "1) Prefer IN-DOMAIN routing by default.\n"
         "2) Use current_domain_last_mile when goal evidence is visible OR obvious next local control exists.\n"
         "3) Use current_domain_hive when location is unclear and strategic navigation hints are needed.\n"
-        "4) Use cross_domain_navigate ONLY when the user explicitly requests another website/domain.\n"
-        "5) Do NOT route to generic knowledge sites (wikipedia/reddit/stackoverflow/medium/etc.) unless user explicitly asks for that site.\n"
-        "6) If uncertain, choose current_domain_hive.\n"
-        "Never invent domains. Use null target_domain unless route=cross_domain_navigate.\n"
-        "Never output cross_domain_navigate just because the page seems unrelated."
+        "4) If uncertain, choose current_domain_hive.\n"
+        "Never output any external-domain routing from this stage."
     )
     user_prompt = (
         f"User goal: {goal}\n"
@@ -178,11 +135,11 @@ async def run_pre_router_gate(
         return None, None
 
     route = str(data.get("route", "")).strip().lower()
-    allowed_routes = {"cross_domain_navigate", "current_domain_hive", "current_domain_last_mile"}
+    allowed_routes = {"current_domain_hive", "current_domain_last_mile"}
     if route not in allowed_routes:
         route = "current_domain_hive"
-    target_domain = data.get("target_domain")
-    confidence = float(data.get("confidence") or 0.0)
+    target_domain = None
+    confidence = _parse_confidence(data.get("confidence"))
     reason = str(data.get("reason") or "").strip()[:180]
     goal_evidence_visible = bool(data.get("goal_evidence_visible", False))
     obvious_next_control = bool(data.get("obvious_next_control", False))
@@ -190,7 +147,7 @@ async def run_pre_router_gate(
 
     decision = {
         "route": route,
-        "target_domain": target_domain,
+        "target_domain": None,
         "confidence": confidence,
         "reason": reason,
         "goal_evidence_visible": goal_evidence_visible,
@@ -198,93 +155,28 @@ async def run_pre_router_gate(
         "page_clearly_unrelated": page_clearly_unrelated,
     }
 
-    # Normalize noisy LLM output: cross-domain prediction inside same root domain
-    # should stay in current-domain routing to avoid confusing handoff behavior/logs.
-    if route == "cross_domain_navigate" and target_domain:
-        current_root = _root_domain(current_url)
-        target_root = _root_domain(str(target_domain))
-        if current_root and target_root and current_root == target_root:
-            decision["route"] = "current_domain_hive"
-            decision["target_domain"] = None
-            decision["reason"] = (
-                f"normalized_same_root_domain({current_root}): {reason or 'keep in-domain routing'}"
-            )[:180]
-            logger.info(
-                f"PRE_ROUTER_VISION_NORMALIZED session={session_id} "
-                f"from=cross_domain_navigate to=current_domain_hive root={current_root}"
-            )
-            route = decision["route"]
-            target_domain = decision["target_domain"]
-            reason = decision["reason"]
+    # If model provides route/reason but leaves confidence at 0, calibrate a sensible default
+    # so downstream gates/logs reflect an actionable signal instead of a misleading zero.
+    if confidence <= 0.0:
+        if goal_evidence_visible or obvious_next_control:
+            confidence = 0.85
+        elif route == "current_domain_hive" and reason:
+            confidence = 0.70
+        elif page_clearly_unrelated:
+            confidence = 0.65
+        else:
+            confidence = 0.55
+        decision["confidence"] = confidence
 
-    # Hard rule: cross-domain only on explicit-domain intent in user goal.
-    if route == "cross_domain_navigate" and not _has_explicit_domain_intent(goal):
-        decision["route"] = "current_domain_hive"
-        decision["target_domain"] = None
-        decision["reason"] = (
-            f"normalized_cross_domain_requires_explicit_domain_intent: {reason or 'stay in-domain'}"
-        )[:180]
-        logger.info(
-            f"PRE_ROUTER_VISION_NORMALIZED session={session_id} "
-            "from=cross_domain_navigate to=current_domain_hive reason=no_explicit_domain_intent"
-        )
-        route = decision["route"]
-        target_domain = decision["target_domain"]
-        reason = decision["reason"]
+    # Tie-breaker only: keep current-domain routes only.
+    decision["route"] = route
+    decision["target_domain"] = None
 
-    # Normalize noisy LLM output: cross-domain target not explicitly requested in goal.
-    if route == "cross_domain_navigate" and target_domain:
-        if not _goal_mentions_target_domain(goal, str(target_domain)):
-            decision["route"] = "current_domain_hive"
-            decision["target_domain"] = None
-            decision["reason"] = (
-                f"normalized_no_explicit_domain_in_goal: {reason or 'stay in-domain'}"
-            )[:180]
-            logger.info(
-                f"PRE_ROUTER_VISION_NORMALIZED session={session_id} "
-                "from=cross_domain_navigate to=current_domain_hive reason=no_explicit_domain"
-            )
-            route = decision["route"]
-            target_domain = decision["target_domain"]
-            reason = decision["reason"]
-
-    # Normalize noisy LLM output: generic external knowledge domains without explicit user request.
-    if route == "cross_domain_navigate" and target_domain and _is_generic_external_domain(str(target_domain)):
-        if not _goal_mentions_target_domain(goal, str(target_domain)):
-            decision["route"] = "current_domain_hive"
-            decision["target_domain"] = None
-            decision["reason"] = (
-                f"normalized_generic_external_domain: {reason or 'stay in-domain'}"
-            )[:180]
-            logger.info(
-                f"PRE_ROUTER_VISION_NORMALIZED session={session_id} "
-                f"from=cross_domain_navigate to=current_domain_hive reason=generic_external({_root_domain(str(target_domain))})"
-            )
-            route = decision["route"]
-            target_domain = decision["target_domain"]
-            reason = decision["reason"]
     logger.info(
         f"PRE_ROUTER_VISION_DECISION session={session_id} route={route or 'none'} "
-        f"target={target_domain or 'none'} conf={confidence:.2f} "
+        f"target=none conf={confidence:.2f} "
         f"visible={goal_evidence_visible} next_control={obvious_next_control} "
         f"unrelated={page_clearly_unrelated} reason={reason or 'n/a'}"
     )
-
-    if route == "cross_domain_navigate" and target_domain:
-        current_root = _root_domain(current_url)
-        target_root = _root_domain(str(target_domain))
-        if target_root and current_root and target_root != current_root:
-            return {
-                "success": True,
-                "action": {
-                    "type": "cross_domain_navigate",
-                    "target_domain": str(target_domain),
-                    "target_entity": goal,
-                    "hints": [],
-                    "speech": f"Taking you to {target_domain} now.",
-                },
-                "pipeline": "ultimate_tara_pre_router_vision",
-                "confidence": confidence,
-            }, decision
 
     return None, decision

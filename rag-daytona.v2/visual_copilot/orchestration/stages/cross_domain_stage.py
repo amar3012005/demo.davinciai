@@ -42,10 +42,11 @@ async def run_cross_domain_gate(
         is_explicit_jump = any(re.search(t, goal.lower()) for t in cross_domain_triggers)
 
         cross_response = None
-        if not is_mid_mission or is_explicit_jump:
+        # Only perform cross-domain retrieval when user intent explicitly asks to jump domains.
+        if is_explicit_jump:
             cross_response = await hive_interface.retrieve_cross_domain(schema)
         else:
-            logger.info("⏩ Mid-mission detected. Skipping redundant cross-domain search.")
+            logger.info("⏩ Cross-domain retrieval skipped: no explicit domain-jump intent.")
 
         bridge_domain = getattr(cross_response, "cross_domain_target", None) if cross_response else None
         garbage_domains = {"all", "none", "null", "", "any"}

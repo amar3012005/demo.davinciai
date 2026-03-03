@@ -50,6 +50,20 @@ async def run_router_pre_detective_stage(
     is_canary_domain_fn,
     match_result_cls,
 ) -> Dict[str, Any]:
+    def _is_weak_token_overlap_label(label: str) -> bool:
+        c = (label or "").strip().lower()
+        if not c:
+            return True
+        tokens = [t for t in c.split() if t]
+        if len(tokens) > 3:
+            return True
+        weak = {
+            "page", "showing", "data", "details", "info", "information", "section",
+            "content", "results", "model", "usage", "token", "tokens", "user",
+            "navigate", "locate", "find", "open",
+        }
+        return any(t in weak for t in tokens)
+
     def _is_question_like(text: str) -> bool:
         t = (text or "").strip().lower()
         return ("?" in t) or t.startswith(("what ", "which ", "how ", "why ", "where ", "when "))
@@ -366,14 +380,14 @@ async def run_router_pre_detective_stage(
             label_policy["raw_node_id"] = hard_match.raw_node_id
             if (
                 subgoal_mode == "literal_click"
-                and strategy_authoritative
                 and label_policy["match_mode"] == "token_overlap"
             ):
-                label_policy["miss_reason"] = "weak_keyword_overlap"
-                logger.info(
-                    f"KEYWORD_DIRECT_MISS reason=weak_keyword_overlap labels={label_policy['label_candidates'][:2]}"
-                )
-                hard_match = match_result_cls(None, "", "none", None, "weak_keyword_overlap")
+                if strategy_authoritative or _is_weak_token_overlap_label(label_policy.get("matched_label", "")):
+                    label_policy["miss_reason"] = "weak_keyword_overlap"
+                    logger.info(
+                        f"KEYWORD_DIRECT_MISS reason=weak_keyword_overlap labels={label_policy['label_candidates'][:2]}"
+                    )
+                    hard_match = match_result_cls(None, "", "none", None, "weak_keyword_overlap")
             if subgoal_mode == "literal_click" and hard_match.candidate_id:
                 target_id = hard_match.candidate_id
                 resolved_id, resolve_reason = resolve_clickable_target_id_fn(

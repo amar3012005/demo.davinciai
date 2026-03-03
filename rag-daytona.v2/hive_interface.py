@@ -547,6 +547,11 @@ class HiveInterface:
                     else getattr(point, 'score', 0.0)
                 )
                 d = payload.get('domain', '')
+                if isinstance(d, str):
+                    d = d.strip().lower()
+                garbage_domains = {"all", "none", "null", "", "any", "unknown"}
+                if d in garbage_domains:
+                    continue
 
                 # Skip current domain — we already know it has nothing
                 if d == schema.domain or not d:

@@ -119,7 +119,19 @@ def _extract_unquoted_label_phrase(text: str) -> str:
 
 def _override_mode_for_labels(subgoal_mode: str, label_candidates: List[str]) -> str:
     if subgoal_mode in {"cognitive_navigate", "ambiguous"} and label_candidates:
-        return "literal_click"
+        weak_terms = {
+            "page", "showing", "data", "details", "info", "information", "section",
+            "content", "results", "model", "usage", "token", "tokens", "user",
+            "navigate", "locate", "find", "open",
+        }
+        for label in label_candidates:
+            c = _canonicalize_label(label)
+            if not c:
+                continue
+            toks = [t for t in c.split() if t]
+            # Only promote to literal click when label looks like a concrete UI label.
+            if 1 <= len(toks) <= 3 and not any(t in weak_terms for t in toks):
+                return "literal_click"
     return subgoal_mode
 
 def _classify_subgoal_mode(query: str) -> str:
