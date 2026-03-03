@@ -1284,10 +1284,14 @@ class OrchestratorWSHandler:
                 async def barge_in_validation_timeout():
                     try:
                         await asyncio.sleep(5.0)
-                        if session.barge_in_pending:
+                        # Only recover if we're STILL in an active speaking interruption window.
+                        # If playback already completed or state moved on, do nothing.
+                        if session.barge_in_pending and not session.is_closed and state_mgr.state == State.SPEAKING:
                             session.barge_in_pending = False
                             logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after barge-in, resuming last response")
                             await self._recover_from_noise_interrupt(session)
+                        else:
+                            session.barge_in_pending = False
                     except asyncio.CancelledError:
                         pass  # STT transcript arrived and validated/rejected
 
@@ -3444,12 +3448,20 @@ class OrchestratorWSHandler:
             elapsed = time.time() - session.audio_playback_start_time
             # Keep a small margin for browser clock drift.
             if elapsed + 0.08 < session.audio_playback_duration:
-                # Premature playback_done - ignore it (watchdog will handle it)
-                logger.debug(
-                    f"[{session.session_id}] ⏸️ Ignoring premature playback_done "
-                    f"(elapsed: {elapsed:.2f}s < duration: {session.audio_playback_duration:.2f}s)"
-                )
-                return
+                # If we are in deferred barge-in validation, trust browser completion
+                # and finish this turn to avoid false noise_recovery replays.
+                if session.barge_in_pending:
+                    logger.info(
+                        f"[{session.session_id}] ✅ Accepting playback_done during pending barge-in "
+                        f"(elapsed: {elapsed:.2f}s, duration: {session.audio_playback_duration:.2f}s)"
+                    )
+                else:
+                    # Premature playback_done - ignore it (watchdog will handle it)
+                    logger.debug(
+                        f"[{session.session_id}] ⏸️ Ignoring premature playback_done "
+                        f"(elapsed: {elapsed:.2f}s < duration: {session.audio_playback_duration:.2f}s)"
+                    )
+                    return
         
         # Cancel server-side timer if browser confirms early (but valid)
         if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
