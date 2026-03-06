@@ -231,7 +231,7 @@ services:
 
     command: "uvicorn app:app --host 0.0.0.0 --port 4004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0"
     ports:
-      - "${ORCHESTRATOR_EU_PORT:-4014}:4004"
+      - "8030:4004"
     volumes:
       - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
       - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
