@@ -145,6 +145,8 @@ class QdrantAddon:
     @staticmethod
     def _sanitize_tenant(tenant_id: str) -> str:
         tenant = (tenant_id or "tara").strip().lower()
+        # Remove any trailing paths like /ws that the orchestrator might accidentally pass
+        tenant = tenant.split('/')[0]
         return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
 
     def _get_tenant_env(self, tenant_id: str, suffix: str) -> Optional[str]:

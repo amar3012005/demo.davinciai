@@ -235,8 +235,7 @@ services:
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
       FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-
-      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450}
+      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
       AGENT_HOST_SUFFIX: ${AGENT_HOST_SUFFIX:-}
       GLOBAL_CLIENT_URL: ${GLOBAL_CLIENT_URL:-}
       FORCE_GLOBAL_DOMAIN: ${FORCE_GLOBAL_DOMAIN:-false}
