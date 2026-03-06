@@ -15,8 +15,11 @@ COPY requirements.txt ./requirements.txt
 # Test network connectivity before pip install
 RUN curl -I https://pypi.org/ || (echo "Network test failed" && exit 1)
 
-# Install Python dependencies with retry and timeout
-RUN pip install --no-cache-dir --timeout=300 --retries=10 -r requirements.txt
+# Upgrade packaging tooling first (improves resolver/wheel compatibility on CI builders)
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install Python dependencies with retry, timeout, and binary preference
+RUN pip install --no-cache-dir --prefer-binary --timeout=300 --retries=10 -r requirements.txt
 
 # Copy application code
 COPY . .
