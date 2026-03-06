@@ -85,12 +85,42 @@ services:
     depends_on:
       redis-eu:
         condition: service_healthy
+      embeddings-eu:
+        condition: service_started
     labels:
       - coolify.managed=true
       - coolify.type=service
       - coolify.name=rag-eu
       - coolify.service.subType=application
       - coolify.service.subName=rag
+    env_file:
+      - .env.eu
+
+  # ═══════════════════════════════════════════════════════════
+  # Embeddings Service (Internal port 4006)
+  # ═══════════════════════════════════════════════════════════
+  embeddings-eu:
+    build:
+      context: ./bindings-eu/embeddings-eu
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 4006
+    environment:
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-all-MiniLM-L6-v2}
+      PORT: "4006"
+      HF_HOME: "/root/.cache/huggingface"
+      COOLIFY_CONTAINER_NAME: embeddings-eu
+    volumes:
+      - hf_cache_eu:/root/.cache/huggingface
+    networks:
+      eu-stack: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=embeddings-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=embeddings
     env_file:
       - .env.eu
 
@@ -220,12 +250,12 @@ services:
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
 
-      PUBLIC_URL: "https://demo.davinciai.eu:8001"
+      PUBLIC_URL: "https://demo.davinciai.eu:8030"
       # Tenant-agnostic websocket base endpoint.
       # Clients must pass tenant dynamically at runtime:
       # wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws?tenant_id=<tenant_id>
-      ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8001/ws"
-      WIDGET_WS_URL: "wss://demo.davinciai.eu:8001/ws"
+      ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8030/ws"
+      WIDGET_WS_URL: "wss://demo.davinciai.eu:8030/ws"
 
       STREAM_OUT: ${STREAM_OUT:-auto}
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
@@ -282,6 +312,8 @@ volumes:
     name: redis_eu_data
   rag_eu_index:
     name: rag_eu_index
+  hf_cache_eu:
+    name: hf_cache_eu
 
 networks:
   coolify:
