@@ -336,6 +336,14 @@ class OrchestratorWSHandler:
         tenant_candidates: List[str] = []
         if session.tenant_id:
             tenant_candidates.append(str(session.tenant_id).strip().lower())
+        if session.agent_name:
+            clean_name = session.agent_name.lower().replace(" agent", "").strip()
+            if clean_name and clean_name not in tenant_candidates:
+                tenant_candidates.append(clean_name)
+        if session.agent_id:
+            if session.agent_id.lower() not in tenant_candidates:
+                tenant_candidates.append(session.agent_id.lower())
+                
         intro_tenant = (os.getenv("TENANT_ID_INTRO", "") or "").strip().lower()
         if intro_tenant and intro_tenant not in tenant_candidates:
             tenant_candidates.append(intro_tenant)
@@ -476,15 +484,25 @@ class OrchestratorWSHandler:
 
         return config
 
-    def _resolve_tenant_voice_id(self, tenant_id: Optional[str], fallback_voice_id: Optional[str] = None) -> Optional[str]:
+    def _resolve_tenant_voice_id(self, tenant_id: Optional[str], fallback_voice_id: Optional[str] = None, agent_name: Optional[str] = None, agent_id: Optional[str] = None) -> Optional[str]:
         """
         Resolve voice id by tenant using env pattern:
         - <tenant>_voice_id
         - <TENANT>_VOICE_ID
         Fallback to provided voice id, then CARTESIA_VOICE_ID.
         """
-        tenant = (tenant_id or "").strip().lower()
-        if tenant:
+        tenant_candidates = []
+        if tenant_id:
+            tenant_candidates.append(tenant_id.strip().lower())
+        if agent_name:
+            clean_name = agent_name.lower().replace(" agent", "").strip()
+            if clean_name and clean_name not in tenant_candidates:
+                tenant_candidates.append(clean_name)
+        if agent_id:
+            if agent_id.lower() not in tenant_candidates:
+                tenant_candidates.append(agent_id.lower())
+                
+        for tenant in tenant_candidates:
             safe_tenant = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
             by_lower = os.getenv(f"{safe_tenant}_voice_id")
             by_upper = os.getenv(f"{safe_tenant.upper()}_VOICE_ID")
@@ -580,7 +598,7 @@ class OrchestratorWSHandler:
         session.agent_name = query_params.get("agent_name") or host_config["agent_name"]
         session.rag_url = query_params.get("rag_url") or host_config["rag_url"]
         base_voice = query_params.get("voice_id") or host_config["voice_id"]
-        session.voice_id_override = self._resolve_tenant_voice_id(session.tenant_id, base_voice)
+        session.voice_id_override = self._resolve_tenant_voice_id(session.tenant_id, base_voice, session.agent_name, session.agent_id)
         
         if query_params.get("rag_url"):
             logger.info(f"[{session_id}] 🚀 DYNAMIC RAG OVERRIDE: {session.rag_url}")
@@ -2533,7 +2551,9 @@ class OrchestratorWSHandler:
         requested_voice = effective_msg.get("voice_id")
         session.voice_id_override = self._resolve_tenant_voice_id(
             session.tenant_id,
-            str(requested_voice) if requested_voice else session.voice_id_override
+            str(requested_voice) if requested_voice else session.voice_id_override,
+            session.agent_name,
+            session.agent_id
         )
         await self._persist_session_runtime_config(session)
 

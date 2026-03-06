@@ -1136,9 +1136,17 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             return result
 
         # Original query logic proceeds...
+        original_tenant_id = (request_data.tenant_id or "demo").strip().lower()
+        effective_agent_name = (request_data.agent_name or "unknown").strip()
+        effective_tenant_id = original_tenant_id
+        if len(original_tenant_id) > 20 and effective_agent_name and effective_agent_name.lower() != "unknown":
+            clean_agent = effective_agent_name.lower().replace(" agent", "").strip()
+            if clean_agent:
+                effective_tenant_id = clean_agent
+
         # Generate cache key with tenant + org + context to avoid cross-brand cache bleed.
         lang_suffix = f":{request_data.language}" if request_data.language else ""
-        tenant_prefix = f"{request_data.tenant_id or 'demo'}:"
+        tenant_prefix = f"{effective_tenant_id}:"
         org_slug = str(getattr(app.state.rag_engine.config, "organization_name", "org")).strip().lower()
         context_hash = hashlib.md5(
             json.dumps(request_data.context or {}, sort_keys=True, default=str).encode()
@@ -1179,7 +1187,7 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             context_data,
             streaming_callback=None,  # Streaming handled separately if needed
             history_context=request_data.history_context,
-            tenant_id=request_data.tenant_id,
+            tenant_id=effective_tenant_id,
             force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
             generation_config={
                 "max_tokens": 1024,
@@ -1233,9 +1241,15 @@ async def stream_query_knowledge_base(request: QueryRequest):
     Returns a stream of JSON objects: {"text": "...", "is_final": bool}
     """
     async def event_generator():
-        effective_tenant_id = (request.tenant_id or "tara").strip().lower()
+        original_tenant_id = (request.tenant_id or "tara").strip().lower()
         effective_session_id = (request.session_id or "unknown").strip()
         effective_agent_name = (request.agent_name or ((request.context or {}).get("agent_name")) or "unknown").strip()
+
+        effective_tenant_id = original_tenant_id
+        if len(original_tenant_id) > 20 and effective_agent_name and effective_agent_name.lower() != "unknown":
+            clean_agent = effective_agent_name.lower().replace(" agent", "").strip()
+            if clean_agent:
+                effective_tenant_id = clean_agent
 
         # Emit one banner per session at first stream query (session handshake into RAG path)
         if effective_session_id not in session_banner_logged:

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class RemoteEmbeddings:
     def __init__(self, endpoint_url: str = None):
         if endpoint_url is None:
-            endpoint_url = os.getenv("EMBEDDINGS_SERVICE_URL", "http://embeddings-eu-local:4006/embed")
+            endpoint_url = os.getenv("EMBEDDINGS_SERVICE_URL", "http://embeddings-eu:4006/embed")
         self.endpoint_url = endpoint_url
         
     def encode(self, sentences: Union[str, List[str]], **kwargs) -> np.ndarray:
