@@ -220,12 +220,12 @@ services:
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
 
-      PUBLIC_URL: "${PUBLIC_URL:-https://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}}"
+      PUBLIC_URL: "${PUBLIC_URL:-https://demo.davinciai.eu:8100}"
       # Tenant-agnostic websocket base endpoint.
       # Clients must pass tenant dynamically at runtime:
       # wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws?tenant_id=<tenant_id>
-      ORCHESTRATOR_WS_URL: "${ORCHESTRATOR_WS_URL:-wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws}"
-      WIDGET_WS_URL: "${WIDGET_WS_URL:-wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws}"
+      ORCHESTRATOR_WS_URL: "${ORCHESTRATOR_WS_URL:-wss://demo.davinciai.eu:8100/ws}"
+      WIDGET_WS_URL: "${WIDGET_WS_URL:-wss://demo.davinciai.eu:8100/ws}"
 
       STREAM_OUT: ${STREAM_OUT:-auto}
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
