@@ -1,0 +1,40 @@
+services:
+  # ═══════════════════════════════════════════════════════════
+  # Standalone Embeddings Service (Internal port 4006)
+  # ═══════════════════════════════════════════════════════════
+  embeddings-eu:
+    build:
+      context: ./bindings-eu/embeddings-eu
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 4006
+    environment:
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-all-MiniLM-L6-v2}
+      PORT: "4006"
+      HF_HOME: "/root/.cache/huggingface"
+      COOLIFY_CONTAINER_NAME: embeddings-eu
+    volumes:
+      - hf_cache_standalone_eu:/root/.cache/huggingface
+    networks:
+      coolify: null
+      eu-stack: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=embeddings-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=embeddings
+    env_file:
+      - .env.eu
+
+volumes:
+  hf_cache_standalone_eu:
+    name: hf_cache_standalone_eu
+
+networks:
+  coolify:
+    external: true
+  eu-stack:
+    external: true
+    name: eu-stack

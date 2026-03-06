@@ -73,6 +73,7 @@ services:
       DAYTONA_RAG_ENABLE_CACHE: "false"
       DAYTONA_RAG_CACHE_TTL: "0"
 
+      EMBEDDINGS_SERVICE_URL: ${EMBEDDINGS_SERVICE_URL:-http://embeddings-eu:4006/embed}
       COOLIFY_CONTAINER_NAME: rag-eu
     dns:
       - 8.8.8.8
@@ -83,42 +84,12 @@ services:
     depends_on:
       redis-eu:
         condition: service_healthy
-      embeddings-eu:
-        condition: service_started
     labels:
       - coolify.managed=true
       - coolify.type=service
       - coolify.name=rag-eu
       - coolify.service.subType=application
       - coolify.service.subName=rag
-    env_file:
-      - .env.eu
-
-  # ═══════════════════════════════════════════════════════════
-  # Embeddings Service (Internal port 4006)
-  # ═══════════════════════════════════════════════════════════
-  embeddings-eu:
-    build:
-      context: ./bindings-eu/embeddings-eu
-      dockerfile: Dockerfile
-    command: >
-      uvicorn app:app --host 0.0.0.0 --port 4006
-    environment:
-      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-all-MiniLM-L6-v2}
-      PORT: "4006"
-      HF_HOME: "/root/.cache/huggingface"
-      COOLIFY_CONTAINER_NAME: embeddings-eu
-    volumes:
-      - hf_cache_eu:/root/.cache/huggingface
-    networks:
-      eu-stack: null
-    restart: unless-stopped
-    labels:
-      - coolify.managed=true
-      - coolify.type=service
-      - coolify.name=embeddings-eu
-      - coolify.service.subType=application
-      - coolify.service.subName=embeddings
     env_file:
       - .env.eu
 
@@ -308,8 +279,6 @@ volumes:
     name: redis_eu_data
   rag_eu_index:
     name: rag_eu_index
-  hf_cache_eu:
-    name: hf_cache_eu
 
 networks:
   coolify:
