@@ -1,5 +1,5 @@
 # Coolify-compatible TARA EU Service
-# Domain: demo.davinciai.eu | Orchestrator WSS exposed on port 8011
+# Domain: demo.davinciai.eu | Orchestrator WSS exposed on port 4014
 # Config synced from docker-compose.local-eu.yml + Coolify patterns from docker-compose.yml
 
 services:
@@ -28,7 +28,8 @@ services:
     environment:
       COOLIFY_CONTAINER_NAME: redis-eu
     env_file:
-      - .env
+
+      - .env.eu
 
   # ═══════════════════════════════════════════════════════════
   # RAG Service (Internal port 4001)
@@ -38,12 +39,14 @@ services:
       context: ./rag-eu
       dockerfile: Dockerfile
 
-    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001"
+    command: >
+      sh -c 'export LLM_API_KEY="$${LLM_API_KEY:-$$GROQ_API_KEY}";
+      export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}";
+      python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001'
     volumes:
       - rag_eu_index:/app/index
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
-      LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
       ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
       MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
@@ -58,15 +61,16 @@ services:
       QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
-      ENABLE_HIVE_MIND: "true"
+      ENABLE_HIVE_MIND: "false"
       ENABLE_LOCAL_RETRIEVAL: "false"
       ENABLE_INGESTION_SERVICE: "false"
-      HIVEMIND_IN_VISUAL_COPILOT: "true"
+      USE_ULTIMATE_TARA: "false"
+      HIVEMIND_IN_VISUAL_COPILOT: "false"
 
-      USE_NEW_DETECTIVE: "true"
-      USE_MISSION_BRAIN: "true"
-      USE_LIVE_GRAPH: "true"
-      USE_HIVE_INTERFACE: "true"
+      USE_NEW_DETECTIVE: "false"
+      USE_MISSION_BRAIN: "false"
+      USE_LIVE_GRAPH: "false"
+      USE_HIVE_INTERFACE: "false"
 
       DAYTONA_RAG_ENABLE_CACHE: "false"
       DAYTONA_RAG_CACHE_TTL: "0"
@@ -88,7 +92,8 @@ services:
       - coolify.service.subType=application
       - coolify.service.subName=rag
     env_file:
-      - .env
+      - .env.eu
+
 
   # ═══════════════════════════════════════════════════════════
   # STT Service (Internal port 4002) — Groq Whisper
@@ -103,12 +108,18 @@ services:
       uvicorn app:app --host 0.0.0.0 --port 4002'
     environment:
       PYTHONUNBUFFERED: 1
-      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
-      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3-turbo}
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3}
       ENABLE_MICRO_CHUNKING: ${ENABLE_MICRO_CHUNKING:-false}
-      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-700}
-      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-400}
+      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-120}
+      OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-60}
+      CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-3}
+      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-850}
+      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-250}
+      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-700}
+      PRE_SPEECH_PADDING_MS: ${PRE_SPEECH_PADDING_MS:-500}
+      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-500}
       GROQ_LANGUAGE: ${GROQ_LANGUAGE:-en}
 
       STT_GROQ_HOST: 0.0.0.0
@@ -140,7 +151,7 @@ services:
       - coolify.service.subType=application
       - coolify.service.subName=stt
     env_file:
-      - .env
+      - .env.eu
 
   # ═══════════════════════════════════════════════════════════
   # TTS Service (Internal port 4003) — Cartesia
@@ -153,7 +164,7 @@ services:
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
     environment:
       CARTESIA_API_KEY: ${CARTESIA_API_KEY}
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-07bc462a-c644-49f1-baf7-82d5599131be}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-f786b574-daa5-4673-aa0c-cbe3e8534c02}
       CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
       CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
       CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
@@ -178,10 +189,10 @@ services:
       - coolify.service.subType=application
       - coolify.service.subName=tts
     env_file:
-      - .env
+      - .env.eu
 
   # ═══════════════════════════════════════════════════════════
-  # Orchestrator (Internal 4004 → External 8011 with SSL for WSS)
+  # Orchestrator (Internal 4004 → External 4014 with SSL for WSS)
   # ═══════════════════════════════════════════════════════════
   orchestrator-eu:
     build:
@@ -190,7 +201,7 @@ services:
 
     command: "uvicorn app:app --host 0.0.0.0 --port 4004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0"
     ports:
-      - "8011:4004"
+      - "${ORCHESTRATOR_EU_PORT:-4014}:4004"
     volumes:
       - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
       - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
@@ -209,13 +220,21 @@ services:
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
 
-      PUBLIC_URL: "https://demo.davinciai.eu:8011"
-      ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8011/ws"
-      WIDGET_WS_URL: "wss://demo.davinciai.eu:8011/ws"
+      PUBLIC_URL: "${PUBLIC_URL:-https://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}}"
+      # Tenant-agnostic websocket base endpoint.
+      # Clients must pass tenant dynamically at runtime:
+      # wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws?tenant_id=<tenant_id>
+      ORCHESTRATOR_WS_URL: "${ORCHESTRATOR_WS_URL:-wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws}"
+      WIDGET_WS_URL: "${WIDGET_WS_URL:-wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws}"
 
       STREAM_OUT: ${STREAM_OUT:-auto}
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
+      BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
+      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-true}
+      TENANT_ID_INTRO: ${TENANT_ID_INTRO:-tara}
+      DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
+      DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
       FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
@@ -224,6 +243,12 @@ services:
       GLOBAL_CLIENT_URL: ${GLOBAL_CLIENT_URL:-}
       FORCE_GLOBAL_DOMAIN: ${FORCE_GLOBAL_DOMAIN:-false}
       USE_ULTIMATE_TARA: "false"
+
+      # FSM Appointment Booking (Schema-Driven)
+      FSM_APPOINTMENT_SCHEMA_JSON: ${FSM_APPOINTMENT_SCHEMA_JSON:-}
+      FSM_ALLOW_RAG_DETOUR: ${FSM_ALLOW_RAG_DETOUR:-true}
+      FSM_MAX_DETOURS_PER_FIELD: ${FSM_MAX_DETOURS_PER_FIELD:-2}
+      FSM_MAX_RETRIES: ${FSM_MAX_RETRIES:-3}
 
       COOLIFY_CONTAINER_NAME: orchestrator-eu
     networks:
@@ -250,7 +275,7 @@ services:
       - traefik.http.services.orchestrator-eu-https.loadbalancer.server.port=4004
       - traefik.http.services.orchestrator-eu-https.loadbalancer.server.scheme=https
     env_file:
-      - .env
+      - .env.eu
 
 volumes:
   redis_eu_data:

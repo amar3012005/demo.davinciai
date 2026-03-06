@@ -134,6 +134,7 @@ class SessionConfig:
     timeout_seconds: float = 30.0
     max_timeout_prompts: int = 3
     ttl_seconds: int = 3600
+    bargin_feature: bool = False
     ignore_stt_while_speaking: bool = True
 
 
@@ -147,6 +148,16 @@ class PerformanceConfig:
 
 
 @dataclass
+class FSMConfig:
+    """FSM (Finite State Machine) configuration for appointment booking"""
+    appointment_schema_json: str = ""  # JSON schema for appointment fields
+    allow_rag_detour: bool = True  # Allow RAG detours during FSM flow
+    max_detours_per_field: int = 2  # Max detours allowed per pending field
+    cancel_keywords: list = field(default_factory=lambda: ["cancel", "stop", "nevermind", "forget it", "quit", "exit"])
+    max_retries: int = 3  # Max retries per field before cancellation
+
+
+@dataclass
 class OrchestratorConfig:
     """Complete configuration for the Orchestrator"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -157,6 +168,7 @@ class OrchestratorConfig:
     dialogue: Dict[str, Dict[str, List[Dict[str, Any]]]] = field(default_factory=dict)
     session: SessionConfig = field(default_factory=SessionConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    fsm: FSMConfig = field(default_factory=FSMConfig)
 
 
 class ConfigLoader:
@@ -351,11 +363,24 @@ class ConfigLoader:
         # Session config (with env var overrides)
         if "session" in data:
             session_data = data["session"]
+            bargin_feature = os.getenv(
+                "BARGIN_FEATURE",
+                os.getenv("BARGE_IN_FEATURE", str(session_data.get("bargin_feature", False)))
+            ).lower() == "true"
+            ignore_stt_while_speaking = os.getenv(
+                "IGNORE_STT_WHILE_SPEAKING",
+                str(session_data.get("ignore_stt_while_speaking", True))
+            ).lower() == "true"
+            # Safety: when barge-in is disabled, always ignore STT while speaking.
+            if not bargin_feature:
+                ignore_stt_while_speaking = True
+
             config.session = SessionConfig(
                 timeout_seconds=float(os.getenv("SESSION_TIMEOUT_SECONDS", session_data.get("timeout_seconds", 10.0))),
                 max_timeout_prompts=int(os.getenv("MAX_TIMEOUT_PROMPTS", session_data.get("max_timeout_prompts", 3))),
                 ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", session_data.get("ttl_seconds", 3600))),
-                ignore_stt_while_speaking=os.getenv("IGNORE_STT_WHILE_SPEAKING", str(session_data.get("ignore_stt_while_speaking", True))).lower() == "true"
+                bargin_feature=bargin_feature,
+                ignore_stt_while_speaking=ignore_stt_while_speaking
             )
         
         # Performance config (with env var overrides)
@@ -367,7 +392,17 @@ class ConfigLoader:
                 max_concurrent_sessions=int(os.getenv("MAX_CONCURRENT_SESSIONS", perf_data.get("max_concurrent_sessions", 100))),
                 enable_fillers=os.getenv("ENABLE_FILLERS", str(perf_data.get("enable_fillers", "true"))).lower() == "true"
             )
-        
+
+        # FSM config (with env var overrides)
+        fsm_data = data.get("fsm", {})
+        config.fsm = FSMConfig(
+            appointment_schema_json=os.getenv("FSM_APPOINTMENT_SCHEMA_JSON", fsm_data.get("appointment_schema_json", "")),
+            allow_rag_detour=os.getenv("FSM_ALLOW_RAG_DETOUR", str(fsm_data.get("allow_rag_detour", "true"))).lower() == "true",
+            max_detours_per_field=int(os.getenv("FSM_MAX_DETOURS_PER_FIELD", fsm_data.get("max_detours_per_field", "2"))),
+            cancel_keywords=fsm_data.get("cancel_keywords", ["cancel", "stop", "nevermind", "forget it", "quit", "exit"]),
+            max_retries=int(os.getenv("FSM_MAX_RETRIES", str(fsm_data.get("max_retries", "3"))))
+        )
+
         return config
 
     def _apply_dialogue_placeholders(self, config: OrchestratorConfig):

@@ -245,6 +245,7 @@ async def transcribe_stream(websocket: WebSocket, session_id: str = None):
     
     if not session_id:
         session_id = f"groq_{int(time.time())}_{id(websocket)}"
+    tenant_id = os.getenv("TENANT_ID", "tenant")
     
     # Check if session already exists
     if session_id in active_sessions:
@@ -255,9 +256,11 @@ async def transcribe_stream(websocket: WebSocket, session_id: str = None):
         except Exception as e:
             logger.warning(f"⚠️ Error cleaning up existing session: {e}")
     
-    logger.info("=" * 70)
-    logger.info(f"🔌 WebSocket session established: {session_id}")
-    logger.info("=" * 70)
+    logger.info("============================================================")
+    logger.info("============================================================")
+    logger.info(f"🔌 STT SESSION START | TENANT_ID={tenant_id} | SESSION_ID={session_id}")
+    logger.info("============================================================")
+    logger.info("============================================================")
     
     await websocket.accept()
     
@@ -427,9 +430,11 @@ async def transcribe_stream(websocket: WebSocket, session_id: str = None):
         except Exception:
             pass
         
-        logger.info("=" * 70)
-        logger.info(f"🔌 WebSocket session ended: {session_id}")
-        logger.info("=" * 70)
+        logger.info("============================================================")
+        logger.info("============================================================")
+        logger.info(f"🔌 STT SESSION END | TENANT_ID={tenant_id} | SESSION_ID={session_id}")
+        logger.info("============================================================")
+        logger.info("============================================================")
 
 
 if __name__ == "__main__":

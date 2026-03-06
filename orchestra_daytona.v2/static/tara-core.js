@@ -398,6 +398,19 @@
             console.log('📤 Sending session_config:', JSON.stringify(sessionConfig));
             this.ws.send(JSON.stringify(sessionConfig));
 
+            // 3a. Force one immediate DOM seed packet on widget-open.
+            // This avoids pre-route "0 nodes" races before first user input.
+            if (this.ws && this.ws.readyState === WebSocket.OPEN && Array.isArray(sessionConfig.dom_elements) && sessionConfig.dom_elements.length > 0) {
+                this.ws.send(JSON.stringify({
+                    type: 'dom_update',
+                    elements: sessionConfig.dom_elements,
+                    url: window.location.href,
+                    title: document.title,
+                    source: 'widget_click_seed'
+                }));
+                console.log(`🌱 [TARA] widget_click_seed sent (${sessionConfig.dom_elements.length} nodes)`);
+            }
+
             // 3b. Phoenix: Send resume messages AFTER session_config so backend
             //     has is_mission_active=true before execution_complete arrives
             WS.sendPhoenixResume(this);

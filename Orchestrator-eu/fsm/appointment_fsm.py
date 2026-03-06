@@ -1,5 +1,5 @@
 """
-Simple Appointment FSM for LEXI (Daytona Expert Assistant)
+Simple Appointment FSM (Expert Assistant)
 
 A lightweight 3-question appointment booking flow:
 1. Name (with spelling confirmation)
@@ -11,6 +11,7 @@ Features:
 - Spelling confirmation (yes/no)
 - LEXI persona (friendly, expert)
 - JSON storage
+- Schema-driven configuration (optional)
 """
 
 import json
@@ -18,12 +19,47 @@ import logging
 import os
 import re
 import uuid
+from copy import deepcopy
 from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
+
+
+# Default V1 Schema (used if no schema provided)
+DEFAULT_V1_SCHEMA = {
+    "fields": {
+        "name": {
+            "required": True,
+            "collect_prompt": "Please spell out your name letter by letter. For example, 'J-O-H-N S-M-I-T-H'.",
+            "confirm_prompt": "Is your name correct?",
+            "min_length": 2,
+            "max_length": 50,
+            "validation_regex": r"^[a-zA-Z\s\-']+$"
+        },
+        "email": {
+            "required": True,
+            "collect_prompt": "Please spell out your email address. For example, 'J-O-H-N at G-M-A-I-L dot C-O-M'.",
+            "confirm_prompt": "Is your email correct?",
+            "validation_regex": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+        },
+        "topic": {
+            "required": True,
+            "collect_prompt": "What would you like to discuss with our expert? Just a brief description is fine.",
+            "confirm_prompt": "Is this topic correct?",
+            "min_length": 5,
+            "max_length": 500
+        }
+    },
+    "cancel_keywords": ["cancel", "stop", "nevermind", "forget it", "quit", "exit"],
+    "max_retries": 3,
+    "fallback_messages": {
+        "retry": "Could you please repeat that?",
+        "max_retries": "I'm having trouble understanding. No worries! Feel free to ask me anything, or we can try booking an appointment later."
+    }
+}
 
 
 class AppointmentState(Enum):
@@ -70,12 +106,33 @@ class SimpleAppointmentFSM:
     # Cancel keywords
     CANCEL_KEYWORDS = ["cancel", "stop", "nevermind", "forget it", "quit", "exit"]
     
-    def __init__(self):
+    def __init__(self, schema: Optional[Dict[str, Any]] = None):
+        # Merge user-provided schema over defaults (shallow merge by top-level keys, per-field merge below)
+        self.schema = deepcopy(DEFAULT_V1_SCHEMA)
+        if schema and isinstance(schema, dict):
+            if "fields" in schema and isinstance(schema["fields"], dict):
+                for key, value in schema["fields"].items():
+                    if key not in self.schema["fields"]:
+                        self.schema["fields"][key] = value
+                    elif isinstance(value, dict):
+                        self.schema["fields"][key].update(value)
+            for key in ("cancel_keywords", "max_retries", "fallback_messages"):
+                if key in schema and schema[key]:
+                    self.schema[key] = schema[key]
+
         self.state = AppointmentState.INIT
         self.data = AppointmentData()
         self.retry_counts: Dict[str, int] = {}
+        self.max_retries: int = int(self.schema.get("max_retries", self.MAX_RETRIES))
+        self.cancel_keywords: list = list(self.schema.get("cancel_keywords", self.CANCEL_KEYWORDS))
         
-        logger.info("🗓️ SimpleAppointmentFSM initialized")
+        logger.info("🗓️ SimpleAppointmentFSM initialized (schema-driven)")
+
+    def _field_cfg(self, field: str) -> Dict[str, Any]:
+        return self.schema.get("fields", {}).get(field, {})
+
+    def _fallback_message(self, key: str, default: str) -> str:
+        return self.schema.get("fallback_messages", {}).get(key, default)
     
     def process_input(self, user_input: str) -> Dict[str, Any]:
         """
@@ -88,10 +145,10 @@ class SimpleAppointmentFSM:
         user_input = user_input.strip()
         
         # Check for cancellation
-        if any(keyword in user_input.lower() for keyword in self.CANCEL_KEYWORDS):
+        if any(keyword in user_input.lower() for keyword in self.cancel_keywords):
             self.state = AppointmentState.CANCELLED
             return {
-                "response": "No problem! If you'd like to book an appointment later, just let me know. Feel free to ask me anything else about Daytona!",
+                "response": "No problem! If you'd like to book an appointment later, just let me know. Feel free to ask me anything.",
                 "state": self.state.value,
                 "complete": False,
                 "cancelled": True,
@@ -145,10 +202,14 @@ class SimpleAppointmentFSM:
     def _handle_init(self) -> str:
         """Start the appointment booking flow"""
         self.state = AppointmentState.COLLECT_NAME
-        return (
-            "Great! I'd be happy to help you connect with a Daytona expert. "
-            "I just need a few quick details. You can say 'cancel' anytime to stop.\n\n"
+        name_prompt = self._field_cfg("name").get(
+            "collect_prompt",
             "First, please spell out your name letter by letter. For example, 'J-O-H-N S-M-I-T-H'."
+        )
+        return (
+            "Great! I'd be happy to help you connect with our experts. "
+            "I just need a few quick details. You can say 'cancel' anytime to stop.\n\n"
+            f"{name_prompt}"
         )
     
     def _handle_collect_name(self, user_input: str) -> str:
@@ -157,14 +218,11 @@ class SimpleAppointmentFSM:
         name = user_input.strip()
         
         # Handle spelled-out names like "A-M-A-R" or "A M A R" or "A, M, A, R"
-        spelled_pattern = re.match(r'^([A-Za-z][\s\-,\.]*)+$', name)
-        if spelled_pattern and len(name) > 2:
-            # Check if it looks like spelled letters (single letters separated by delimiters)
-            letters = re.findall(r'[A-Za-z]', name)
-            if len(letters) >= 2 and all(len(l) == 1 for l in letters):
-                # It's likely spelled out - combine letters
-                name = ''.join(letters).capitalize()
-                logger.info(f"🔤 Detected spelled name: {name}")
+        # Only treat as spelled-out if every alpha token is a single character.
+        name_tokens = re.findall(r"[A-Za-z]+", name)
+        if name_tokens and len(name_tokens) >= 2 and all(len(token) == 1 for token in name_tokens):
+            name = ''.join(name_tokens).capitalize()
+            logger.info(f"🔤 Detected spelled name: {name}")
         
         # Remove common prefixes (case-insensitive matching)
         prefixes = ["my name is", "i'm", "this is", "i am", "call me", "it's", "its", "it is", "name is"]
@@ -175,18 +233,26 @@ class SimpleAppointmentFSM:
                 logger.info(f"📝 Stripped prefix '{prefix}' -> remaining: '{name}'")
                 break  # Only strip one prefix
         
-        # Validate: at least 2 characters, only letters and spaces
-        if len(name) < 2 or not re.match(r'^[a-zA-Z\s\-\']+$', name):
+        field_cfg = self._field_cfg("name")
+        min_len = int(field_cfg.get("min_length", 2))
+        max_len = int(field_cfg.get("max_length", 50))
+        regex = field_cfg.get("validation_regex", r'^[a-zA-Z\s\-\']+$')
+
+        # Validate: min/max and pattern
+        if len(name) < min_len or len(name) > max_len or not re.match(regex, name):
             self.retry_counts['name'] = self.retry_counts.get('name', 0) + 1
             retry_num = self.retry_counts['name']
             
-            if retry_num >= self.MAX_RETRIES:
+            if retry_num >= self.max_retries:
                 self.state = AppointmentState.CANCELLED
-                return "I'm having trouble understanding. No worries! Feel free to ask me anything else about Daytona, or we can try booking an appointment later."
+                return self._fallback_message(
+                    "max_retries",
+                    "I'm having trouble understanding. No worries! Feel free to ask me anything , or we can try booking an appointment later."
+                )
             
             # Progressive prompts based on retry attempt
             if retry_num == 1:
-                return "I didn't quite catch that. Could you tell me your name? For example, 'John Smith'."
+                return self._fallback_message("retry", "I didn't quite catch that. Could you tell me your name? For example, 'John Smith'.")
             elif retry_num == 2:
                 return "Sorry, I'm still having trouble. Could you speak a bit slower? Just your first and last name please."
             else:
@@ -208,7 +274,11 @@ class SimpleAppointmentFSM:
         if response_type is True:
             # Confirmed - move to email
             self.state = AppointmentState.COLLECT_EMAIL
-            return f"Perfect, {self.data.name.split()[0]}! Now please spell out your email address. For example, 'J-O-H-N at G-M-A-I-L dot C-O-M'."
+            email_prompt = self._field_cfg("email").get(
+                "collect_prompt",
+                "Now please spell out your email address. For example, 'J-O-H-N at G-M-A-I-L dot C-O-M'."
+            )
+            return f"Perfect, {self.data.name.split()[0]}! {email_prompt}"
         
         elif response_type is False:
             # Rejected - ask to spell it
@@ -235,15 +305,22 @@ class SimpleAppointmentFSM:
         email = self._parse_spelled_email(email)
         logger.info(f"📧 Parsed email: '{email}'")
         
+        email_regex = self._field_cfg("email").get("validation_regex", r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
         # Simple email validation
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+        if not re.match(email_regex, email):
             self.retry_counts['email'] = self.retry_counts.get('email', 0) + 1
             
-            if self.retry_counts['email'] >= self.MAX_RETRIES:
+            if self.retry_counts['email'] >= self.max_retries:
                 self.state = AppointmentState.CANCELLED
-                return "I'm having trouble with the email format. No worries! Feel free to reach out anytime, or we can try again later."
+                return self._fallback_message(
+                    "max_retries",
+                    "I'm having trouble with the email format. No worries! Feel free to reach out anytime, or we can try again later."
+                )
             
-            return "That doesn't look like a valid email. Please spell it out letter by letter. For example, 'J-O-H-N at G-M-A-I-L dot C-O-M'."
+            return self._fallback_message(
+                "retry",
+                "That doesn't look like a valid email. Please spell it out letter by letter. For example, 'J-O-H-N at G-M-A-I-L dot C-O-M'."
+            )
         
         # Store and confirm
         self.data.email = email
@@ -261,7 +338,11 @@ class SimpleAppointmentFSM:
         if response_type is True:
             # Confirmed - move to query
             self.state = AppointmentState.COLLECT_QUERY
-            return "Awesome! Last question: what would you like to discuss with our expert? Just a brief description is fine."
+            topic_prompt = self._field_cfg("topic").get(
+                "collect_prompt",
+                "what would you like to discuss with our expert? Just a brief description is fine."
+            )
+            return f"Awesome! Last question: {topic_prompt}"
         
         elif response_type is False:
             # Rejected - ask to spell it
@@ -278,19 +359,29 @@ class SimpleAppointmentFSM:
         """Collect the user's query/topic"""
         query = user_input.strip()
         
-        # Basic validation - at least 5 characters
-        if len(query) < 5:
+        field_cfg = self._field_cfg("topic")
+        min_len = int(field_cfg.get("min_length", 5))
+        max_len = int(field_cfg.get("max_length", 500))
+
+        # Basic validation
+        if len(query) < min_len:
             self.retry_counts['query'] = self.retry_counts.get('query', 0) + 1
             
-            if self.retry_counts['query'] >= self.MAX_RETRIES:
+            if self.retry_counts['query'] >= self.max_retries:
                 self.state = AppointmentState.CANCELLED
-                return "I need a bit more detail about what you'd like to discuss. No worries! Feel free to reach out when you're ready."
+                return self._fallback_message(
+                    "max_retries",
+                    "I need a bit more detail about what you'd like to discuss. No worries! Feel free to reach out when you're ready."
+                )
             
-            return "Could you tell me a bit more about what you'd like to discuss? For example, 'I need help with Daytona installation'."
+            return self._fallback_message(
+                "retry",
+                "Could you tell me a bit more about what you'd like to discuss?"
+            )
         
         # Truncate if too long
-        if len(query) > 500:
-            query = query[:500]
+        if len(query) > max_len:
+            query = query[:max_len]
         
         # Store and confirm
         self.data.query = query
@@ -318,7 +409,7 @@ class SimpleAppointmentFSM:
                 f"• Name: {self.data.name}\n"
                 f"• Email: {self.data.email}\n"
                 f"• Topic: {self.data.query[:50]}{'...' if len(self.data.query) > 50 else ''}\n\n"
-                f"One of our Daytona experts will reach out to you at {self.data.email} within 24 hours.\n\n"
+                f"One of our experts will reach out to you at {self.data.email} within 24 hours.\n\n"
                 f"Is there anything else I can help you with?"
             )
         

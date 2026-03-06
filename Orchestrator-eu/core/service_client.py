@@ -412,14 +412,14 @@ class TTSClient:
                 else:
                     logger.error("Cannot reconnect: no session_id available")
 
-    async def stream_end(self):
+    async def stream_end(self, flush_buffer: bool = True):
         """
         Signal end of text streaming to TTS service.
         This triggers EOS to ElevenLabs to finalize audio generation.
-        Flushes any remaining buffered chunks first.
+        Optionally flushes any remaining buffered chunks first.
         """
         # CRITICAL FIX: Flush any remaining buffered chunks before ending stream
-        if self._chunk_buffer:
+        if flush_buffer and self._chunk_buffer:
             logger.debug(f"Flushing remaining buffer before stream_end: '{self._chunk_buffer[:50]}...'")
             # Cancel delayed flush task if running
             if self._flush_task and not self._flush_task.done():
@@ -446,6 +446,25 @@ class TTSClient:
         except Exception as e:
             logger.error(f"TTS stream_end send failed: {e}")
             # Don't retry stream_end - it's not critical if it fails
+
+    async def abort_stream(self):
+        """
+        Abort current TTS generation immediately without flushing buffered text.
+        This is used for barge-in/interrupt so stale response text is not synthesized.
+        """
+        # Cancel delayed flush task and drop any buffered text so old turn cannot leak.
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
+        self._chunk_buffer = ""
+
+        # Closing the socket forces server-side stream termination for this turn.
+        if self.ws and not self.ws.closed:
+            try:
+                await self.ws.close()
+            except Exception as e:
+                logger.debug(f"TTS abort close error: {e}")
+            finally:
+                self.ws = None
 
     async def receive_audio(self) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -584,6 +603,7 @@ class RAGClient:
                             query: str,
                             session_id: str,
                             user_id: Optional[str] = None,
+                            agent_name: Optional[str] = None,
                             language: str = "en",
                             context: Optional[Dict[str, Any]] = None,
                             history_context: Optional[str] = None,
@@ -608,9 +628,12 @@ class RAGClient:
                 ssl_context = False if self.skip_ssl else None
                 payload = {
                     "query": query,
+                    "session_id": session_id,
                     "user_id": user_id,
                     "language": language  # Pass language to RAG for correct response language
                 }
+                if agent_name:
+                    payload["agent_name"] = agent_name
 
                 if context:
                     payload["context"] = context
@@ -719,7 +742,7 @@ class RAGClient:
                     "history_context": history_context,
                     "language": language
                 }
-                
+
                 url = base_url if base_url else self.config.url
                 async with session.post(
                     f"{url}/api/v1/generate_exit",
@@ -736,6 +759,85 @@ class RAGClient:
         except Exception as e:
             logger.error(f"RAG generate_exit client error: {e}")
             return ""
+
+    async def route_fsm_turn(
+        self,
+        user_text: str,
+        session_id: str,
+        tenant_id: str,
+        language: str,
+        fsm_context: Dict[str, Any],
+        base_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Route FSM turn during appointment booking via RAG service.
+        
+        Args:
+            user_text: User input text
+            session_id: Session identifier
+            tenant_id: Tenant identifier
+            language: Response language
+            fsm_context: Current FSM state (active, pending_field, collected_data, retry_counts, schema)
+            base_url: Optional override for RAG service URL
+            
+        Returns:
+            Dict with: action, field, normalized_value, confidence, reason, resume_prompt, cancelled
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                ssl_context = False if self.skip_ssl else None
+                payload = {
+                    "user_text": user_text,
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "language": language,
+                    "fsm_context": fsm_context
+                }
+
+                url = base_url if base_url else self.config.url
+                route_url = f"{url}/api/v1/fsm/route"
+
+                async with session.post(
+                    route_url,
+                    json=payload,
+                    ssl=ssl_context,
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    else:
+                        logger.error(f"RAG FSM route error: HTTP {resp.status}")
+                        return {
+                            "action": "invalid_retry",
+                            "field": None,
+                            "normalized_value": None,
+                            "confidence": 0.0,
+                            "reason": f"HTTP {resp.status}",
+                            "resume_prompt": None,
+                            "cancelled": False
+                        }
+        except asyncio.TimeoutError:
+            logger.error("RAG FSM route timeout")
+            return {
+                "action": "invalid_retry",
+                "field": None,
+                "normalized_value": None,
+                "confidence": 0.0,
+                "reason": "timeout",
+                "resume_prompt": None,
+                "cancelled": False
+            }
+        except Exception as e:
+            logger.error(f"RAG FSM route error: {e}")
+            return {
+                "action": "invalid_retry",
+                "field": None,
+                "normalized_value": None,
+                "confidence": 0.0,
+                "reason": str(e),
+                "resume_prompt": None,
+                "cancelled": False
+            }
 
 
 class IntentClient:
@@ -793,6 +895,4 @@ class IntentClient:
                 "confidence": 0.0,
                 "context": {}
             }
-
-
 

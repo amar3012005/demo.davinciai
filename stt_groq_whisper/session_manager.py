@@ -10,6 +10,7 @@ import audioop
 import time
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, Callable, List
 from collections import deque
 
@@ -70,6 +71,9 @@ class GroqWhisperSession:
         self.audio_buffer = bytearray()
         self.overlap_buffer = bytearray()  # Stores overlap from previous chunk
         self.full_audio_buffer = bytearray()  # For full transcription mode
+        self.pre_speech_chunks: deque = deque()
+        self.pre_speech_bytes: int = 0
+        self._just_seeded_from_preroll: bool = False
         self.last_audio_time = 0.0
         
         # Context chaining - sliding window of recent transcripts
@@ -97,6 +101,17 @@ class GroqWhisperSession:
         
         # Silence detection
         self.consecutive_silent_chunks = 0
+
+    def _append_pre_speech_chunk(self, audio_chunk: bytes):
+        """Keep a rolling pre-speech PCM buffer (for start padding)."""
+        if self.config.enable_micro_chunking:
+            return
+        self.pre_speech_chunks.append(bytes(audio_chunk))
+        self.pre_speech_bytes += len(audio_chunk)
+        max_pre_bytes = int((self.config.sample_rate * 2 * self.config.pre_speech_padding_ms) / 1000)
+        while self.pre_speech_bytes > max_pre_bytes and self.pre_speech_chunks:
+            removed = self.pre_speech_chunks.popleft()
+            self.pre_speech_bytes -= len(removed)
     
     async def start(self) -> bool:
         """Start session and initialize Groq client"""
@@ -138,6 +153,7 @@ class GroqWhisperSession:
         self.last_audio_time = time.time()
         
         now = time.time()
+        self._append_pre_speech_chunk(audio_chunk)
 
         # Local VAD gate - check energy level
         try:
@@ -155,6 +171,10 @@ class GroqWhisperSession:
             # Emit SPEECH_START if not already active
             if not self.speech_active:
                 self.speech_active = True
+                # Seed full buffer with a short pre-roll to avoid clipping initial phonemes.
+                if not self.config.enable_micro_chunking and self.pre_speech_chunks:
+                    self.full_audio_buffer = bytearray(b"".join(self.pre_speech_chunks))
+                    self._just_seeded_from_preroll = True
                 await self._emit_speech_event("SPEECH_START")
                 logger.info(f"🎤 [{self.session_id}] Speech started (energy={energy})")
         else:
@@ -166,9 +186,15 @@ class GroqWhisperSession:
         # Add audio to buffer (always, for both modes)
         self.audio_buffer.extend(audio_chunk)
         
-        # In full transcription mode, also accumulate to full buffer during speech
+        # In full transcription mode, accumulate speech plus a short trailing pad.
+        # This keeps endpointing natural while reducing finalization latency.
         if not self.config.enable_micro_chunking and self.speech_active:
-            self.full_audio_buffer.extend(audio_chunk)
+            silence_ms = self._current_silence_ms()
+            if self.silence_start_time is None or silence_ms <= self.config.final_silence_padding_ms:
+                if self._just_seeded_from_preroll:
+                    self._just_seeded_from_preroll = False
+                else:
+                    self.full_audio_buffer.extend(audio_chunk)
         
         # MICRO-CHUNKING MODE: Process chunks in real-time
         if self.config.enable_micro_chunking:
@@ -223,6 +249,11 @@ class GroqWhisperSession:
             )
             
             if result and not result.is_empty:
+                # If speech already ended, this chunk is stale; don't emit noisy late partials.
+                if not self.speech_active:
+                    logger.debug(f"⏸️ [{self.session_id}] Dropping late micro-chunk result after speech end")
+                    return
+
                 if result.is_hallucination or result.is_low_quality:
                     logger.info(f"🚫 [{self.session_id}] Filtered micro-chunk hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
                     return
@@ -328,10 +359,10 @@ class GroqWhisperSession:
             )
             
             if result and not result.is_empty:
-                if result.is_hallucination or result.is_low_quality:
+                final_text = result.text.strip()
+                if self._should_filter_full_result(result, final_text):
                     logger.info(f"🚫 [{self.session_id}] Filtered full hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
                 else:
-                    final_text = result.text.strip()
                     if final_text:
                         await self._emit_transcript(
                             text=final_text,
@@ -382,6 +413,30 @@ class GroqWhisperSession:
         self.current_utterance = ""
         self.partial_text = ""
         self.context_window.clear()
+        self.pre_speech_chunks.clear()
+        self.pre_speech_bytes = 0
+        self._just_seeded_from_preroll = False
+
+    def _is_meaningful_single_word(self, text: str) -> bool:
+        """
+        Allow valid one-word user intents (e.g. yes/no/stop/one) that are often
+        dropped by aggressive noise filters.
+        """
+        words = re.findall(r"[a-zA-Z0-9']+", (text or "").lower())
+        if len(words) != 1:
+            return False
+        token = words[0]
+        reject = {"you", "thanks", "thank", "bye", "goodbye", "hallo", "und"}
+        allow_common = {"yes", "no", "ok", "okay", "stop", "wait", "go", "one", "two", "three", "hi", "hello"}
+        if token in reject:
+            return False
+        return token in allow_common or len(token) >= 2
+
+    def _should_filter_full_result(self, result: GroqTranscriptionResult, final_text: str) -> bool:
+        """Apply stricter noise filtering without dropping meaningful single-word inputs."""
+        if self._is_meaningful_single_word(final_text):
+            return False
+        return result.is_hallucination or result.is_low_quality
     
     async def _emit_transcript(
         self,

@@ -1,91 +1,60 @@
-"""
-Test configuration and fixtures for RAG service tests.
+"""Pytest configuration and fixtures for FSM routing tests."""
 
-Reference:
-    - services/intent/tests/conftest.py - Test fixture pattern
-"""
+import asyncio
+import inspect
+import sys
+from pathlib import Path
 
 import pytest
-import asyncio
-import tempfile
-import os
-from typing import Generator
 
-from daytona_agent.services.rag.config import RAGConfig
-from daytona_agent.services.rag.rag_engine import RAGEngine
-from daytona_agent.services.rag.index_builder import IndexBuilder
+# Add rag-eu root directory to path for imports
+TESTS_DIR = Path(__file__).resolve().parent
+RAG_EU_DIR = TESTS_DIR.parent
+if str(RAG_EU_DIR) not in sys.path:
+    sys.path.insert(0, str(RAG_EU_DIR))
 
 
-@pytest.fixture
-def rag_config() -> RAGConfig:
-    """RAG configuration for testing."""
-    return RAGConfig(
-        gemini_api_key=os.getenv("GEMINI_API_KEY", "test_key"),
-        knowledge_base_path="leibniz_knowledge_base",
-        vector_store_path="daytona_agent/services/rag/index",
-        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
-        gemini_model="gemini-2.0-flash-lite",
-        top_k=8,
-        top_n=5,
-        similarity_threshold=0.3,
-        chunk_size_min=500,
-        chunk_size_max=800,
-        chunk_overlap=100,
-        response_style="friendly_casual",
-        max_response_length=500,
-        enable_humanization=True,
-        min_quality_score=0.5,
-        timeout=30.0,
-        enable_streaming=True,
-        cache_ttl=3600,
-        log_queries=False,
-        verbose=False
-    )
-
-
-@pytest.fixture
-def rag_engine(rag_config) -> RAGEngine:
-    """RAG engine instance for testing."""
-    return RAGEngine(rag_config)
-
-
-@pytest.fixture
-def index_builder(rag_config) -> IndexBuilder:
-    """Index builder instance for testing."""
-    return IndexBuilder(rag_config)
-
-
-@pytest.fixture
-def sample_knowledge_base() -> Generator[str, None, None]:
-    """Create temporary knowledge base for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create sample category directory
-        category_dir = os.path.join(tmpdir, "01_test_category")
-        os.makedirs(category_dir)
-        
-        # Create sample markdown file
-        test_file = os.path.join(category_dir, "test_doc.md")
-        with open(test_file, 'w', encoding='utf-8') as f:
-            f.write("""# Test Document
-
-This is a test document for RAG testing.
-
-## Section 1
-
-Information about section 1 with sufficient content to create a meaningful chunk.
-
-## Section 2
-
-Information about section 2 with sufficient content to create another meaningful chunk.
-""")
-        
-        yield tmpdir
-
-
-# Configure pytest
 def pytest_configure(config):
-    """Configure pytest markers."""
-    config.addinivalue_line("markers", "unit: Unit tests (no external dependencies)")
-    config.addinivalue_line("markers", "integration: Integration tests (with Redis, mocked Gemini)")
-    config.addinivalue_line("markers", "requires_service: Tests requiring running service")
-    config.addinivalue_line("markers", "slow: Tests taking >5 seconds")
+    # Keep local test runs independent from optional pytest-asyncio plugin.
+    config.addinivalue_line("markers", "asyncio: mark test as async")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    test_fn = pyfuncitem.obj
+    if inspect.iscoroutinefunction(test_fn):
+        asyncio.run(test_fn(**pyfuncitem.funcargs))
+        return True
+    return None
+
+
+@pytest.fixture
+def default_fsm_context():
+    """Default FSM context for testing"""
+    return {
+        "active": True,
+        "pending_field": "name",
+        "collected_data": {},
+        "retry_counts": {},
+        "schema": {
+            "fields": {
+                "name": {
+                    "required": True,
+                    "min_length": 2,
+                    "max_length": 50,
+                    "validation_regex": r"^[a-zA-Z\s\-']+$"
+                },
+                "email": {
+                    "required": True,
+                    "validation_regex": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+                },
+                "topic": {
+                    "required": True,
+                    "min_length": 5,
+                    "max_length": 500
+                }
+            },
+            "cancel_keywords": ["cancel", "stop", "nevermind", "forget it", "quit", "exit"],
+            "max_retries": 3
+        }
+    }

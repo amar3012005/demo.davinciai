@@ -1,0 +1,1616 @@
+[
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "engelvoelkers.com",
+    "action": "extraction",
+    "sequence": [
+      "Open homepage",
+      "Choose Kaufen or Mieten",
+      "Open relevant region page",
+      "Review listing details"
+    ],
+    "constraints_order": [
+      "transaction_type",
+      "location",
+      "property_type",
+      "budget"
+    ],
+    "blocking_rules": {
+      "open_listing": [
+        "transaction_type",
+        "location"
+      ]
+    },
+    "example_url": "https://www.engelvoelkers.com/de/de",
+    "text": "Strategy for extraction on engelvoelkers.com: Navigate Engel & Völkers real estate sections. URL: https://www.engelvoelkers.com/de/de",
+    "concept": "Navigate Engel & Völkers real estate sections"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "engelvoelkers.com",
+    "url": "https://www.engelvoelkers.com/de/de",
+    "concept": "Navigate Engel & Völkers real estate sections",
+    "sequence": [
+      "Open homepage",
+      "Choose Kaufen or Mieten",
+      "Open relevant region page",
+      "Review listing details"
+    ],
+    "blocking_rules": [
+      "wait_for_results_after_filter",
+      "ensure_listing_cards_visible"
+    ],
+    "action_script": "await page.goto('<url>'); // choose kaufen/mieten and open listing"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/impressum']",
+    "keyword_match": "engel & völkers gmbh",
+    "element_type": "a",
+    "text_pattern": "Engel & Völkers GmbH",
+    "zone": "footer",
+    "description": "Navigate to 'Engel & Völkers GmbH' (https://www.engelvoelkers.com/de/de/impressum)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/hamburg/hamburg']",
+    "keyword_match": "haus kaufen in hamburg",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Hamburg",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Hamburg' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/hamburg/hamburg)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/berlin/berlin']",
+    "keyword_match": "haus kaufen in berlin",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Berlin",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Berlin' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/berlin/berlin)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/nordrhein-westfalen/koeln']",
+    "keyword_match": "haus kaufen in köln",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Köln",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Köln' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/nordrhein-westfalen/koeln)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/nordrhein-westfalen/dortmund']",
+    "keyword_match": "haus kaufen in dortmund",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Dortmund",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Dortmund' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/nordrhein-westfalen/dortmund)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/hessen/frankfurt-am-main']",
+    "keyword_match": "haus kaufen in frankfurt",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Frankfurt",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Frankfurt' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/hessen/frankfurt-am-main)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/baden-wuerttemberg/stuttgart']",
+    "keyword_match": "haus kaufen in stuttgart",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Stuttgart",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Stuttgart' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/baden-wuerttemberg/stuttgart)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/bayern/muenchen']",
+    "keyword_match": "haus kaufen in münchen",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in München",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in München' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/bayern/muenchen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/nordrhein-westfalen/duesseldorf']",
+    "keyword_match": "haus kaufen in düsseldorf",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Düsseldorf",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Düsseldorf' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/nordrhein-westfalen/duesseldorf)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/schleswig-holstein/sylt']",
+    "keyword_match": "haus kaufen auf sylt",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen auf Sylt",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen auf Sylt' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/schleswig-holstein/sylt)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus/baden-wuerttemberg/bodensee']",
+    "keyword_match": "haus kaufen am bodensee",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen am Bodensee",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen am Bodensee' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus/baden-wuerttemberg/bodensee)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/hamburg/hamburg']",
+    "keyword_match": "wohnung kaufen in hamburg",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Hamburg",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Hamburg' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/hamburg/hamburg)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/berlin/berlin']",
+    "keyword_match": "wohnung kaufen in berlin",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Berlin",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Berlin' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/berlin/berlin)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/nordrhein-westfalen/koeln']",
+    "keyword_match": "wohnung kaufen in köln",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Köln",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Köln' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/nordrhein-westfalen/koeln)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/nordrhein-westfalen/dortmund']",
+    "keyword_match": "wohnung kaufen in dortmund",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Dortmund",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Dortmund' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/nordrhein-westfalen/dortmund)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/hessen/frankfurt-am-main']",
+    "keyword_match": "wohnung kaufen in frankfurt",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Frankfurt",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Frankfurt' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/hessen/frankfurt-am-main)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/baden-wuerttemberg/stuttgart']",
+    "keyword_match": "wohnung kaufen in stuttgart",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Stuttgart",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Stuttgart' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/baden-wuerttemberg/stuttgart)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/bayern/muenchen']",
+    "keyword_match": "wohnung kaufen in münchen",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in München",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in München' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/bayern/muenchen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/nordrhein-westfalen/duesseldorf']",
+    "keyword_match": "wohnung kaufen in düsseldorf",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Düsseldorf",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Düsseldorf' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/nordrhein-westfalen/duesseldorf)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/schleswig-holstein/sylt']",
+    "keyword_match": "wohnung kaufen auf sylt",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen auf Sylt",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen auf Sylt' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/schleswig-holstein/sylt)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung/baden-wuerttemberg/bodensee']",
+    "keyword_match": "wohnung kaufen am bodensee",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen am Bodensee",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen am Bodensee' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung/baden-wuerttemberg/bodensee)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/fr/en/properties/res/sale/house/ile-de-france/paris']",
+    "keyword_match": "haus kaufen in paris",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Paris",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Paris' (https://www.engelvoelkers.com/fr/en/properties/res/sale/house/ile-de-france/paris)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/it/de/immobilien/res/kaufen/haus/latium/rom']",
+    "keyword_match": "haus kaufen in rom",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Rom",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Rom' (https://www.engelvoelkers.com/it/de/immobilien/res/kaufen/haus/latium/rom)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/immobilien/res/kaufen/haus/balearische-inseln/mallorca']",
+    "keyword_match": "haus kaufen auf mallorca",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen auf Mallorca",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen auf Mallorca' (https://www.engelvoelkers.com/es/de/immobilien/res/kaufen/haus/balearische-inseln/mallorca)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/immobilien/res/kaufen/haus/autonome-gemeinschaft-madrid/madrid']",
+    "keyword_match": "haus kaufen in madrid",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Madrid",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Madrid' (https://www.engelvoelkers.com/es/de/immobilien/res/kaufen/haus/autonome-gemeinschaft-madrid/madrid)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/pt/de/immobilien/res/kaufen/haus/lissabon/lissabon']",
+    "keyword_match": "haus kaufen in lissabon",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Lissabon",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Lissabon' (https://www.engelvoelkers.com/pt/de/immobilien/res/kaufen/haus/lissabon/lissabon)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/fr/en/properties/res/sale/house/provence-alpes-cote-dazur']",
+    "keyword_match": "haus kaufen an der cote d'azur",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen an der Cote d'Azur",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen an der Cote d'Azur' (https://www.engelvoelkers.com/fr/en/properties/res/sale/house/provence-alpes-cote-dazur)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/be/en/properties/res/sale/house/brussels/brussels']",
+    "keyword_match": "haus kaufen in brüssel",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Brüssel",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Brüssel' (https://www.engelvoelkers.com/be/en/properties/res/sale/house/brussels/brussels)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/at/de/immobilien/res/kaufen/haus/wien/wien']",
+    "keyword_match": "haus kaufen in wien",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Wien",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Wien' (https://www.engelvoelkers.com/at/de/immobilien/res/kaufen/haus/wien/wien)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/ch/de/immobilien/res/kaufen/haus/zurich/zurich']",
+    "keyword_match": "haus kaufen in zürich",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Zürich",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Zürich' (https://www.engelvoelkers.com/ch/de/immobilien/res/kaufen/haus/zurich/zurich)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/cz/en/properties/res/sale/house/prague/prague']",
+    "keyword_match": "haus kaufen in prag",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Prag",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Prag' (https://www.engelvoelkers.com/cz/en/properties/res/sale/house/prague/prague)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/fr/en/properties/res/sale/apartment/ile-de-france/paris']",
+    "keyword_match": "wohnung kaufen in paris",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Paris",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Paris' (https://www.engelvoelkers.com/fr/en/properties/res/sale/apartment/ile-de-france/paris)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/it/de/immobilien/res/kaufen/wohnung/latium/rom']",
+    "keyword_match": "wohnung kaufen in rom",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Rom",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Rom' (https://www.engelvoelkers.com/it/de/immobilien/res/kaufen/wohnung/latium/rom)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/immobilien/res/kaufen/wohnung/balearische-inseln/mallorca']",
+    "keyword_match": "wohnung kaufen auf mallorca",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen auf Mallorca",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen auf Mallorca' (https://www.engelvoelkers.com/es/de/immobilien/res/kaufen/wohnung/balearische-inseln/mallorca)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/immobilien/res/kaufen/wohnung/autonome-gemeinschaft-madrid/madrid']",
+    "keyword_match": "wohnung kaufen in madrid",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Madrid",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Madrid' (https://www.engelvoelkers.com/es/de/immobilien/res/kaufen/wohnung/autonome-gemeinschaft-madrid/madrid)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/pt/de/immobilien/res/kaufen/wohnung/lissabon/lissabon']",
+    "keyword_match": "wohnung kaufen in lissabon",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Lissabon",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Lissabon' (https://www.engelvoelkers.com/pt/de/immobilien/res/kaufen/wohnung/lissabon/lissabon)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/fr/en/properties/res/sale/apartment/provence-alpes-cote-dazur']",
+    "keyword_match": "wohnung kaufen an der cote d'azur",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen an der Cote d'Azur",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen an der Cote d'Azur' (https://www.engelvoelkers.com/fr/en/properties/res/sale/apartment/provence-alpes-cote-dazur)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/be/en/properties/res/sale/apartment/brussels/brussels']",
+    "keyword_match": "wohnung kaufen in brüssel",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Brüssel",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Brüssel' (https://www.engelvoelkers.com/be/en/properties/res/sale/apartment/brussels/brussels)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/at/de/immobilien/res/kaufen/wohnung/wien/wien']",
+    "keyword_match": "wohnung kaufen in wien",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Wien",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Wien' (https://www.engelvoelkers.com/at/de/immobilien/res/kaufen/wohnung/wien/wien)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/ch/de/immobilien/res/kaufen/wohnung/zurich/zurich']",
+    "keyword_match": "wohnung kaufen in zürich",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Zürich",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Zürich' (https://www.engelvoelkers.com/ch/de/immobilien/res/kaufen/wohnung/zurich/zurich)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/cz/en/properties/res/sale/apartment/prague/prague']",
+    "keyword_match": "wohnung kaufen in prag",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Prag",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Prag' (https://www.engelvoelkers.com/cz/en/properties/res/sale/apartment/prague/prague)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in spanien",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Spanien",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Spanien' (https://www.engelvoelkers.com/es/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/it/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in italien",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Italien",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Italien' (https://www.engelvoelkers.com/it/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in deutschland",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Deutschland",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Deutschland' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/fr/en/properties/res/sale/house']",
+    "keyword_match": "haus kaufen in frankreich",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Frankreich",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Frankreich' (https://www.engelvoelkers.com/fr/en/properties/res/sale/house)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/at/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in österreich",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Österreich",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Österreich' (https://www.engelvoelkers.com/at/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/ch/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in schweiz",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Schweiz",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Schweiz' (https://www.engelvoelkers.com/ch/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/pt/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in portugal",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Portugal",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Portugal' (https://www.engelvoelkers.com/pt/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/gr/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in griechenland",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Griechenland",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Griechenland' (https://www.engelvoelkers.com/gr/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/us/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in den usa",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in den USA",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in den USA' (https://www.engelvoelkers.com/us/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/ca/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen in kanada",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen in Kanada",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen in Kanada' (https://www.engelvoelkers.com/ca/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in spanien",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Spanien",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Spanien' (https://www.engelvoelkers.com/es/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/it/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in italien",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Italien",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Italien' (https://www.engelvoelkers.com/it/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in deutschland",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Deutschland",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Deutschland' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/fr/en/properties/res/sale/apartment']",
+    "keyword_match": "wohnung kaufen in frankreich",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Frankreich",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Frankreich' (https://www.engelvoelkers.com/fr/en/properties/res/sale/apartment)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/at/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in österreich",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Österreich",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Österreich' (https://www.engelvoelkers.com/at/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/ch/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in schweiz",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Schweiz",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Schweiz' (https://www.engelvoelkers.com/ch/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/pt/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in portugal",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Portugal",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Portugal' (https://www.engelvoelkers.com/pt/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/gr/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in griechenland",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Griechenland",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Griechenland' (https://www.engelvoelkers.com/gr/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/us/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in den usa",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in den USA",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in den USA' (https://www.engelvoelkers.com/us/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/ca/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen in kanada",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen in Kanada",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen in Kanada' (https://www.engelvoelkers.com/ca/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "engelvoelkers.com",
+    "action": "extraction",
+    "sequence": [
+      "Open Kaufen & Mieten",
+      "Select Kaufen",
+      "Apply region/type filters",
+      "Open matching listing"
+    ],
+    "constraints_order": [
+      "transaction_type",
+      "location",
+      "property_type",
+      "budget"
+    ],
+    "blocking_rules": {
+      "open_listing": [
+        "transaction_type",
+        "location"
+      ]
+    },
+    "example_url": "https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/immobilien",
+    "text": "Strategy for extraction on engelvoelkers.com: Find property listings to buy. URL: https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/immobilien",
+    "concept": "Find property listings to buy"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "engelvoelkers.com",
+    "url": "https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/immobilien",
+    "concept": "Find property listings to buy",
+    "sequence": [
+      "Open Kaufen & Mieten",
+      "Select Kaufen",
+      "Apply region/type filters",
+      "Open matching listing"
+    ],
+    "blocking_rules": [
+      "wait_for_results_after_filter",
+      "ensure_listing_cards_visible"
+    ],
+    "action_script": "await page.goto('<url>'); // choose kaufen/mieten and open listing"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "engelvoelkers.com",
+    "action": "extraction",
+    "sequence": [
+      "Open Kaufen & Mieten",
+      "Select Mieten",
+      "Apply region/type filters",
+      "Open matching listing"
+    ],
+    "constraints_order": [
+      "transaction_type",
+      "location",
+      "property_type",
+      "budget"
+    ],
+    "blocking_rules": {
+      "open_listing": [
+        "transaction_type",
+        "location"
+      ]
+    },
+    "example_url": "https://www.engelvoelkers.com/de/de/immobilien/res/mieten/immobilien",
+    "text": "Strategy for extraction on engelvoelkers.com: Find property listings to rent. URL: https://www.engelvoelkers.com/de/de/immobilien/res/mieten/immobilien",
+    "concept": "Find property listings to rent"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "engelvoelkers.com",
+    "url": "https://www.engelvoelkers.com/de/de/immobilien/res/mieten/immobilien",
+    "concept": "Find property listings to rent",
+    "sequence": [
+      "Open Kaufen & Mieten",
+      "Select Mieten",
+      "Apply region/type filters",
+      "Open matching listing"
+    ],
+    "blocking_rules": [
+      "wait_for_results_after_filter",
+      "ensure_listing_cards_visible"
+    ],
+    "action_script": "await page.goto('<url>'); // choose kaufen/mieten and open listing"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "engelvoelkers.com",
+    "action": "extraction",
+    "sequence": [
+      "Open financing section",
+      "Review financing options",
+      "Open contact path"
+    ],
+    "constraints_order": [
+      "transaction_type",
+      "location",
+      "property_type",
+      "budget"
+    ],
+    "blocking_rules": {
+      "open_listing": [
+        "transaction_type",
+        "location"
+      ]
+    },
+    "example_url": "https://www.engelvoelkers.com/de/de/finanzierung",
+    "text": "Strategy for extraction on engelvoelkers.com: Navigate to financing information. URL: https://www.engelvoelkers.com/de/de/finanzierung",
+    "concept": "Navigate to financing information"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "engelvoelkers.com",
+    "url": "https://www.engelvoelkers.com/de/de/finanzierung",
+    "concept": "Navigate to financing information",
+    "sequence": [
+      "Open financing section",
+      "Review financing options",
+      "Open contact path"
+    ],
+    "blocking_rules": [
+      "wait_for_results_after_filter",
+      "ensure_listing_cards_visible"
+    ],
+    "action_script": "await page.goto('<url>'); // choose kaufen/mieten and open listing"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/finanzierung/budgetrechner']",
+    "keyword_match": "budgetrechner",
+    "element_type": "a",
+    "text_pattern": "Budgetrechner",
+    "zone": "main",
+    "description": "Navigate to 'Budgetrechner' (https://www.engelvoelkers.com/de/de/finanzierung/budgetrechner#AffordabilityCalculator)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "ev-finance.de",
+    "selector": "a[href*='/kontakt']",
+    "keyword_match": "beratungstermin vereinbaren",
+    "element_type": "a",
+    "text_pattern": "Beratungstermin vereinbaren",
+    "zone": "footer",
+    "description": "Navigate to 'Beratungstermin vereinbaren' (https://www.ev-finance.de/kontakt?utm_source=engelvoelkers_website&utm_medium=finance_subpage_de&utm_content=cta_step_1)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "ev-finance.de",
+    "selector": "a[href*='/finanzierung']",
+    "keyword_match": "persönliches angebot anfordern",
+    "element_type": "a",
+    "text_pattern": "Persönliches Angebot anfordern",
+    "zone": "main",
+    "description": "Navigate to 'Persönliches Angebot anfordern' (https://www.ev-finance.de/finanzierung?utm_source=engelvoelkers_website&utm_medium=finance_subpage_de&utm_content=cta_step_2)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "ev-finance.de",
+    "selector": "a[href*='/finanzierung']",
+    "keyword_match": "finanzierung jetzt anfragen",
+    "element_type": "a",
+    "text_pattern": "Finanzierung jetzt anfragen",
+    "zone": "main",
+    "description": "Navigate to 'Finanzierung jetzt anfragen' (https://www.ev-finance.de/finanzierung?utm_source=engelvoelkers_website&utm_medium=finance_subpage_de&utm_content=cta_step_3)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "engelvoelkers.com",
+    "action": "extraction",
+    "sequence": [
+      "Open valuation page",
+      "Enter property details",
+      "Submit valuation request"
+    ],
+    "constraints_order": [
+      "transaction_type",
+      "location",
+      "property_type",
+      "budget"
+    ],
+    "blocking_rules": {
+      "open_listing": [
+        "transaction_type",
+        "location"
+      ]
+    },
+    "example_url": "https://www.engelvoelkers.com/de/de/immobilienbewertung",
+    "text": "Strategy for extraction on engelvoelkers.com: Navigate to property valuation flow. URL: https://www.engelvoelkers.com/de/de/immobilienbewertung",
+    "concept": "Navigate to property valuation flow"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "engelvoelkers.com",
+    "url": "https://www.engelvoelkers.com/de/de/immobilienbewertung",
+    "concept": "Navigate to property valuation flow",
+    "sequence": [
+      "Open valuation page",
+      "Enter property details",
+      "Submit valuation request"
+    ],
+    "blocking_rules": [
+      "wait_for_results_after_filter",
+      "ensure_listing_cards_visible"
+    ],
+    "action_script": "await page.goto('<url>'); // choose kaufen/mieten and open listing"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/en/imprint']",
+    "keyword_match": "imprint",
+    "element_type": "a",
+    "text_pattern": "Imprint",
+    "zone": "nav",
+    "description": "Navigate to 'Imprint' (https://www.engelvoelkers.com/de/en/imprint)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienbewertung']",
+    "keyword_match": "view our partners",
+    "element_type": "a",
+    "text_pattern": "View our partners",
+    "zone": "main",
+    "description": "Navigate to 'View our partners' (https://www.engelvoelkers.com/de/de/immobilienbewertung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/immobilien']",
+    "keyword_match": "kaufen & mieten",
+    "element_type": "a",
+    "text_pattern": "Kaufen & Mieten",
+    "zone": "main",
+    "description": "Navigate to 'Kaufen & Mieten' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/immobilien)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/immobilien']",
+    "keyword_match": "immobilien zum kauf finden",
+    "element_type": "a",
+    "text_pattern": "Immobilien zum Kauf finden",
+    "zone": "main",
+    "description": "Navigate to 'Immobilien zum Kauf finden' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/immobilien)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/mieten/immobilien']",
+    "keyword_match": "immobilien zur miete finden",
+    "element_type": "a",
+    "text_pattern": "Immobilien zur Miete finden",
+    "zone": "main",
+    "description": "Navigate to 'Immobilien zur Miete finden' (https://www.engelvoelkers.com/de/de/immobilien/res/mieten/immobilien)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/kaufen/suchalarm']",
+    "keyword_match": "persönliches suchprofil",
+    "element_type": "a",
+    "text_pattern": "Persönliches Suchprofil",
+    "zone": "main",
+    "description": "Navigate to 'Persönliches Suchprofil' (https://www.engelvoelkers.com/de/de/kaufen/suchalarm)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/ressourcen/kaeufer']",
+    "keyword_match": "käufer:in-guide",
+    "element_type": "a",
+    "text_pattern": "Käufer:in-Guide",
+    "zone": "nav",
+    "description": "Navigate to 'Käufer:in-Guide' (https://www.engelvoelkers.com/de/de/ressourcen/kaeufer)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/finanzierung']",
+    "keyword_match": "immobilienfinanzierung",
+    "element_type": "a",
+    "text_pattern": "Immobilienfinanzierung",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienfinanzierung' (https://www.engelvoelkers.com/de/de/finanzierung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/private-office-marktbericht']",
+    "keyword_match": "private office marktbericht",
+    "element_type": "a",
+    "text_pattern": "Private Office Marktbericht",
+    "zone": "nav",
+    "description": "Navigate to 'Private Office Marktbericht' (https://www.engelvoelkers.com/de/de/private-office-marktbericht)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/shops']",
+    "keyword_match": "lokale expert:innen finden",
+    "element_type": "a",
+    "text_pattern": "Lokale Expert:innen finden",
+    "zone": "nav",
+    "description": "Navigate to 'Lokale Expert:innen finden' (https://www.engelvoelkers.com/de/de/shops)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/verkauf/immobilie-verkaufen']",
+    "keyword_match": "immobilie verkaufen",
+    "element_type": "a",
+    "text_pattern": "Immobilie verkaufen",
+    "zone": "main",
+    "description": "Navigate to 'Immobilie verkaufen' (https://www.engelvoelkers.com/de/de/verkauf/immobilie-verkaufen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/verkauf/immobilie-verkaufen']",
+    "keyword_match": "verkaufen sie ihre immobilie",
+    "element_type": "a",
+    "text_pattern": "Verkaufen Sie Ihre Immobilie",
+    "zone": "main",
+    "description": "Navigate to 'Verkaufen Sie Ihre Immobilie' (https://www.engelvoelkers.com/de/de/verkauf/immobilie-verkaufen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/verkauf/immobilienbewertung']",
+    "keyword_match": "bewerten sie ihre immobilie",
+    "element_type": "a",
+    "text_pattern": "Bewerten Sie Ihre Immobilie",
+    "zone": "main",
+    "description": "Navigate to 'Bewerten Sie Ihre Immobilie' (https://www.engelvoelkers.com/de/de/verkauf/immobilienbewertung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/vermietung']",
+    "keyword_match": "vermieten sie ihre immobilie",
+    "element_type": "a",
+    "text_pattern": "Vermieten Sie Ihre Immobilie",
+    "zone": "main",
+    "description": "Navigate to 'Vermieten Sie Ihre Immobilie' (https://www.engelvoelkers.com/de/de/vermietung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de-de/immobilienpreise/']",
+    "keyword_match": "immobilienpreise",
+    "element_type": "a",
+    "text_pattern": "Immobilienpreise",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienpreise' (https://www.engelvoelkers.com/de-de/immobilienpreise/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/ressourcen/verkaeufer']",
+    "keyword_match": "verkäufer:in-guide",
+    "element_type": "a",
+    "text_pattern": "Verkäufer:in-Guide",
+    "zone": "nav",
+    "description": "Navigate to 'Verkäufer:in-Guide' (https://www.engelvoelkers.com/de/de/ressourcen/verkaeufer)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/ratgeber/immobilien-webinare']",
+    "keyword_match": "immobilien-webinare",
+    "element_type": "a",
+    "text_pattern": "Immobilien-Webinare",
+    "zone": "main",
+    "description": "Navigate to 'Immobilien-Webinare' (https://www.engelvoelkers.com/de/de/ratgeber/immobilien-webinare)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/verkauf/immobilienbewertung']",
+    "keyword_match": "immobilie bewerten lassen",
+    "element_type": "a",
+    "text_pattern": "Immobilie bewerten lassen",
+    "zone": "main",
+    "description": "Navigate to 'Immobilie bewerten lassen' (https://www.engelvoelkers.com/de/de/verkauf/immobilienbewertung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler-werden']",
+    "keyword_match": "immobilienmakler:in",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler:in",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler:in' (https://www.engelvoelkers.com/de/de/immobilienmakler-werden)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/shops']",
+    "keyword_match": "standorte finden",
+    "element_type": "a",
+    "text_pattern": "Standorte finden",
+    "zone": "nav",
+    "description": "Navigate to 'Standorte finden' (https://www.engelvoelkers.com/de/de/shops)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler-werden']",
+    "keyword_match": "immobilienmakler:in werden",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler:in werden",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler:in werden' (https://www.engelvoelkers.com/de/de/immobilienmakler-werden)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/ressourcen/makler']",
+    "keyword_match": "immobilienmakler:in-guide",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler:in-Guide",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler:in-Guide' (https://www.engelvoelkers.com/de/de/ressourcen/makler)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler-werden']",
+    "keyword_match": "werden sie immobilienmakler:in",
+    "element_type": "a",
+    "text_pattern": "Werden Sie Immobilienmakler:in",
+    "zone": "main",
+    "description": "Navigate to 'Werden Sie Immobilienmakler:in' (https://www.engelvoelkers.com/de/de/immobilienmakler-werden)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/commercial']",
+    "keyword_match": "commercial",
+    "element_type": "a",
+    "text_pattern": "Commercial",
+    "zone": "nav",
+    "description": "Navigate to 'Commercial' (https://www.engelvoelkers.com/de/de/commercial)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/com/kaufen/gewerbeimmobilien']",
+    "keyword_match": "mehrfamilienhäuser & gewerbeimmobilien zum kauf",
+    "element_type": "a",
+    "text_pattern": "Mehrfamilienhäuser & Gewerbeimmobilien zum Kauf",
+    "zone": "main",
+    "description": "Navigate to 'Mehrfamilienhäuser & Gewerbeimmobilien zum Kauf' (https://www.engelvoelkers.com/de/de/immobilien/com/kaufen/gewerbeimmobilien)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/commercial/verkaufen-vermieten/gewerbeimmobilien-verkaufen']",
+    "keyword_match": "verkaufen sie ihre gewerbeimmobilie",
+    "element_type": "a",
+    "text_pattern": "Verkaufen Sie Ihre Gewerbeimmobilie",
+    "zone": "main",
+    "description": "Navigate to 'Verkaufen Sie Ihre Gewerbeimmobilie' (https://www.engelvoelkers.com/de/de/commercial/verkaufen-vermieten/gewerbeimmobilien-verkaufen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/commercial/services/suchauftrag']",
+    "keyword_match": "suchauftrag",
+    "element_type": "a",
+    "text_pattern": "Suchauftrag",
+    "zone": "nav",
+    "description": "Navigate to 'Suchauftrag' (https://www.engelvoelkers.com/de/de/commercial/services/suchauftrag)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/commercial/services/immobilienbewertung']",
+    "keyword_match": "immobilienbewertung",
+    "element_type": "a",
+    "text_pattern": "Immobilienbewertung",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienbewertung' (https://www.engelvoelkers.com/de/de/commercial/services/immobilienbewertung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/commercial/ueber-uns/karriere']",
+    "keyword_match": "berater:in werden",
+    "element_type": "a",
+    "text_pattern": "Berater:in werden",
+    "zone": "nav",
+    "description": "Navigate to 'Berater:in werden' (https://www.engelvoelkers.com/de/de/commercial/ueber-uns/karriere)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/commercial']",
+    "keyword_match": "ihr partner für anlageimmobilien",
+    "element_type": "a",
+    "text_pattern": "Ihr Partner für Anlageimmobilien",
+    "zone": "main",
+    "description": "Navigate to 'Ihr Partner für Anlageimmobilien' (https://www.engelvoelkers.com/de/de/commercial)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/ueber-uns']",
+    "keyword_match": "unternehmen",
+    "element_type": "a",
+    "text_pattern": "Unternehmen",
+    "zone": "nav",
+    "description": "Navigate to 'Unternehmen' (https://www.engelvoelkers.com/de/de/unternehmen/ueber-uns)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/ueber-uns']",
+    "keyword_match": "über engel & völkers",
+    "element_type": "a",
+    "text_pattern": "Über Engel & Völkers",
+    "zone": "nav",
+    "description": "Navigate to 'Über Engel & Völkers' (https://www.engelvoelkers.com/de/de/unternehmen/ueber-uns)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/team']",
+    "keyword_match": "team deutschland",
+    "element_type": "a",
+    "text_pattern": "Team Deutschland",
+    "zone": "nav",
+    "description": "Navigate to 'Team Deutschland' (https://www.engelvoelkers.com/de/de/unternehmen/team)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/karriere']",
+    "keyword_match": "karriere",
+    "element_type": "a",
+    "text_pattern": "Karriere",
+    "zone": "nav",
+    "description": "Navigate to 'Karriere' (https://www.engelvoelkers.com/de/de/unternehmen/karriere)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/immobilien-franchise-partner']",
+    "keyword_match": "lizenzpartner:in werden",
+    "element_type": "a",
+    "text_pattern": "Lizenzpartner:in werden",
+    "zone": "main",
+    "description": "Navigate to 'Lizenzpartner:in werden' (https://www.engelvoelkers.com/de/de/unternehmen/immobilien-franchise-partner)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/presse']",
+    "keyword_match": "presse",
+    "element_type": "a",
+    "text_pattern": "Presse",
+    "zone": "nav",
+    "description": "Navigate to 'Presse' (https://www.engelvoelkers.com/de/de/unternehmen/presse)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/podcast']",
+    "keyword_match": "podcast",
+    "element_type": "a",
+    "text_pattern": "Podcast",
+    "zone": "nav",
+    "description": "Navigate to 'Podcast' (https://www.engelvoelkers.com/de/de/unternehmen/podcast)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/unternehmensbereiche']",
+    "keyword_match": "übersicht",
+    "element_type": "a",
+    "text_pattern": "Übersicht",
+    "zone": "nav",
+    "description": "Navigate to 'Übersicht' (https://www.engelvoelkers.com/de/de/unternehmen/unternehmensbereiche)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/gg-magazine']",
+    "keyword_match": "gg magazine",
+    "element_type": "a",
+    "text_pattern": "GG Magazine",
+    "zone": "nav",
+    "description": "Navigate to 'GG Magazine' (https://www.engelvoelkers.com/de/de/gg-magazine)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/finanzierung']",
+    "keyword_match": "finance",
+    "element_type": "a",
+    "text_pattern": "Finance",
+    "zone": "main",
+    "description": "Navigate to 'Finance' (https://www.engelvoelkers.com/de/de/finanzierung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/private-office']",
+    "keyword_match": "private office",
+    "element_type": "a",
+    "text_pattern": "Private Office",
+    "zone": "nav",
+    "description": "Navigate to 'Private Office' (https://www.engelvoelkers.com/de/de/unternehmen/private-office)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "evyachtsales.com",
+    "selector": "a[href='/'], a[href*='engelvoelkers.com']",
+    "keyword_match": "yachting",
+    "element_type": "a",
+    "text_pattern": "Yachting",
+    "zone": "nav",
+    "description": "Navigate to 'Yachting' (https://www.evyachtsales.com/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/immobilien-franchise-partner']",
+    "keyword_match": "werden sie lizenzpartner:in",
+    "element_type": "a",
+    "text_pattern": "Werden Sie Lizenzpartner:in",
+    "zone": "main",
+    "description": "Navigate to 'Werden Sie Lizenzpartner:in' (https://www.engelvoelkers.com/de/de/unternehmen/immobilien-franchise-partner)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/shops']",
+    "keyword_match": "standorte",
+    "element_type": "a",
+    "text_pattern": "Standorte",
+    "zone": "nav",
+    "description": "Navigate to 'Standorte' (https://www.engelvoelkers.com/de/de/shops)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de']",
+    "keyword_match": "zurück zur startseite",
+    "element_type": "a",
+    "text_pattern": "Zurück zur Startseite",
+    "zone": "nav",
+    "description": "Navigate to 'Zurück zur Startseite' (https://www.engelvoelkers.com/de/de)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "instagram.com",
+    "selector": "a[href*='/engelvoelkers.deutschland']",
+    "keyword_match": "instagram",
+    "element_type": "a",
+    "text_pattern": "instagram",
+    "zone": "nav",
+    "description": "Navigate to 'instagram' (https://www.instagram.com/engelvoelkers.deutschland)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "facebook.com",
+    "selector": "a[href*='/engelvoelkers.global']",
+    "keyword_match": "facebook",
+    "element_type": "a",
+    "text_pattern": "facebook",
+    "zone": "nav",
+    "description": "Navigate to 'facebook' (https://www.facebook.com/engelvoelkers.global)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "linkedin.com",
+    "selector": "a[href*='/company/engel-voelkers-deutschland/']",
+    "keyword_match": "linkedin",
+    "element_type": "a",
+    "text_pattern": "linkedin",
+    "zone": "nav",
+    "description": "Navigate to 'linkedin' (https://www.linkedin.com/company/engel-voelkers-deutschland/)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "youtube.com",
+    "selector": "a[href*='/channel/UCqhjjL8aQ5yEJS78i_9OChQ']",
+    "keyword_match": "youtube",
+    "element_type": "a",
+    "text_pattern": "youtube",
+    "zone": "nav",
+    "description": "Navigate to 'youtube' (https://www.youtube.com/channel/UCqhjjL8aQ5yEJS78i_9OChQ)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "xing.com",
+    "selector": "a[href*='/pages/engelvoelkers']",
+    "keyword_match": "xing",
+    "element_type": "a",
+    "text_pattern": "xing",
+    "zone": "nav",
+    "description": "Navigate to 'xing' (https://www.xing.com/pages/engelvoelkers)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "tiktok.com",
+    "selector": "a[href*='/@engelvoelkersglobal']",
+    "keyword_match": "tiktok",
+    "element_type": "a",
+    "text_pattern": "tiktok",
+    "zone": "nav",
+    "description": "Navigate to 'tiktok' (https://www.tiktok.com/@engelvoelkersglobal)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/haus']",
+    "keyword_match": "haus kaufen",
+    "element_type": "a",
+    "text_pattern": "Haus kaufen",
+    "zone": "main",
+    "description": "Navigate to 'Haus kaufen' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/wohnung']",
+    "keyword_match": "wohnung kaufen",
+    "element_type": "a",
+    "text_pattern": "Wohnung kaufen",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung kaufen' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/kaufen/grundstueck']",
+    "keyword_match": "grundstück kaufen",
+    "element_type": "a",
+    "text_pattern": "Grundstück kaufen",
+    "zone": "main",
+    "description": "Navigate to 'Grundstück kaufen' (https://www.engelvoelkers.com/de/de/immobilien/res/kaufen/grundstueck)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/mieten/haus']",
+    "keyword_match": "haus mieten",
+    "element_type": "a",
+    "text_pattern": "Haus mieten",
+    "zone": "main",
+    "description": "Navigate to 'Haus mieten' (https://www.engelvoelkers.com/de/de/immobilien/res/mieten/haus)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilien/res/mieten/wohnung']",
+    "keyword_match": "wohnung mieten",
+    "element_type": "a",
+    "text_pattern": "Wohnung mieten",
+    "zone": "main",
+    "description": "Navigate to 'Wohnung mieten' (https://www.engelvoelkers.com/de/de/immobilien/res/mieten/wohnung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/verkauf/immobilienbewertung']",
+    "keyword_match": "immobilie bewerten",
+    "element_type": "a",
+    "text_pattern": "Immobilie bewerten",
+    "zone": "main",
+    "description": "Navigate to 'Immobilie bewerten' (https://www.engelvoelkers.com/de/de/verkauf/immobilienbewertung)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/berlin']",
+    "keyword_match": "immobilienmakler berlin",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler Berlin",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler Berlin' (https://www.engelvoelkers.com/de/de/berlin)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/hamburg']",
+    "keyword_match": "immobilienmakler hamburg",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler Hamburg",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler Hamburg' (https://www.engelvoelkers.com/de/de/hamburg)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler/bayern/muenchen']",
+    "keyword_match": "immobilienmakler münchen",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler München",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler München' (https://www.engelvoelkers.com/de/de/immobilienmakler/bayern/muenchen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler/hessen/frankfurt-am-main']",
+    "keyword_match": "immobilienmakler frankfurt",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler Frankfurt",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler Frankfurt' (https://www.engelvoelkers.com/de/de/immobilienmakler/hessen/frankfurt-am-main)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler/nordrhein-westfalen/duesseldorf']",
+    "keyword_match": "immobilienmakler düsseldorf",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler Düsseldorf",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler Düsseldorf' (https://www.engelvoelkers.com/de/de/immobilienmakler/nordrhein-westfalen/duesseldorf)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/es/de/mallorca']",
+    "keyword_match": "immobilienmakler mallorca",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler Mallorca",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler Mallorca' (https://www.engelvoelkers.com/es/de/mallorca)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/ueber-uns']",
+    "keyword_match": "über uns",
+    "element_type": "a",
+    "text_pattern": "Über uns",
+    "zone": "nav",
+    "description": "Navigate to 'Über uns' (https://www.engelvoelkers.com/de/de/unternehmen/ueber-uns)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/shops']",
+    "keyword_match": "makler finden",
+    "element_type": "a",
+    "text_pattern": "Makler finden",
+    "zone": "nav",
+    "description": "Navigate to 'Makler finden' (https://www.engelvoelkers.com/de/de/shops)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler-werden']",
+    "keyword_match": "immobilienmakler werden",
+    "element_type": "a",
+    "text_pattern": "Immobilienmakler werden",
+    "zone": "main",
+    "description": "Navigate to 'Immobilienmakler werden' (https://www.engelvoelkers.com/de/de/immobilienmakler-werden)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/unternehmen/immobilien-franchise-partner']",
+    "keyword_match": "franchisepartner werden",
+    "element_type": "a",
+    "text_pattern": "Franchisepartner werden",
+    "zone": "main",
+    "description": "Navigate to 'Franchisepartner werden' (https://www.engelvoelkers.com/de/de/unternehmen/immobilien-franchise-partner)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/erklaerung-zur-barrierefreiheit']",
+    "keyword_match": "erklärung zur barrierefreiheit",
+    "element_type": "a",
+    "text_pattern": "Erklärung zur Barrierefreiheit",
+    "zone": "nav",
+    "description": "Navigate to 'Erklärung zur Barrierefreiheit' (https://www.engelvoelkers.com/de/de/erklaerung-zur-barrierefreiheit)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/nutzungsbedingungen']",
+    "keyword_match": "nutzungsbedinungen",
+    "element_type": "a",
+    "text_pattern": "Nutzungsbedinungen",
+    "zone": "nav",
+    "description": "Navigate to 'Nutzungsbedinungen' (https://www.engelvoelkers.com/de/de/nutzungsbedingungen)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/digital-services-act']",
+    "keyword_match": "rechtswidrigen inhalt melden (digital services act)",
+    "element_type": "a",
+    "text_pattern": "Rechtswidrigen Inhalt melden (Digital Services Act)",
+    "zone": "nav",
+    "description": "Navigate to 'Rechtswidrigen Inhalt melden (Digital Services Act)' (https://www.engelvoelkers.com/de/de/digital-services-act)"
+  },
+  {
+    "doc_type": "Strategy_Sequence",
+    "domain": "engelvoelkers.com",
+    "action": "extraction",
+    "sequence": [
+      "Open homepage",
+      "Choose Kaufen or Mieten",
+      "Open relevant region page",
+      "Review listing details"
+    ],
+    "constraints_order": [
+      "transaction_type",
+      "location",
+      "property_type",
+      "budget"
+    ],
+    "blocking_rules": {
+      "open_listing": [
+        "transaction_type",
+        "location"
+      ]
+    },
+    "example_url": "https://www.engelvoelkers.com/de/de/immobilienmakler",
+    "text": "Strategy for extraction on engelvoelkers.com: Navigate Engel & Völkers real estate sections. URL: https://www.engelvoelkers.com/de/de/immobilienmakler",
+    "concept": "Navigate Engel & Völkers real estate sections"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "engelvoelkers.com",
+    "url": "https://www.engelvoelkers.com/de/de/immobilienmakler",
+    "concept": "Navigate Engel & Völkers real estate sections",
+    "sequence": [
+      "Open homepage",
+      "Choose Kaufen or Mieten",
+      "Open relevant region page",
+      "Review listing details"
+    ],
+    "blocking_rules": [
+      "wait_for_results_after_filter",
+      "ensure_listing_cards_visible"
+    ],
+    "action_script": "await page.goto('<url>'); // choose kaufen/mieten and open listing"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "domain": "engelvoelkers.com",
+    "selector": "a[href*='/de/de/immobilienmakler']",
+    "keyword_match": "view our partners",
+    "element_type": "a",
+    "text_pattern": "View our partners",
+    "zone": "main",
+    "description": "Navigate to 'View our partners' (https://www.engelvoelkers.com/de/de/immobilienmakler)"
+  }
+]

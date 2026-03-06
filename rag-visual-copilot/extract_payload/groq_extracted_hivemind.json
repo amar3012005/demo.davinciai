@@ -1,0 +1,821 @@
+[
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://groq.com/",
+    "concept": "Navigate to Groq website and evaluate inference pricing",
+    "sequence": [
+      "Locate Navigation",
+      "Select Pricing Link",
+      "Verify Tiers",
+      "Explore Solutions",
+      "Learn More",
+      "Get Started"
+    ],
+    "blocking_rules": [
+      "Do not select pricing until navigation is located",
+      "Do not verify tiers before pricing page loaded",
+      "Do not explore solutions before learning more"
+    ],
+    "action_script": "await page.goto('https://groq.com/'); await page.click('text=Pricing'); await page.click('text=Learn More'); await page.click('text=Get Started');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/pricing']",
+    "keyword_match": "/pricing",
+    "element_type": "a",
+    "text_pattern": "See Pricing",
+    "zone": "nav",
+    "description": "Navigation link to pricing page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/groqcloud']",
+    "keyword_match": "/groqcloud",
+    "element_type": "a",
+    "text_pattern": "GroqCloud",
+    "zone": "nav",
+    "description": "Navigation link to GroqCloud"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/lpu-architecture']",
+    "keyword_match": "/lpu-architecture",
+    "element_type": "a",
+    "text_pattern": "LPU Architecture",
+    "zone": "nav",
+    "description": "Navigation link to LPU Architecture"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/industry-solutions']",
+    "keyword_match": "/industry-solutions",
+    "element_type": "a",
+    "text_pattern": "Industries & Use Cases",
+    "zone": "nav",
+    "description": "Navigation link to Industries & Use Cases"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/customer-stories']",
+    "keyword_match": "/customer-stories",
+    "element_type": "a",
+    "text_pattern": "Customer Stories",
+    "zone": "nav",
+    "description": "Navigation link to Customer Stories"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/demos']",
+    "keyword_match": "/demos",
+    "element_type": "a",
+    "text_pattern": "Demos",
+    "zone": "nav",
+    "description": "Navigation link to Demos"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/blog']",
+    "keyword_match": "/blog",
+    "element_type": "a",
+    "text_pattern": "Blog",
+    "zone": "nav",
+    "description": "Navigation link to Blog"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/changelog']",
+    "keyword_match": "/changelog",
+    "element_type": "a",
+    "text_pattern": "Changelog",
+    "zone": "nav",
+    "description": "Navigation link to Changelog"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/papers']",
+    "keyword_match": "/papers",
+    "element_type": "a",
+    "text_pattern": "Whitepapers",
+    "zone": "nav",
+    "description": "Navigation link to Whitepapers"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/subscribe']",
+    "keyword_match": "/subscribe",
+    "element_type": "a",
+    "text_pattern": "Subscribe",
+    "zone": "nav",
+    "description": "Navigation link to Subscribe"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/about-groq']",
+    "keyword_match": "/about-groq",
+    "element_type": "a",
+    "text_pattern": "About Groq",
+    "zone": "nav",
+    "description": "Navigation link to About Groq"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/newsroom']",
+    "keyword_match": "/newsroom",
+    "element_type": "a",
+    "text_pattern": "Newsroom",
+    "zone": "nav",
+    "description": "Navigation link to Newsroom"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/careers-at-groq']",
+    "keyword_match": "/careers-at-groq",
+    "element_type": "a",
+    "text_pattern": "Careers at Groq",
+    "zone": "nav",
+    "description": "Navigation link to Careers at Groq"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/contact']",
+    "keyword_match": "/contact",
+    "element_type": "a",
+    "text_pattern": "Contact Us",
+    "zone": "nav",
+    "description": "Navigation link to Contact Us"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/console.groq.com/keys']",
+    "keyword_match": "/console.groq.com/keys",
+    "element_type": "a",
+    "text_pattern": "Free API key",
+    "zone": "nav",
+    "description": "Navigation link to Free API key"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/community.groq.com/']",
+    "keyword_match": "/community.groq.com/",
+    "element_type": "a",
+    "text_pattern": "Community",
+    "zone": "nav",
+    "description": "Navigation link to Community"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/console.groq.com/docs/overview']",
+    "keyword_match": "/console.groq.com/docs/overview",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Navigation link to Docs"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/enterprise-access']",
+    "keyword_match": "/enterprise-access",
+    "element_type": "a",
+    "text_pattern": "Enterprises",
+    "zone": "nav",
+    "description": "Navigation link to Enterprises"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/start-building']",
+    "keyword_match": "/start-building",
+    "element_type": "a",
+    "text_pattern": "Start Building",
+    "zone": "nav",
+    "description": "Navigation link to Start Building"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://console.groq.com/docs/quickstart",
+    "concept": "Navigate to and evaluate Groq API quickstart guide",
+    "sequence": [
+      "Locate Navigation",
+      "Select Quickstart Link",
+      "Verify Quickstart Guide Content"
+    ],
+    "blocking_rules": [
+      "Do not select quickstart link until navigation is located",
+      "Do not verify quickstart guide content before quickstart page loaded"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/quickstart'); await page.click('text=Quickstart');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart']",
+    "keyword_match": "/quickstart",
+    "element_type": "a",
+    "text_pattern": "Quickstart",
+    "zone": "nav",
+    "description": "Navigation link to quickstart guide"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/overview']",
+    "keyword_match": "/overview",
+    "element_type": "a",
+    "text_pattern": "Overview",
+    "zone": "nav",
+    "description": "Navigation link to overview"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground']",
+    "keyword_match": "/playground",
+    "element_type": "a",
+    "text_pattern": "Playground",
+    "zone": "nav",
+    "description": "Navigation link to playground"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/keys']",
+    "keyword_match": "/keys",
+    "element_type": "a",
+    "text_pattern": "API Keys",
+    "zone": "nav",
+    "description": "Navigation link to API keys"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/dashboard']",
+    "keyword_match": "/dashboard",
+    "element_type": "a",
+    "text_pattern": "Dashboard",
+    "zone": "nav",
+    "description": "Navigation link to dashboard"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs']",
+    "keyword_match": "/docs",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Navigation link to documentation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/login']",
+    "keyword_match": "/login",
+    "element_type": "a",
+    "text_pattern": "Log In",
+    "zone": "nav",
+    "description": "Navigation link to login"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/settings']",
+    "keyword_match": "/settings",
+    "element_type": "a",
+    "text_pattern": "",
+    "zone": "nav",
+    "description": "Navigation link to settings"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://console.groq.com/docs/models",
+    "concept": "Navigate to and evaluate supported models",
+    "sequence": [
+      "Locate Navigation",
+      "Select Models Link",
+      "Verify Model Information"
+    ],
+    "blocking_rules": [
+      "Do not select models until navigation is located",
+      "Do not verify model information before models page loaded"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/models'); await page.click('text=Models');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models']",
+    "keyword_match": "/docs/models",
+    "element_type": "a",
+    "text_pattern": "Models",
+    "zone": "nav",
+    "description": "Navigation link to models page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/overview']",
+    "keyword_match": "/docs/overview",
+    "element_type": "a",
+    "text_pattern": "Overview",
+    "zone": "nav",
+    "description": "Navigation link to overview page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference']",
+    "keyword_match": "/docs/api-reference",
+    "element_type": "a",
+    "text_pattern": "API Reference",
+    "zone": "nav",
+    "description": "Navigation link to API reference page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/home']",
+    "keyword_match": "/home",
+    "element_type": "a",
+    "text_pattern": "Home",
+    "zone": "nav",
+    "description": "Navigation link to home page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground']",
+    "keyword_match": "/playground",
+    "element_type": "a",
+    "text_pattern": "Playground",
+    "zone": "nav",
+    "description": "Navigation link to playground page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/keys']",
+    "keyword_match": "/keys",
+    "element_type": "a",
+    "text_pattern": "API Keys",
+    "zone": "nav",
+    "description": "Navigation link to API keys page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/dashboard']",
+    "keyword_match": "/dashboard",
+    "element_type": "a",
+    "text_pattern": "Dashboard",
+    "zone": "nav",
+    "description": "Navigation link to dashboard page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs']",
+    "keyword_match": "/docs",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Navigation link to docs page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/settings']",
+    "keyword_match": "/settings",
+    "element_type": "a",
+    "text_pattern": "",
+    "zone": "nav",
+    "description": "Navigation link to settings page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/login']",
+    "keyword_match": "/login",
+    "element_type": "a",
+    "text_pattern": "Log In",
+    "zone": "nav",
+    "description": "Navigation link to login page"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://console.groq.com/docs/api-reference",
+    "concept": "Navigate to and evaluate API reference",
+    "sequence": [
+      "Locate Navigation",
+      "Select API Reference Link",
+      "Verify API Endpoints"
+    ],
+    "blocking_rules": [
+      "Do not select API Reference until navigation is located",
+      "Do not verify endpoints before API Reference page loaded"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/api-reference'); await page.click('text=API Reference');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference']",
+    "keyword_match": "/api-reference",
+    "element_type": "a",
+    "text_pattern": "API Reference",
+    "zone": "nav",
+    "description": "Navigation link to API reference page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/overview']",
+    "keyword_match": "/overview",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Navigation link to documentation overview"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground']",
+    "keyword_match": "/playground",
+    "element_type": "a",
+    "text_pattern": "Playground",
+    "zone": "nav",
+    "description": "Navigation link to playground"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/keys']",
+    "keyword_match": "/keys",
+    "element_type": "a",
+    "text_pattern": "API Keys",
+    "zone": "nav",
+    "description": "Navigation link to API keys"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/dashboard']",
+    "keyword_match": "/dashboard",
+    "element_type": "a",
+    "text_pattern": "Dashboard",
+    "zone": "nav",
+    "description": "Navigation link to dashboard"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/login']",
+    "keyword_match": "/login",
+    "element_type": "a",
+    "text_pattern": "Log In",
+    "zone": "nav",
+    "description": "Navigation link to login"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/settings']",
+    "keyword_match": "/settings",
+    "element_type": "a",
+    "text_pattern": "",
+    "zone": "nav",
+    "description": "Navigation link to settings"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#chat']",
+    "keyword_match": "/api-reference#chat",
+    "element_type": "a",
+    "text_pattern": "Chat",
+    "zone": "content",
+    "description": "Link to chat API reference"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#responses']",
+    "keyword_match": "/api-reference#responses",
+    "element_type": "a",
+    "text_pattern": "Responses (beta)",
+    "zone": "content",
+    "description": "Link to responses API reference"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio']",
+    "keyword_match": "/api-reference#audio",
+    "element_type": "a",
+    "text_pattern": "Audio",
+    "zone": "content",
+    "description": "Link to audio API reference"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#models']",
+    "keyword_match": "/api-reference#models",
+    "element_type": "a",
+    "text_pattern": "Models",
+    "zone": "content",
+    "description": "Link to models API reference"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches']",
+    "keyword_match": "/api-reference#batches",
+    "element_type": "a",
+    "text_pattern": "Batches",
+    "zone": "content",
+    "description": "Link to batches API reference"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://console.groq.com/docs/vision",
+    "concept": "Navigate to and evaluate vision documentation",
+    "sequence": [
+      "Locate Navigation",
+      "Select Vision Documentation Link",
+      "Verify Vision Capabilities"
+    ],
+    "blocking_rules": [
+      "Do not select vision documentation until navigation is located",
+      "Do not verify vision capabilities before vision documentation page loaded"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/vision'); await page.click('text=Vision');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/vision']",
+    "keyword_match": "/vision",
+    "element_type": "a",
+    "text_pattern": "Vision",
+    "zone": "nav",
+    "description": "Navigation link to vision documentation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground']",
+    "keyword_match": "/playground",
+    "element_type": "a",
+    "text_pattern": "GroqCloud Console Playground",
+    "zone": "main",
+    "description": "Link to GroqCloud Console Playground"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/text-chat']",
+    "keyword_match": "/text-chat",
+    "element_type": "a",
+    "text_pattern": "chat.completions",
+    "zone": "main",
+    "description": "Link to chat completions documentation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='https://github.com/groq/groq-api-cookbook']",
+    "keyword_match": "github",
+    "element_type": "a",
+    "text_pattern": "Groq API Cookbook",
+    "zone": "footer",
+    "description": "Link to Groq API Cookbook repository on GitHub"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://console.groq.com/docs/rate-limits",
+    "concept": "Navigate to and evaluate rate limits documentation",
+    "sequence": [
+      "Locate Navigation",
+      "Select Docs Link",
+      "Verify Rate Limits Page Loaded",
+      "Evaluate Rate Limits Information"
+    ],
+    "blocking_rules": [
+      "Do not select docs link until navigation is located",
+      "Do not verify rate limits page loaded before docs link is clicked"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/rate-limits'); await page.click('text=Docs');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs']",
+    "keyword_match": "/docs",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Navigation link to docs page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/rate-limits']",
+    "keyword_match": "/rate-limits",
+    "element_type": "a",
+    "text_pattern": "Rate Limits",
+    "zone": "docs",
+    "description": "Link to rate limits documentation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/settings/limits']",
+    "keyword_match": "/settings/limits",
+    "element_type": "a",
+    "text_pattern": "limits page",
+    "zone": "docs",
+    "description": "Link to limits page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/overview']",
+    "keyword_match": "/docs/overview",
+    "element_type": "a",
+    "text_pattern": "Overview",
+    "zone": "docs",
+    "description": "Link to overview documentation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference']",
+    "keyword_match": "/docs/api-reference",
+    "element_type": "a",
+    "text_pattern": "API Reference",
+    "zone": "docs",
+    "description": "Link to API reference documentation"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://groq.com/lpu/",
+    "concept": "Understand Language Processing Unit",
+    "sequence": [
+      "Locate Overview",
+      "Read Background",
+      "Understand LPU Design Principles",
+      "Evaluate Conclusion"
+    ],
+    "blocking_rules": [
+      "Do not read background until overview is located",
+      "Do not understand LPU design principles before reading background",
+      "Do not evaluate conclusion before understanding LPU design principles"
+    ],
+    "action_script": "await page.goto('https://groq.com/lpu/'); await page.click('text=What is a Language Processing Unit');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/groqcloud/']",
+    "keyword_match": "/groqcloud",
+    "element_type": "a",
+    "text_pattern": "GroqCloud",
+    "zone": "content",
+    "description": "Link to GroqCloud page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "img[src*='cdn.sanity.io/images']",
+    "keyword_match": "cdn.sanity.io/images",
+    "element_type": "img",
+    "text_pattern": "",
+    "zone": "content",
+    "description": "Image on the page"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "groq.com",
+    "url": "https://groq.com/privacy-policy/",
+    "concept": "Evaluate privacy policy and terms of service",
+    "sequence": [
+      "Locate Privacy Policy",
+      "Review Terms of Service",
+      "Evaluate Data Collection Practices"
+    ],
+    "blocking_rules": [
+      "Do not proceed until privacy policy is located",
+      "Do not review terms of service until privacy policy is evaluated"
+    ],
+    "action_script": "await page.goto('https://groq.com/privacy-policy/'); await page.click('text=Terms of Service');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/privacy-policy']",
+    "keyword_match": "/privacy-policy",
+    "element_type": "a",
+    "text_pattern": "Privacy Policy",
+    "zone": "footer",
+    "description": "Link to privacy policy in the footer"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/cookie-policy']",
+    "keyword_match": "/cookie-policy",
+    "element_type": "a",
+    "text_pattern": "Cookie Policy",
+    "zone": "footer",
+    "description": "Link to cookie policy in the footer"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/terms-of-service']",
+    "keyword_match": "/terms-of-service",
+    "element_type": "a",
+    "text_pattern": "Terms of Service",
+    "zone": "footer",
+    "description": "Link to terms of service in the footer"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='mailto:privacy@groq.com']",
+    "keyword_match": "mailto:privacy@groq.com",
+    "element_type": "a",
+    "text_pattern": "Contact Us",
+    "zone": "footer",
+    "description": "Link to contact email in the footer"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/#main']",
+    "keyword_match": "/#main",
+    "element_type": "a",
+    "text_pattern": "skip to content",
+    "zone": "nav",
+    "description": "Navigation link to skip to content"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/']",
+    "keyword_match": "/",
+    "element_type": "a",
+    "text_pattern": "Groq",
+    "zone": "nav",
+    "description": "Navigation link to Groq"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/newsroom/mclaren-racing-announces-groq-as-an-official-partner-of-the-mclaren-formula-1-team']",
+    "keyword_match": "/newsroom/mclaren-racing-announces-groq-as-an-official-partner-of-the-mclaren-formula-1-team",
+    "element_type": "a",
+    "text_pattern": "Read More",
+    "zone": "nav",
+    "description": "Navigation link to Read More"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/case-studies']",
+    "keyword_match": "/case-studies",
+    "element_type": "a",
+    "text_pattern": "Read Customer Stories",
+    "zone": "nav",
+    "description": "Navigation link to Read Customer Stories"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/newsroom/groq-raises-750-million-as-inference-demand-surges']",
+    "keyword_match": "/newsroom/groq-raises-750-million-as-inference-demand-surges",
+    "element_type": "a",
+    "text_pattern": "September 17, 2025 ### Groq Raises $750 Million as Inference Demand Surges",
+    "zone": "nav",
+    "description": "Navigation link to September 17, 2025 ### Groq Raises $750 Million as Inference Demand Surges"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/blog/day-zero-support-for-openai-open-models']",
+    "keyword_match": "/blog/day-zero-support-for-openai-open-models",
+    "element_type": "a",
+    "text_pattern": "August 5, 2025 ### Day Zero Support for OpenAI Open Models",
+    "zone": "nav",
+    "description": "Navigation link to August 5, 2025 ### Day Zero Support for OpenAI Open Models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/terms-of-use']",
+    "keyword_match": "/terms-of-use",
+    "element_type": "a",
+    "text_pattern": "Website Terms of Use",
+    "zone": "nav",
+    "description": "Navigation link to Website Terms of Use"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/security']",
+    "keyword_match": "/security",
+    "element_type": "a",
+    "text_pattern": "Security",
+    "zone": "nav",
+    "description": "Navigation link to Security"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/trademark-policy']",
+    "keyword_match": "/trademark-policy",
+    "element_type": "a",
+    "text_pattern": "Trademark Policy",
+    "zone": "nav",
+    "description": "Navigation link to Trademark Policy"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/photography-and-filming-policy']",
+    "keyword_match": "/photography-and-filming-policy",
+    "element_type": "a",
+    "text_pattern": "Photography and Filming Policy",
+    "zone": "nav",
+    "description": "Navigation link to Photography and Filming Policy"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/groqcloud/']",
+    "keyword_match": "/groqcloud/",
+    "element_type": "a",
+    "text_pattern": "GroqCloud\u2122",
+    "zone": "nav",
+    "description": "Navigation link to GroqCloud\u2122"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/privacy-policy-oct-15-2025']",
+    "keyword_match": "/privacy-policy-oct-15-2025",
+    "element_type": "a",
+    "text_pattern": "[**October 15, 2025**",
+    "zone": "nav",
+    "description": "Navigation link to [**October 15, 2025**"
+  }
+]

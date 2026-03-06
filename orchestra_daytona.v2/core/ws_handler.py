@@ -169,6 +169,8 @@ class OrchestratorSession:
 
     metadata: Dict[str, Any] = field(default_factory=dict)
     map_status_checked: bool = False
+    livegraph_seeded: bool = False
+    livegraph_seeded_at: float = 0.0
 
     # Barge-in validation (deferred VAD interrupt)
     last_query_text: str = ""
@@ -888,6 +890,7 @@ class OrchestratorWSHandler:
 
         text = msg.get("text", "").strip()
         screenshot_b64 = msg.get("screenshot_b64") or None
+        incoming_dom = msg.get("dom_context") or msg.get("elements") or []
         if not text:
             logger.warning(f"[{session.session_id}] Empty text input in mock mode")
             return
@@ -895,6 +898,13 @@ class OrchestratorWSHandler:
         if screenshot_b64:
             session._screenshot_b64 = screenshot_b64
             logger.debug(f"[{session.session_id}] 📸 Text input screenshot stored ({len(screenshot_b64) // 1024}KB)")
+        if isinstance(incoming_dom, list) and incoming_dom:
+            # Use DOM captured at text submit time to prevent pre-route empty-node race.
+            session.last_dom_context = session.dom_context if session.dom_context else []
+            session.dom_context = incoming_dom
+            if msg.get("current_url"):
+                session.current_url = msg.get("current_url")
+            await self._seed_livegraph(session, incoming_dom, source="text_input", force=False)
 
         logger.info(f"[{session.session_id}] 📝 Mock STT input: '{text}'")
         session.last_activity = time.time()
@@ -2343,6 +2353,8 @@ class OrchestratorWSHandler:
             session.current_url = msg.get("url")
         elif msg.get("current_url"):
             session.current_url = msg.get("current_url")
+        if msg.get("title"):
+            session._page_title = msg.get("title")
 
         if mode in ["voice", "visual-copilot", "analyse_only"]:
             prev_mode = session.mode
@@ -2374,6 +2386,8 @@ class OrchestratorWSHandler:
             if isinstance(elements, list) and elements:
                 session.dom_context = elements
                 logger.info(f"[{session.session_id}] 👁️ DOM elements found in session_config: {len(elements)} items")
+                # Seed LiveGraph immediately on widget open/session config so pre-route has nodes.
+                await self._seed_livegraph(session, elements, source="session_config", force=False)
 
             if mode == "visual-copilot" and is_resume and pending_goal:
                 # ── STICKY AGENT RESUME ────────────────────────────────────────
@@ -2509,6 +2523,9 @@ class OrchestratorWSHandler:
         if screenshot_b64:
             session._screenshot_b64 = screenshot_b64
             logger.debug(f"[{session.session_id}] 📸 DOM update screenshot stored ({len(screenshot_b64) // 1024}KB)")
+            # Push to RAG screenshot cache so Last-Mile broker can access it without a WebSocket
+            asyncio.create_task(self._push_screenshot_to_rag(session, screenshot_b64, source="dom_update"))
+
             
         # IMMEDIATE MAP MODE CHECK (First load only)
         if self.config.services.rag.enable_map and not getattr(session, 'map_status_checked', False) and session.current_url:
@@ -2556,6 +2573,9 @@ class OrchestratorWSHandler:
             # Log detailed summary for proof that scanning/sending is working
             preview = [f"{e.get('type')}:{e.get('id', 'no-id')}:{e.get('text', '')[:20]}" for e in elements]
             logger.info(f"[{session.session_id}] 👁️ DOM Update Received ({len(elements)} items): {preview}")
+            # Seed LiveGraph on DOM Update ONLY if not strictly seeded already for this session state
+            source_label = msg.get("source", "dom_update")
+            await self._seed_livegraph(session, elements, source=source_label, force=False)
         else:
             logger.warning(f"[{session.session_id}] ⚠️ Received invalid DOM update format: {type(elements)}")
 
@@ -2590,6 +2610,28 @@ class OrchestratorWSHandler:
                 )
                 # Import the history into the new session so future turns are connected
                 session.history_manager = old_session.history_manager
+
+                # 🛡️ MISSION STATE RESTORATION: Copy mission action state so the
+                # RAG backend receives accurate history and doesn't repeat actions.
+                if old_session.action_history:
+                    session.action_history = list(old_session.action_history)
+                    logger.info(
+                        f"[{session.session_id}] 🔥 Phoenix: Restored {len(session.action_history)} "
+                        f"action_history entries from old session"
+                    )
+                if old_session.is_mission_active and old_session.current_goal:
+                    session.current_goal = old_session.current_goal
+                    session.is_mission_active = True
+                    session.goal_step_count = old_session.goal_step_count
+                    session.last_dom_hash = old_session.last_dom_hash
+                    session.stagnation_count = old_session.stagnation_count
+                    session.map_hints = old_session.map_hints
+                    session.last_action = old_session.last_action
+                    logger.info(
+                        f"[{session.session_id}] 🔥 Phoenix: Restored mission state — "
+                        f"goal='{session.current_goal}' step={session.goal_step_count} "
+                        f"history_len={len(session.action_history)}"
+                    )
             else:
                 logger.info(
                     f"[{session.session_id}] 🔥 Phoenix: Old session not found "
@@ -2659,6 +2701,14 @@ class OrchestratorWSHandler:
                 
                 logger.info(
                     f"[{session.session_id}] 👁️ DOM Delta: Full scan ({len(nodes)} nodes)"
+                )
+                
+                # Seed LiveGraph so the backend is in sync
+                await self._seed_livegraph(
+                    session,
+                    nodes,
+                    source="dom_delta_full_scan",
+                    force=False
                 )
         
         elif delta_type == "update":
@@ -2738,9 +2788,49 @@ class OrchestratorWSHandler:
         if image_b64:
             session._screenshot_b64 = image_b64
             logger.info(f"[{session.session_id}] 📸 Screenshot response stored ({len(image_b64) // 1024}KB)")
+            # Push to RAG so Last-Mile broker can access it without a direct WebSocket
+            asyncio.create_task(self._push_screenshot_to_rag(session, image_b64, source="screenshot_response"))
         else:
             err = msg.get("error", "unknown")
             logger.info(f"[{session.session_id}] 📸 Screenshot response missing image ({err})")
+
+    async def _push_screenshot_to_rag(
+        self,
+        session: OrchestratorSession,
+        screenshot_b64: str,
+        source: str = "orchestrator",
+    ) -> None:
+        """
+        Fire-and-forget: push the latest screenshot to the RAG service cache.
+        This allows the RAG Last-Mile screenshot broker to get a fresh image
+        without needing its own direct WebSocket to the browser.
+        """
+        if not screenshot_b64:
+            return
+        base_rag_url = (getattr(session, "rag_url", None) or self.config.services.rag.url).rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.post(
+                    f"{base_rag_url}/api/v1/push_screenshot",
+                    json={
+                        "session_id": session.session_id,
+                        "screenshot_b64": screenshot_b64,
+                        "source": source,
+                    },
+                )
+                if resp.status_code == 200:
+                    logger.debug(
+                        f"[{session.session_id}] 📸 PUSH_SCREENSHOT ok "
+                        f"source={source} size={len(screenshot_b64) // 1024}KB"
+                    )
+                else:
+                    logger.debug(
+                        f"[{session.session_id}] 📸 PUSH_SCREENSHOT non-200 "
+                        f"status={resp.status_code} source={source}"
+                    )
+        except Exception as e:
+            logger.debug(f"[{session.session_id}] 📸 PUSH_SCREENSHOT failed source={source}: {e}")
+
 
     async def _handle_analyse_page(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """
@@ -3895,6 +3985,7 @@ class OrchestratorWSHandler:
 
         text = msg.get("text", "").strip()
         screenshot_b64 = msg.get("screenshot_b64") or None
+        incoming_dom = msg.get("dom_context") or msg.get("elements") or []
         if not text:
             logger.warning(f"[{session.session_id}] Empty text input in mock mode")
             return
@@ -3902,6 +3993,13 @@ class OrchestratorWSHandler:
         if screenshot_b64:
             session._screenshot_b64 = screenshot_b64
             logger.debug(f"[{session.session_id}] 📸 Text input screenshot stored ({len(screenshot_b64) // 1024}KB)")
+        if isinstance(incoming_dom, list) and incoming_dom:
+            # Use DOM captured at text submit time to prevent pre-route empty-node race.
+            session.last_dom_context = session.dom_context if session.dom_context else []
+            session.dom_context = incoming_dom
+            if msg.get("current_url"):
+                session.current_url = msg.get("current_url")
+            await self._seed_livegraph(session, incoming_dom, source="text_input", force=False)
 
         logger.info(f"[{session.session_id}] 📝 Mock STT input: '{text}'")
         session.last_activity = time.time()
@@ -4548,6 +4646,7 @@ class OrchestratorWSHandler:
         session.last_dom_hash = None
         session.last_action = ""
         session.map_hints = ""  # Will be fetched once
+        session.livegraph_seeded = False  # Ensure one seed per mission
         logger.info(f"[{session.session_id}] 🎯 Mission Started: '{goal}'")
         
         # Notify widget of mission goal (for Sticky Agent navigation persistence)
@@ -4568,11 +4667,83 @@ class OrchestratorWSHandler:
         # Kick off the loop - First step will provide context-aware narration
         await self._execute_next_step(session)
 
+    async def _seed_livegraph(
+        self,
+        session: OrchestratorSession,
+        dom_context: Optional[List[Dict[str, Any]]],
+        source: str,
+        force: bool = False,
+    ) -> bool:
+        """Seed RAG LiveGraph early so pre-route can reason before user input processing."""
+        if not isinstance(dom_context, list) or not dom_context:
+            return False
+        if session.livegraph_seeded and not force:
+            return True
+
+        now = time.time()
+        current_url = session.current_url or ""
+        dom_head = dom_context[:350]
+        dom_signature = hashlib.md5(
+            json.dumps(dom_head, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        last_seed_sig = str(session.metadata.get("livegraph_seed_signature", "") or "")
+        last_seed_url = str(session.metadata.get("livegraph_seed_url", "") or "")
+        last_seed_ts = float(session.metadata.get("livegraph_seed_ts", 0.0) or 0.0)
+
+        # Hard duplicate suppression: identical DOM+URL in a short burst.
+        if (
+            last_seed_sig
+            and last_seed_sig == dom_signature
+            and last_seed_url == current_url
+            and (now - last_seed_ts) < 0.9
+        ):
+            logger.debug(
+                f"[{session.session_id}] 🌱 LiveGraph seed skip (duplicate burst) "
+                f"source={source} age_ms={int((now - last_seed_ts) * 1000)}"
+            )
+            return True
+
+        base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip("/")
+        payload = {
+            "session_id": session.session_id,
+            "dom_context": dom_context[:700],
+            "current_url": current_url,
+            "page_title": getattr(session, "_page_title", "") or "",
+        }
+        start = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(f"{base_rag_url}/api/v1/livegraph_seed", json=payload)
+                if resp.status_code == 200:
+                    session.livegraph_seeded = True
+                    session.livegraph_seeded_at = time.time()
+                    session.metadata["livegraph_seed_source"] = source
+                    session.metadata["livegraph_seed_signature"] = dom_signature
+                    session.metadata["livegraph_seed_url"] = current_url
+                    session.metadata["livegraph_seed_ts"] = session.livegraph_seeded_at
+                    seed_ms = int((time.time() - start) * 1000)
+                    logger.info(
+                        f"[{session.session_id}] 🌱 LiveGraph seed ok source={source} "
+                        f"nodes={len(dom_context)} took_ms={seed_ms}"
+                    )
+                    return True
+                logger.warning(
+                    f"[{session.session_id}] 🌱 LiveGraph seed non-200 source={source} status={resp.status_code}"
+                )
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] 🌱 LiveGraph seed failed source={source}: {type(e).__name__} - {e}")
+        return False
+
     async def _fetch_map_hints(self, session: OrchestratorSession, goal: str) -> str:
         """Fetch navigation hints from Qdrant (called ONCE at mission start)."""
         base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
         current_url = session.current_url or ""
         screenshot_b64 = getattr(session, "_screenshot_b64", None)
+        dom_context = session.dom_context or []
+
+        # Try to seed before map hints so pre-decision sees non-empty LiveGraph.
+        if dom_context and not session.livegraph_seeded:
+            await self._seed_livegraph(session, dom_context, source="map_hints_fetch", force=False)
 
         # If screenshot is missing, request one-shot capture from frontend and wait briefly.
         if not screenshot_b64 and session.websocket:
@@ -4602,11 +4773,35 @@ class OrchestratorWSHandler:
                     "session_id": session.session_id,
                     "current_url": current_url,
                     "screenshot_b64": screenshot_b64,
+                    "dom_context": dom_context[:300] if dom_context else None,
                 }
             )
             if response.status_code == 200:
                 data = response.json()
-                return data.get("hints", "")
+                hints = data.get("hints", "") or ""
+                pre_decision = data.get("pre_decision") or {}
+                route_hint = data.get("route_hint") or pre_decision.get("route") or ""
+                seq = pre_decision.get("recommended_strategy_order") or []
+
+                # Persist full pre-route context for immediate execution handoff.
+                session.metadata["pre_route_payload"] = {
+                    "pre_decision": pre_decision,
+                    "route_hint": route_hint,
+                    "hints": hints,
+                }
+                session.metadata["pre_route_ts"] = time.time()
+
+                if route_hint:
+                    logger.info(
+                        f"[{session.session_id}] 🧭 Pre-route ready: route={route_hint} "
+                        f"seq_len={len(seq)}"
+                    )
+                if seq:
+                    logger.info(
+                        f"[{session.session_id}] 🧭 Pre-route sequence: {' -> '.join(seq[:10])}"
+                    )
+
+                return hints
         return ""
 
     async def _end_mission(self, session: OrchestratorSession, summary: str):
@@ -4707,7 +4902,28 @@ class OrchestratorWSHandler:
             return
 
         # Handle response
-        action_payload = plan.get("action", {})
+        # Planner may return either:
+        #   - action: { ... }                (legacy single action)
+        #   - action: [ { ... }, { ... } ]   (bundled multi-action pipeline)
+        raw_action_payload = plan.get("action", {})
+        if isinstance(raw_action_payload, list):
+            action_sequence = [a for a in raw_action_payload if isinstance(a, dict)]
+        elif isinstance(raw_action_payload, dict):
+            action_sequence = [raw_action_payload]
+        else:
+            action_sequence = []
+
+        # Representative action for routing/guards/logging:
+        # prefer first non-wait step so click+wait bundles are treated as click.
+        action_payload = {}
+        for _a in action_sequence:
+            _t = (_a.get("type") or "").strip().lower()
+            if _t and _t != "wait":
+                action_payload = _a
+                break
+        if not action_payload and action_sequence:
+            action_payload = action_sequence[0]
+
         action_type = action_payload.get("type", "none")
         
         # GUARD RAIL: Anti-Loop Protection
@@ -4769,6 +4985,12 @@ class OrchestratorWSHandler:
 
         elif action_type == "wait":
             logger.info(f"[{session.session_id}] ⏳ Waiting for page to load...")
+            # 🛡️ Count wait as a first-class step to prevent stagnation loops
+            session.goal_step_count += 1
+            session.action_history.append(f"wait: page_load")
+            if len(session.action_history) > 5:
+                session.action_history = session.action_history[-5:]
+
             # Narrate the wait
             wait_speech = plan.get("speech", "Just a moment while this loads...")
             await self._stream_tts_to_browser(session, wait_speech, session.current_language)
@@ -4899,10 +5121,15 @@ class OrchestratorWSHandler:
                 }, session)
 
             else:
-                await self._send_json(session.websocket, {
+                # Send bundled actions through `action` for modular frontend path,
+                # while preserving legacy compatibility via representative `payload`.
+                command_msg = {
                     "type": "command",
                     "payload": action_payload
-                }, session)
+                }
+                if isinstance(raw_action_payload, list):
+                    command_msg["action"] = raw_action_payload
+                await self._send_json(session.websocket, command_msg, session)
             
             # CONDITIONAL SYNC: Wait for voice to finish ONLY if speaker is NOT muted
             # When muted, go to TURBO MODE (execute immediately)
@@ -4923,7 +5150,77 @@ class OrchestratorWSHandler:
         3. Full Planning: Deep reasoning with filtered DOM (800-1200ms)
         """
         base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
+        pre_route_only_mode = os.getenv("VC_PRE_ROUTE_ONLY_MODE", "false").strip().lower() in ("1", "true", "yes", "on")
+
+        # Temporary hard switch: pre-route only (no fast_sense, no plan_next_step).
+        if pre_route_only_mode:
+            active_states = getattr(session, '_active_states', None)
+            data_tables = getattr(session, '_data_tables', None)
+            page_title = getattr(session, '_page_title', '')
+            screenshot_b64 = getattr(session, '_screenshot_b64', None)
+
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.post(
+                        f"{base_rag_url}/api/v1/get_map_hints",
+                        json={
+                            "goal": session.current_goal,
+                            "client_id": session.tenant_id or "tara",
+                            "session_id": session.session_id,
+                            "current_url": session.current_url,
+                            "screenshot_b64": screenshot_b64,
+                            "dom_context": (dom or [])[:600],
+                            "step_number": session.goal_step_count,
+                            "warning_message": warning,
+                            "last_action": session.last_action,
+                            "action_history": session.action_history,
+                            "active_states": active_states,
+                            "data_tables": data_tables,
+                            "page_title": page_title,
+                        }
+                    )
+                    resp.raise_for_status()
+                    map_data = resp.json() or {}
+            except Exception as e:
+                logger.error(f"[{session.session_id}] PRE_ROUTE_ONLY: get_map_hints failed: {e}")
+                return {
+                    "action": {"type": "none", "summary": "Pre-route failed"},
+                    "speech": "Pre-route failed. Please retry.",
+                    "confidence": "high",
+                    "_pre_route_only": True,
+                }
+
+            pre_decision = map_data.get("pre_decision") or {}
+            route_hint = map_data.get("route_hint") or pre_decision.get("route") or ""
+            seq = pre_decision.get("recommended_strategy_order") or []
+            hints = map_data.get("hints") or ""
+            session.map_hints = hints
+
+            logger.info(
+                f"[{session.session_id}] PRE_ROUTE_ONLY: route={route_hint or 'none'} "
+                f"mode={pre_decision.get('execution_mode', 'unknown')} "
+                f"strategy_steps={len(seq)}"
+            )
+            if seq:
+                logger.info(f"[{session.session_id}] PRE_ROUTE_ONLY_SEQUENCE: {' -> '.join(seq[:12])}")
+            elif hints:
+                logger.info(f"[{session.session_id}] PRE_ROUTE_ONLY_HINTS: {hints[:300]}")
+
+            return {
+                "action": {"type": "none", "summary": "Pre-route generated"},
+                "speech": "Pre-route generated. Execution modules are currently disabled.",
+                "confidence": "high",
+                "_pre_route_only": True,
+                "pre_decision": pre_decision,
+                "route_hint": route_hint,
+                "hints": hints,
+            }
         
+        pre_route_payload = session.metadata.get("pre_route_payload") or {}
+        pre_decision_payload = pre_route_payload.get("pre_decision") or {}
+        pre_route_hint = pre_route_payload.get("route_hint") or ""
+        pre_route_seq = pre_decision_payload.get("recommended_strategy_order") or []
+
         # Compute simplified DOM Diff (Context Awareness)
         dom_diff = "First interaction."
         if session.dom_history:
@@ -4968,7 +5265,14 @@ class OrchestratorWSHandler:
         # This prevents repeating the same speech like "I see the call history..." 5 times
         is_first_step = session.goal_step_count == 0 and not warning
         
-        if is_first_step:
+        # If pre-route already produced an optimized sequence, skip fast_sense and execute immediately.
+        if is_first_step and pre_route_seq:
+            logger.info(
+                f"[{session.session_id}] ⚡ PRE-ROUTE HANDOFF: "
+                f"route={pre_route_hint or pre_decision_payload.get('route', 'n/a')} "
+                f"seq_len={len(pre_route_seq)} -> executing plan_next_step"
+            )
+        elif is_first_step:
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     fast_response_obj = await client.post(
@@ -5033,6 +5337,8 @@ class OrchestratorWSHandler:
                     "last_action": session.last_action,
                     "action_history": session.action_history,  # For loop detection
                     "map_hints": session.map_hints,  # Pre-fetched at mission start
+                    "pre_decision": pre_decision_payload,
+                    "route_hint": pre_route_hint,
                     "client_id": session.tenant_id or "tara",
                     "session_id": session.session_id,
                     "dom_diff": dom_diff, # Context awareness

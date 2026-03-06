@@ -27,9 +27,15 @@ Endpoints:
     - POST /api/v1/admin/rebuild_index - Rebuild FAISS index
 """
 
-from .config import RAGConfig
-from .rag_engine import RAGEngine
-from .index_builder import IndexBuilder
+try:
+    from .config import RAGConfig
+    from .rag_engine import RAGEngine
+    from .index_builder import IndexBuilder
+except Exception:
+    # Allow direct test collection when this file is imported without package context.
+    RAGConfig = None
+    RAGEngine = None
+    IndexBuilder = None
 
 __all__ = [
     "RAGConfig",

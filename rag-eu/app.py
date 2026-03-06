@@ -15,6 +15,7 @@ import logging
 import json
 import hashlib
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
 
@@ -54,6 +55,9 @@ class QueryRequest(BaseModel):
     history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history for context-aware responses")
     language: Optional[str] = Field("english", description="Response language: 'english' or 'german'")
     tenant_id: Optional[str] = Field("tara", description="Tenant/Agent identifier for cache isolation")
+    session_id: Optional[str] = Field(None, description="Session identifier from orchestrator")
+    user_id: Optional[str] = Field(None, description="User identifier")
+    agent_name: Optional[str] = Field(None, description="Agent name for session config")
 
 
 class QueryResponse(BaseModel):
@@ -174,6 +178,59 @@ class DynamicExitRequest(BaseModel):
     language: Optional[str] = Field("english", description="Response language")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# FSM Routing Models (Schema-Driven Appointment Booking)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class FSMSchemaField(BaseModel):
+    """Schema definition for a single FSM field"""
+    required: bool = True
+    collect_prompt: str = ""
+    confirm_prompt: str = ""
+    validation_regex: Optional[str] = None
+    min_length: Optional[int] = None
+    max_length: Optional[int] = None
+
+
+class FSMSchema(BaseModel):
+    """Complete FSM appointment schema"""
+    fields: Dict[str, FSMSchemaField] = Field(default_factory=dict)
+    cancel_keywords: List[str] = Field(default_factory=list)
+    max_retries: int = 3
+    fallback_messages: Dict[str, str] = Field(default_factory=dict)
+    resume_prompt_template: str = "Back to booking, {pending_field_prompt}"
+
+
+class FSMContext(BaseModel):
+    """Current FSM state passed from Orchestrator"""
+    active: bool = False
+    pending_field: Optional[str] = None  # e.g., "name", "email", "topic"
+    collected_data: Dict[str, Any] = Field(default_factory=dict)
+    retry_counts: Dict[str, int] = Field(default_factory=dict)
+    schema: Optional[FSMSchema] = None
+
+
+class FSMRouteRequest(BaseModel):
+    """Request model for FSM routing endpoint"""
+    user_text: str = Field(..., min_length=1, description="User input text")
+    session_id: str = Field(..., description="Session identifier")
+    tenant_id: str = Field("tara", description="Tenant identifier")
+    language: str = Field("english", description="Response language")
+    fsm_context: FSMContext = Field(..., description="Current FSM state")
+    history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history")
+
+
+class FSMRouteResponse(BaseModel):
+    """Response model for FSM routing endpoint"""
+    action: str = Field(..., description="Routing action: collect_field, confirm_field, detour_rag, cancel, invalid_retry")
+    field: Optional[str] = Field(None, description="Field being collected/confirmed")
+    normalized_value: Optional[str] = Field(None, description="Normalized field value if applicable")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Classification confidence")
+    reason: str = Field(..., description="Reason for the routing decision")
+    resume_prompt: Optional[str] = Field(None, description="FSM pending question to ask after detour")
+    cancelled: bool = Field(False, description="Whether FSM should be cancelled")
+
+
 # ── Agent Skills & Rules Models ──────────────────────────────────────────────
 
 class SkillRuleCreateRequest(BaseModel):
@@ -208,6 +265,16 @@ cache_misses = 0
 app_start_time = 0.0
 hive_mind_connections: List[WebSocket] = []
 ingestion_service: Optional[Any] = None
+session_banner_logged: set[str] = set()
+
+
+def _strip_reasoning_artifacts(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"<think>.*?</think>", " ", str(text), flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"</?think>", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 
 # Redis client utilities
@@ -277,24 +344,8 @@ async def lifespan(app: FastAPI):
             logger.info("ℹ️ Ingestion Service disabled (ENABLE_INGESTION_SERVICE=false)")
         
         # If index not loaded, try to build it (only if local retrieval is enabled)
-        if config.enable_local_retrieval:
-            if not rag_engine.vector_store or not rag_engine.documents:
-                logger.warning(" FAISS index not found, attempting to build...")
-                from daytona_agent.services.rag.index_builder import IndexBuilder
-                builder = IndexBuilder(config)
-                if builder.build_index():
-                    rag_engine.load_index()  # Reload after build
-                    logger.info(f" Index built successfully: {len(rag_engine.documents)} documents")
-                else:
-                    logger.error(" Index build failed")
-            
-            # Final validation
-            if not rag_engine.vector_store or not rag_engine.documents:
-                logger.error(" FAISS index not available - service in degraded mode")
-            else:
-                logger.info(f" RAG engine initialized: {len(rag_engine.documents)} documents")
-        else:
-            logger.info("ℹ️ Local retrieval disabled - skipping FAISS index checks")
+        # Local index logic removed - using Qdrant Hivemind exclusively
+        logger.info("ℹ️ Local retrieval disabled - skipping FAISS index checks")
         
         # Connect to Redis (optional - service can run without it)
         try:
@@ -1085,10 +1136,15 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             return result
 
         # Original query logic proceeds...
-        # Generate cache key (include language to prevent cross-language cache pollution)
+        # Generate cache key with tenant + org + context to avoid cross-brand cache bleed.
         lang_suffix = f":{request_data.language}" if request_data.language else ""
         tenant_prefix = f"{request_data.tenant_id or 'demo'}:"
-        cache_key = f"rag:{tenant_prefix}{hashlib.md5(request_data.query.encode()).hexdigest()}{lang_suffix}"
+        org_slug = str(getattr(app.state.rag_engine.config, "organization_name", "org")).strip().lower()
+        context_hash = hashlib.md5(
+            json.dumps(request_data.context or {}, sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
+        query_hash = hashlib.md5(request_data.query.encode()).hexdigest()
+        cache_key = f"rag:{tenant_prefix}{org_slug}:{query_hash}:{context_hash}{lang_suffix}"
         
         # Check Redis cache (only if connected and TTL > 0)
         cached = None
@@ -1177,11 +1233,68 @@ async def stream_query_knowledge_base(request: QueryRequest):
     Returns a stream of JSON objects: {"text": "...", "is_final": bool}
     """
     async def event_generator():
-        # Generate cache key (include history hash AND language to prevent stale/wrong-language responses)
-        history_hash = hashlib.md5((request.history_context or "").encode()).hexdigest()[:8]
+        effective_tenant_id = (request.tenant_id or "tara").strip().lower()
+        effective_session_id = (request.session_id or "unknown").strip()
+        effective_agent_name = (request.agent_name or ((request.context or {}).get("agent_name")) or "unknown").strip()
+
+        # Emit one banner per session at first stream query (session handshake into RAG path)
+        if effective_session_id not in session_banner_logged:
+            session_banner_logged.add(effective_session_id)
+            qdrant_cfg = {"url": None, "api_key": None, "collection_name": None}
+            qdrant_default_url = None
+            qdrant_default_collection = None
+            qdrant_override = False
+            if app.state.rag_engine and app.state.rag_engine.qdrant:
+                qdrant_default_url = app.state.rag_engine.qdrant.url
+                qdrant_default_collection = app.state.rag_engine.qdrant.collection_name
+                try:
+                    qdrant_cfg = app.state.rag_engine.qdrant._resolve_tenant_qdrant(effective_tenant_id)  # pylint: disable=protected-access
+                    qdrant_override = (
+                        (qdrant_cfg.get("url") or "") != (qdrant_default_url or "")
+                        or (qdrant_cfg.get("collection_name") or "") != (qdrant_default_collection or "")
+                    )
+                except Exception:
+                    pass
+
+            masked_api_key = "unset"
+            raw_key = qdrant_cfg.get("api_key")
+            if raw_key:
+                masked_api_key = f"{raw_key[:4]}***{raw_key[-3:]}" if len(raw_key) >= 8 else "***"
+
+            logger.info("============================================================")
+            logger.info("============================================================")
+            logger.info(
+                f"SESSION START (STREAM) | TENANT_ID={effective_tenant_id} | "
+                f"SESSION_ID={effective_session_id} | AGENT={effective_agent_name}"
+            )
+            logger.info("============================================================")
+            logger.info("SESSION CONFIG")
+            logger.info(f"  - tenant_id: {effective_tenant_id}")
+            logger.info(f"  - session_id: {effective_session_id}")
+            logger.info(f"  - agent_name: {effective_agent_name}")
+            logger.info(f"  - language: {request.language or 'english'}")
+            logger.info(f"  - user_id: {request.user_id or 'anonymous'}")
+            logger.info(f"  - qdrant_default_url: {qdrant_default_url or 'unset'}")
+            logger.info(f"  - qdrant_default_collection: {qdrant_default_collection or 'unset'}")
+            logger.info(f"  - qdrant_effective_url: {qdrant_cfg.get('url') or 'unset'}")
+            logger.info(f"  - qdrant_effective_collection: {qdrant_cfg.get('collection_name') or 'unset'}")
+            logger.info(f"  - qdrant_api_key: {masked_api_key}")
+            logger.info(f"  - qdrant_override_applied: {qdrant_override}")
+            logger.info("============================================================")
+            logger.info("============================================================")
+
+        # Generate cache key with tenant + org + context/history + language.
+        history_hash = hashlib.md5(
+            json.dumps(request.history_context or "", sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
+        context_hash = hashlib.md5(
+            json.dumps(request.context or {}, sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
         lang_suffix = f":{request.language}" if request.language else ""
-        tenant_prefix = f"{request.tenant_id or 'demo'}:"
-        cache_key = f"rag:{tenant_prefix}{hashlib.md5(request.query.encode()).hexdigest()}:{history_hash}{lang_suffix}"
+        tenant_prefix = f"{effective_tenant_id}:"
+        org_slug = str(getattr(app.state.rag_engine.config, "organization_name", "org")).strip().lower()
+        query_hash = hashlib.md5(request.query.encode()).hexdigest()
+        cache_key = f"rag:{tenant_prefix}{org_slug}:{query_hash}:{history_hash}:{context_hash}{lang_suffix}"
 
         # Check Redis cache (only if connected)
         cached = None
@@ -1288,7 +1401,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     query_context,
                     streaming_callback=callback,
                     history_context=request.history_context,
-                    tenant_id=request.tenant_id,
+                    tenant_id=effective_tenant_id,
                     force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
                     generation_config={
                         "max_tokens": 1024,
@@ -1399,8 +1512,8 @@ async def health_check():
             redis_connected = await ping_redis(app.state.redis)
         
         # Get RAG engine stats
-        index_loaded = app.state.rag_engine.vector_store is not None
-        index_size = len(app.state.rag_engine.documents)
+        index_loaded = True # Deprecated local index, always true
+        index_size = 0 # Deprecated local index size
         gemini_available = app.state.rag_engine.llm is not None
         
         # Get Qdrant status
@@ -1414,10 +1527,7 @@ async def health_check():
         uptime_seconds = time.time() - app.state.start_time
         
         # Determine status
-        if not index_loaded:
-            status = "unhealthy"
-            status_code = 503
-        elif not redis_connected:
+        if not redis_connected:
             status = "degraded"
             status_code = 200
         else:
@@ -1460,11 +1570,11 @@ async def get_metrics():
             'cache_hit_rate': app.state.cache_hits / total_requests if total_requests > 0 else 0.0
         }
         
-        # Index stats
+        # Index stats - Deprecated, using Qdrant
         index_stats = {
-            'total_documents': len(app.state.rag_engine.documents),
-            'categories': len(set(m.get('category', '') for m in app.state.rag_engine.doc_metadata)),
-            'embedding_dimension': app.state.rag_engine.vector_store.d if app.state.rag_engine.vector_store else 0
+            'total_documents': 0,
+            'categories': 0,
+            'embedding_dimension': 384
         }
         
         # Qdrant (Hive Mind) stats
@@ -1495,57 +1605,9 @@ async def rebuild_index(request: RebuildIndexRequest):
     """
     Rebuild FAISS index from knowledge base (admin endpoint).
     
-    Useful for knowledge base updates. Clears cache after rebuild.
+    Deprecated: Local FAISS indexing is removed in favor of Qdrant Hivemind.
     """
-    try:
-        build_start = time.time()
-        
-        # Create config (override path if provided)
-        config = RAGConfig.from_env()
-        if request.knowledge_base_path:
-            config.knowledge_base_path = request.knowledge_base_path
-        
-        # Build index
-        builder = IndexBuilder(config)
-        success = builder.build_index()
-        
-        if not success:
-            raise HTTPException(status_code=500, detail="Index build failed")
-        
-        # Reload index in RAG engine
-        app.state.rag_engine.load_index()
-        
-        # Clear cache (only if Redis is available)
-        if app.state.redis:
-            try:
-                # Delete all rag:* keys
-                keys = await app.state.redis.keys("rag:*")
-                if keys:
-                    await app.state.redis.delete(*keys)
-                    logger.info(f"️ Cleared {len(keys)} cached queries")
-            except Exception as cache_error:
-                logger.warning(f"️ Cache clear failed: {cache_error}")
-        else:
-            logger.info("️ Redis not available - skipping cache clear")
-        
-        # Get stats
-        stats = builder.get_index_stats()
-        build_time = time.time() - build_start
-        
-        logger.info(f" Index rebuilt: {stats['total_documents']} documents in {build_time:.2f}s")
-        
-        return RebuildIndexResponse(
-            status="success",
-            documents_indexed=stats['total_documents'],
-            categories=stats['categories'],
-            build_time_seconds=build_time
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Rebuild error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Rebuild failed: {str(e)}")
+    raise HTTPException(status_code=501, detail="Local indexing disabled. Please use Hivemind ingestion APIs instead.")
 
 
 @app.post("/api/v1/analyze_session", response_model=AnalyzeSessionResponse)
@@ -1557,6 +1619,17 @@ async def analyze_session(request: AnalyzeSessionRequest):
     If backend_url is provided, the full report (including brief_context) will be sent there.
     """
     try:
+        effective_tenant_id = request.tenant_id or "tara"
+        effective_agent_id = ((request.metadata or {}).get("agent_id") or "unknown")
+        effective_session_type = ((request.metadata or {}).get("session_type") or "unknown")
+        logger.info("============================================================")
+        logger.info("============================================================")
+        logger.info(
+            f"SESSION START (ANALYZE) | TENANT_ID={effective_tenant_id} | "
+            f"SESSION_ID={request.session_id} | AGENT={((request.metadata or {}).get('agent_name') or 'unknown')}"
+        )
+        logger.info("============================================================")
+        logger.info("============================================================")
         analytics_engine = app.state.session_analytics
         if not analytics_engine:
             raise HTTPException(status_code=503, detail="Session Analytics engine not initialized")
@@ -1571,8 +1644,11 @@ async def analyze_session(request: AnalyzeSessionRequest):
         
         # 2. Extract & Save Collective Knowledge to Hive Mind
         saved_hivemind_chunks = []
+        hivemind_candidates = 0
+        hivemind_skipped = 0
         if "distilled_knowledge" in report:
             kb_units = report["distilled_knowledge"]
+            hivemind_candidates = len(kb_units or [])
             if kb_units and app.state.rag_engine and app.state.rag_engine.qdrant and app.state.rag_engine.qdrant.enabled:
                 logger.info(f"🧠 Unified Pipeline: Distilling {len(kb_units)} knowledge units into Hivemind...")
                 
@@ -1593,9 +1669,11 @@ async def analyze_session(request: AnalyzeSessionRequest):
                                 issue=issue,
                                 solution=solution,
                                 vector=vector,
-                                tenant_id=request.tenant_id,
+                                tenant_id=effective_tenant_id,
                                 metadata={
                                     "session_id": request.session_id,
+                                    "agent_id": effective_agent_id,
+                                    "session_type": effective_session_type,
                                     "category": unit.get("category", "general"),
                                     "reliability": reliability,
                                     "extracted_via": "unified_reasoning_pipeline"
@@ -1624,11 +1702,25 @@ async def analyze_session(request: AnalyzeSessionRequest):
                             })
                         except Exception as e:
                             logger.error(f"Failed to save unified knowledge node: {e}")
+                    else:
+                        hivemind_skipped += 1
         
         # 3. Enrich report with metadata about saved knowledge
         report["hivemind_updates"] = {
             "chunks_saved": len(saved_hivemind_chunks),
+            "chunks_candidates": hivemind_candidates,
+            "chunks_skipped": hivemind_skipped,
             "summary": saved_hivemind_chunks
+        }
+        report["session_metadata"] = {
+            "session_id": request.session_id,
+            "tenant_id": effective_tenant_id,
+            "session_type": effective_session_type,
+            "user_id": request.user_id or "anonymous",
+            "agent_name": (request.metadata or {}).get("agent_name"),
+            "agent_id": (request.metadata or {}).get("agent_id"),
+            "source": (request.metadata or {}).get("source"),
+            "report": (request.metadata or {}).get("report"),
         }
         
         # 4. Send report to backend URL if provided
@@ -1639,7 +1731,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
                     payload = {
                         "session_id": request.session_id,
                         "user_id": request.user_id,
-                        "tenant_id": request.tenant_id,
+                        "tenant_id": effective_tenant_id,
                         "timestamp": report["timestamp"],
                         "brief_context": report.get("brief_context", ""),
                         "metrics": report["metrics"],
@@ -1662,18 +1754,32 @@ async def analyze_session(request: AnalyzeSessionRequest):
                 }
         
         # 5. Clear Final Report in Logs
+        clean_brief = _strip_reasoning_artifacts(report.get('brief_context', 'N/A'))
+        report["brief_context"] = clean_brief
         logger.info(f"📊 FINAL SESSION REPORT: {request.session_id}")
-        logger.info(f"   ├─ Brief Context: {report.get('brief_context', 'N/A')[:80]}...")
-        logger.info(f"   ├─ Sentiment: {report['analysis'].get('overall_sentiment', 'N/A')} ({report['analysis'].get('resolution_status', 'Unknown')})")
+        logger.info(f"   ├─ Brief Context: {clean_brief[:120]}...")
+        logger.info(f"   ├─ Sentiment (heuristic): {report['analysis'].get('overall_sentiment', 'N/A')} ({report['analysis'].get('resolution_status', 'Unknown')})")
         logger.info(f"   ├─ Churn Risk: {report['business_signals'].get('is_churn_risk', 'N/A')} | Priority: {report['business_signals'].get('priority_level', 'NORMAL')}")
-        logger.info(f"   ├─ Agent IQ: {report['metrics'].get('agent_iq', 'N/A')} | Velocity: {report['metrics'].get('frustration_velocity', 'STABLE')}")
-        logger.info(f"   ├─ Hivemind: {len(saved_hivemind_chunks)} knowledge units learned and archived.")
+        logger.info(f"   ├─ Agent IQ (deterministic): {report['metrics'].get('agent_iq', 'N/A')} | Velocity (deterministic): {report['metrics'].get('frustration_velocity', 'STABLE')}")
+        logger.info(
+            f"   ├─ Hivemind: saved={len(saved_hivemind_chunks)} | "
+            f"candidates={hivemind_candidates} | skipped={hivemind_skipped}"
+        )
         if backend_response:
             logger.info(f"   └─ Backend Report: {'✅ Sent' if backend_response.get('sent') else '❌ Failed'}")
         
         if saved_hivemind_chunks:
             for i, chunk in enumerate(saved_hivemind_chunks):
                 logger.info(f"      • Learning [{i+1}]: {chunk['issue'][:60]}...")
+        logger.info("============================================================")
+        logger.info("============================================================")
+        logger.info(
+            f"SESSION END (ANALYZE) | TENANT_ID={effective_tenant_id} | "
+            f"SESSION_ID={request.session_id} | HIVEMIND_SAVED={len(saved_hivemind_chunks)}"
+        )
+        logger.info("============================================================")
+        logger.info("============================================================")
+        session_banner_logged.discard(request.session_id)
         
         return AnalyzeSessionResponse(status="success", report=report)
         
@@ -1689,6 +1795,7 @@ async def save_case(request: SaveCaseRequest):
     If history_context is provided, distills it into issue/solution first.
     """
     try:
+        effective_tenant_id = request.tenant_id or "tara"
         if not app.state.rag_engine:
             raise HTTPException(status_code=503, detail="RAG engine not initialized")
         
@@ -1733,7 +1840,7 @@ async def save_case(request: SaveCaseRequest):
                 issue=issue_text,
                 solution=solution_text,
                 vector=issue_vector,
-                tenant_id=request.tenant_id,
+                tenant_id=effective_tenant_id,
                 metadata=request.metadata
             )
             
@@ -2084,6 +2191,66 @@ async def get_hive_mind_insights(limit: int = 10):
     except Exception as e:
         logger.error(f"Hive Mind insights error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Insights failed: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FSM Routing Endpoint (Schema-Driven Appointment Booking)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/fsm/route", response_model=FSMRouteResponse)
+async def fsm_route(request: FSMRouteRequest):
+    """
+    FSM Routing Endpoint for Schema-Driven Appointment Booking.
+    
+    Decides per turn whether to:
+    1. continue slot collection (collect_field/confirm_field)
+    2. answer a general RAG question (detour_rag)
+    3. resume FSM after detour
+    4. cancel the appointment flow
+    
+    Returns:
+        FSMRouteResponse with action, field, normalized_value, confidence, reason, resume_prompt
+    """
+    try:
+        if not app.state.rag_engine:
+            raise HTTPException(status_code=503, detail="RAG engine not initialized")
+        
+        logger.info(f"🔀 FSM Route | Session: {request.session_id} | Pending: {request.fsm_context.pending_field} | Text: '{request.user_text[:50]}...'")
+
+        # Convert Pydantic models to dicts for engine
+        fsm_context_dict = request.fsm_context.model_dump() if hasattr(request.fsm_context, 'model_dump') else {
+            'active': request.fsm_context.active,
+            'pending_field': request.fsm_context.pending_field,
+            'collected_data': request.fsm_context.collected_data,
+            'retry_counts': request.fsm_context.retry_counts,
+            'schema': request.fsm_context.schema
+        }
+
+        # Call the routing logic in rag_engine
+        result = await app.state.rag_engine.route_fsm_turn(
+            user_text=request.user_text,
+            session_id=request.session_id,
+            tenant_id=request.tenant_id,
+            language=request.language,
+            fsm_context=fsm_context_dict,
+            history_context=request.history_context
+        )
+        
+        logger.info(f"✅ FSM Route Result | Action: {result['action']} | Confidence: {result['confidence']:.2f} | Reason: {result['reason']}")
+        
+        return FSMRouteResponse(**result)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FSM routing error: {e}", exc_info=True)
+        # Fallback to invalid_retry on error
+        return FSMRouteResponse(
+            action="invalid_retry",
+            confidence=0.0,
+            reason=f"Routing error: {str(e)}",
+            cancelled=False
+        )
 
 
 async def broadcast_hive_mind_update(message: Dict[str, Any]):

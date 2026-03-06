@@ -1,0 +1,1562 @@
+[
+  {
+    "doc_type": "Website_Map",
+    "domain": "console.groq.com",
+    "url": "https://console.groq.com/",
+    "concept": "Navigate to and evaluate GroqCloud Dashboard",
+    "sequence": [
+      "Locate Navigation",
+      "Login to Console",
+      "Access API Keys",
+      "Enter Playground",
+      "View Documentation"
+    ],
+    "blocking_rules": [
+      "Do not access API keys before logging in",
+      "Do not enter playground until workspace is verified"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/'); await page.click('text=Log In'); await page.click('text=API Keys');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/login']",
+    "keyword_match": "/login",
+    "element_type": "a",
+    "text_pattern": "Log In",
+    "zone": "nav",
+    "description": "Navigation link to log into console"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/keys']",
+    "keyword_match": "/keys",
+    "element_type": "a",
+    "text_pattern": "API Keys",
+    "zone": "nav",
+    "description": "Navigation link to manage API keys"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground']",
+    "keyword_match": "/playground",
+    "element_type": "a",
+    "text_pattern": "Playground",
+    "zone": "nav",
+    "description": "navigation link to prompt playground"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/overview']",
+    "keyword_match": "/docs/overview",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Link to documentation overview"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "console.groq.com",
+    "url": "https://console.groq.com/docs/quickstart",
+    "concept": "Navigate to and evaluate Groq API generic setup",
+    "sequence": [
+      "Locate Documentation Guide",
+      "Verify Prerequisites",
+      "Install SDK",
+      "Set up API Key",
+      "Run sample request"
+    ],
+    "blocking_rules": [
+      "Do not run sample request until SDK is installed",
+      "Do not set up API key before generating one"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/quickstart'); await page.click('text=Set up your API Key');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart']",
+    "keyword_match": "/docs/quickstart",
+    "element_type": "a",
+    "text_pattern": "Quickstart",
+    "zone": "nav",
+    "description": "Navigation link generic quickstart"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models']",
+    "keyword_match": "/docs/models",
+    "element_type": "a",
+    "text_pattern": "Models",
+    "zone": "nav",
+    "description": "Navigation link model list"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference']",
+    "keyword_match": "/docs/api-reference",
+    "element_type": "a",
+    "text_pattern": "API Reference",
+    "zone": "nav",
+    "description": "Navigation link to API REST spec"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "console.groq.com",
+    "url": "https://console.groq.com/docs/models",
+    "concept": "Learn about deployed LPU inference models",
+    "sequence": [
+      "Access Models section",
+      "Verify Llama 3 context limits",
+      "Check Whisper audio limits"
+    ],
+    "blocking_rules": [
+      "Do not attempt payload without verifying context limit"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/models');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/openai']",
+    "keyword_match": "OpenAI",
+    "element_type": "a",
+    "text_pattern": "OpenAI Compatibility",
+    "zone": "main",
+    "description": "Link to OpenAI compatibility guide"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/responses-api']",
+    "keyword_match": "Responses",
+    "element_type": "a",
+    "text_pattern": "Responses API",
+    "zone": "main",
+    "description": "Link to responses API page"
+  },
+  {
+    "doc_type": "Website_Map",
+    "domain": "console.groq.com",
+    "url": "https://console.groq.com/docs/api-reference",
+    "concept": "Verify Groq HTTP JSON Endpoints",
+    "sequence": [
+      "Access API Reference",
+      "View Chat Completions schema",
+      "Check Transcriptions endpoint setup"
+    ],
+    "blocking_rules": [
+      "Do not construct REST queries before verifying endpoints"
+    ],
+    "action_script": "await page.goto('https://console.groq.com/docs/api-reference');"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='#chat-create']",
+    "keyword_match": "chat-create",
+    "element_type": "a",
+    "text_pattern": "Create chat completion",
+    "zone": "main",
+    "description": "Link to POST chat completion"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='#audio-transcription']",
+    "keyword_match": "audio-transcription",
+    "element_type": "a",
+    "text_pattern": "Create transcription",
+    "zone": "main",
+    "description": "Link to POST audio transcription"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='#batches-create']",
+    "keyword_match": "batches-create",
+    "element_type": "a",
+    "text_pattern": "Create batch",
+    "zone": "main",
+    "description": "Link to POST batch"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/groq-logo.svg']",
+    "keyword_match": "/groq-logo.svg",
+    "element_type": "a",
+    "text_pattern": "![Image 1: Groq",
+    "zone": "main",
+    "description": "Navigation link to ![Image 1: Groq"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/home']",
+    "keyword_match": "/home",
+    "element_type": "a",
+    "text_pattern": "Login",
+    "zone": "main",
+    "description": "Navigation link to Login"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/dashboard']",
+    "keyword_match": "/dashboard",
+    "element_type": "a",
+    "text_pattern": "Dashboard",
+    "zone": "main",
+    "description": "Navigation link to Dashboard"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs']",
+    "keyword_match": "/docs",
+    "element_type": "a",
+    "text_pattern": "Docs",
+    "zone": "nav",
+    "description": "Navigation link to Docs"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/openai']",
+    "keyword_match": "/docs/openai",
+    "element_type": "a",
+    "text_pattern": "OpenAI Compatibility",
+    "zone": "nav",
+    "description": "Navigation link to OpenAI Compatibility"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/responses-api']",
+    "keyword_match": "/docs/responses-api",
+    "element_type": "a",
+    "text_pattern": "Responses API",
+    "zone": "nav",
+    "description": "Navigation link to Responses API"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/rate-limits']",
+    "keyword_match": "/docs/rate-limits",
+    "element_type": "a",
+    "text_pattern": "Rate Limits",
+    "zone": "nav",
+    "description": "Navigation link to Rate Limits"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/examples']",
+    "keyword_match": "/docs/examples",
+    "element_type": "a",
+    "text_pattern": "Templates",
+    "zone": "nav",
+    "description": "Navigation link to Templates"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/text-chat']",
+    "keyword_match": "/docs/text-chat",
+    "element_type": "a",
+    "text_pattern": "Text Generation",
+    "zone": "nav",
+    "description": "Navigation link to Text Generation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/speech-to-text']",
+    "keyword_match": "/docs/speech-to-text",
+    "element_type": "a",
+    "text_pattern": "Speech to Text",
+    "zone": "nav",
+    "description": "Navigation link to Speech to Text"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/text-to-speech']",
+    "keyword_match": "/docs/text-to-speech",
+    "element_type": "a",
+    "text_pattern": "Text to Speech",
+    "zone": "nav",
+    "description": "Navigation link to Text to Speech"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/text-to-speech/orpheus']",
+    "keyword_match": "/docs/text-to-speech/orpheus",
+    "element_type": "a",
+    "text_pattern": "Orpheus",
+    "zone": "nav",
+    "description": "Navigation link to Orpheus"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/vision']",
+    "keyword_match": "/docs/vision",
+    "element_type": "a",
+    "text_pattern": "OCR and Image Recognition",
+    "zone": "nav",
+    "description": "Navigation link to OCR and Image Recognition"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/reasoning']",
+    "keyword_match": "/docs/reasoning",
+    "element_type": "a",
+    "text_pattern": "Reasoning",
+    "zone": "nav",
+    "description": "Navigation link to Reasoning"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/content-moderation']",
+    "keyword_match": "/docs/content-moderation",
+    "element_type": "a",
+    "text_pattern": "Content Moderation",
+    "zone": "nav",
+    "description": "Navigation link to Content Moderation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/structured-outputs']",
+    "keyword_match": "/docs/structured-outputs",
+    "element_type": "a",
+    "text_pattern": "Structured Outputs",
+    "zone": "nav",
+    "description": "Navigation link to Structured Outputs"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/prompt-caching']",
+    "keyword_match": "/docs/prompt-caching",
+    "element_type": "a",
+    "text_pattern": "Prompt Caching",
+    "zone": "nav",
+    "description": "Navigation link to Prompt Caching"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/overview']",
+    "keyword_match": "/docs/tool-use/overview",
+    "element_type": "a",
+    "text_pattern": "Tool Use",
+    "zone": "nav",
+    "description": "Navigation link to Tool Use"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools']",
+    "keyword_match": "/docs/tool-use/built-in-tools",
+    "element_type": "a",
+    "text_pattern": "Groq Built-In Tools",
+    "zone": "nav",
+    "description": "Navigation link to Groq Built-In Tools"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools/web-search']",
+    "keyword_match": "/docs/tool-use/built-in-tools/web-search",
+    "element_type": "a",
+    "text_pattern": "Web Search",
+    "zone": "nav",
+    "description": "Navigation link to Web Search"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools/visit-website']",
+    "keyword_match": "/docs/tool-use/built-in-tools/visit-website",
+    "element_type": "a",
+    "text_pattern": "Visit Website",
+    "zone": "nav",
+    "description": "Navigation link to Visit Website"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools/browser-automation']",
+    "keyword_match": "/docs/tool-use/built-in-tools/browser-automation",
+    "element_type": "a",
+    "text_pattern": "Browser Automation",
+    "zone": "nav",
+    "description": "Navigation link to Browser Automation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools/code-execution']",
+    "keyword_match": "/docs/tool-use/built-in-tools/code-execution",
+    "element_type": "a",
+    "text_pattern": "Code Execution",
+    "zone": "nav",
+    "description": "Navigation link to Code Execution"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools/wolfram-alpha']",
+    "keyword_match": "/docs/tool-use/built-in-tools/wolfram-alpha",
+    "element_type": "a",
+    "text_pattern": "Wolfram Alpha",
+    "zone": "nav",
+    "description": "Navigation link to Wolfram Alpha"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/built-in-tools/browser-search']",
+    "keyword_match": "/docs/tool-use/built-in-tools/browser-search",
+    "element_type": "a",
+    "text_pattern": "Browser Search (GPT OSS Models)",
+    "zone": "nav",
+    "description": "Navigation link to Browser Search (GPT OSS Models)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/remote-mcp']",
+    "keyword_match": "/docs/tool-use/remote-mcp",
+    "element_type": "a",
+    "text_pattern": "Remote Tools and MCP",
+    "zone": "nav",
+    "description": "Navigation link to Remote Tools and MCP"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/remote-mcp/connectors']",
+    "keyword_match": "/docs/tool-use/remote-mcp/connectors",
+    "element_type": "a",
+    "text_pattern": "Connectors",
+    "zone": "nav",
+    "description": "Navigation link to Connectors"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/tool-use/local-tool-calling']",
+    "keyword_match": "/docs/tool-use/local-tool-calling",
+    "element_type": "a",
+    "text_pattern": "Local Tool Calling",
+    "zone": "nav",
+    "description": "Navigation link to Local Tool Calling"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/integrations']",
+    "keyword_match": "/docs/integrations",
+    "element_type": "a",
+    "text_pattern": "Integrations Catalog",
+    "zone": "nav",
+    "description": "Navigation link to Integrations Catalog"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/coding-with-groq']",
+    "keyword_match": "/docs/coding-with-groq",
+    "element_type": "a",
+    "text_pattern": "Coding with Groq",
+    "zone": "nav",
+    "description": "Navigation link to Coding with Groq"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/coding-with-groq/factory-droid']",
+    "keyword_match": "/docs/coding-with-groq/factory-droid",
+    "element_type": "a",
+    "text_pattern": "Factory Droid",
+    "zone": "nav",
+    "description": "Navigation link to Factory Droid"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/coding-with-groq/opencode']",
+    "keyword_match": "/docs/coding-with-groq/opencode",
+    "element_type": "a",
+    "text_pattern": "OpenCode",
+    "zone": "nav",
+    "description": "Navigation link to OpenCode"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/coding-with-groq/kilo-code']",
+    "keyword_match": "/docs/coding-with-groq/kilo-code",
+    "element_type": "a",
+    "text_pattern": "Kilo Code",
+    "zone": "nav",
+    "description": "Navigation link to Kilo Code"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/coding-with-groq/roo-code']",
+    "keyword_match": "/docs/coding-with-groq/roo-code",
+    "element_type": "a",
+    "text_pattern": "Roo Code",
+    "zone": "nav",
+    "description": "Navigation link to Roo Code"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/coding-with-groq/cline']",
+    "keyword_match": "/docs/coding-with-groq/cline",
+    "element_type": "a",
+    "text_pattern": "Cline",
+    "zone": "nav",
+    "description": "Navigation link to Cline"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/compound']",
+    "keyword_match": "/docs/compound",
+    "element_type": "a",
+    "text_pattern": "Overview",
+    "zone": "nav",
+    "description": "Navigation link to Overview"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/compound/built-in-tools']",
+    "keyword_match": "/docs/compound/built-in-tools",
+    "element_type": "a",
+    "text_pattern": "Built-In Tools",
+    "zone": "nav",
+    "description": "Navigation link to Built-In Tools"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/compound/systems']",
+    "keyword_match": "/docs/compound/systems",
+    "element_type": "a",
+    "text_pattern": "Systems",
+    "zone": "nav",
+    "description": "Navigation link to Systems"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/compound/use-cases']",
+    "keyword_match": "/docs/compound/use-cases",
+    "element_type": "a",
+    "text_pattern": "Use Cases",
+    "zone": "nav",
+    "description": "Navigation link to Use Cases"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/prompting']",
+    "keyword_match": "/docs/prompting",
+    "element_type": "a",
+    "text_pattern": "Prompting Guide",
+    "zone": "nav",
+    "description": "Navigation link to Prompting Guide"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/prompting/patterns']",
+    "keyword_match": "/docs/prompting/patterns",
+    "element_type": "a",
+    "text_pattern": "Patterns",
+    "zone": "nav",
+    "description": "Navigation link to Patterns"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/prompting/model-migration']",
+    "keyword_match": "/docs/prompting/model-migration",
+    "element_type": "a",
+    "text_pattern": "Model Migration",
+    "zone": "nav",
+    "description": "Navigation link to Model Migration"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/prefilling']",
+    "keyword_match": "/docs/prefilling",
+    "element_type": "a",
+    "text_pattern": "Assistant Message Prefilling",
+    "zone": "nav",
+    "description": "Navigation link to Assistant Message Prefilling"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/service-tiers']",
+    "keyword_match": "/docs/service-tiers",
+    "element_type": "a",
+    "text_pattern": "Service Tiers",
+    "zone": "nav",
+    "description": "Navigation link to Service Tiers"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/performance-tier']",
+    "keyword_match": "/docs/performance-tier",
+    "element_type": "a",
+    "text_pattern": "Performance Tier",
+    "zone": "nav",
+    "description": "Navigation link to Performance Tier"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/flex-processing']",
+    "keyword_match": "/docs/flex-processing",
+    "element_type": "a",
+    "text_pattern": "Flex Processing",
+    "zone": "nav",
+    "description": "Navigation link to Flex Processing"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/batch']",
+    "keyword_match": "/docs/batch",
+    "element_type": "a",
+    "text_pattern": "Batch Processing",
+    "zone": "nav",
+    "description": "Navigation link to Batch Processing"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/lora']",
+    "keyword_match": "/docs/lora",
+    "element_type": "a",
+    "text_pattern": "LoRA Inference",
+    "zone": "nav",
+    "description": "Navigation link to LoRA Inference"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/production-readiness/production-ready-checklist']",
+    "keyword_match": "/docs/production-readiness/production-ready-checklist",
+    "element_type": "a",
+    "text_pattern": "Production Checklist",
+    "zone": "nav",
+    "description": "Navigation link to Production Checklist"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/production-readiness/optimizing-latency']",
+    "keyword_match": "/docs/production-readiness/optimizing-latency",
+    "element_type": "a",
+    "text_pattern": "Optimizing Latency",
+    "zone": "nav",
+    "description": "Navigation link to Optimizing Latency"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/production-readiness/security-onboarding']",
+    "keyword_match": "/docs/production-readiness/security-onboarding",
+    "element_type": "a",
+    "text_pattern": "Security Onboarding",
+    "zone": "nav",
+    "description": "Navigation link to Security Onboarding"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/prometheus-metrics']",
+    "keyword_match": "/docs/prometheus-metrics",
+    "element_type": "a",
+    "text_pattern": "Prometheus Metrics",
+    "zone": "nav",
+    "description": "Navigation link to Prometheus Metrics"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/spend-limits']",
+    "keyword_match": "/docs/spend-limits",
+    "element_type": "a",
+    "text_pattern": "Spend Limits",
+    "zone": "nav",
+    "description": "Navigation link to Spend Limits"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/projects']",
+    "keyword_match": "/docs/projects",
+    "element_type": "a",
+    "text_pattern": "Projects",
+    "zone": "nav",
+    "description": "Navigation link to Projects"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/model-permissions']",
+    "keyword_match": "/docs/model-permissions",
+    "element_type": "a",
+    "text_pattern": "Model Permissions",
+    "zone": "nav",
+    "description": "Navigation link to Model Permissions"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/billing-faqs']",
+    "keyword_match": "/docs/billing-faqs",
+    "element_type": "a",
+    "text_pattern": "Billing FAQs",
+    "zone": "nav",
+    "description": "Navigation link to Billing FAQs"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/your-data']",
+    "keyword_match": "/docs/your-data",
+    "element_type": "a",
+    "text_pattern": "Your Data",
+    "zone": "nav",
+    "description": "Navigation link to Your Data"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/libraries']",
+    "keyword_match": "/docs/libraries",
+    "element_type": "a",
+    "text_pattern": "SDK Libraries",
+    "zone": "nav",
+    "description": "Navigation link to SDK Libraries"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/badge']",
+    "keyword_match": "/docs/badge",
+    "element_type": "a",
+    "text_pattern": "Groq Badge",
+    "zone": "nav",
+    "description": "Navigation link to Groq Badge"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/errors']",
+    "keyword_match": "/docs/errors",
+    "element_type": "a",
+    "text_pattern": "Error Codes",
+    "zone": "nav",
+    "description": "Navigation link to Error Codes"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/changelog']",
+    "keyword_match": "/docs/changelog",
+    "element_type": "a",
+    "text_pattern": "Changelog",
+    "zone": "nav",
+    "description": "Navigation link to Changelog"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/legal']",
+    "keyword_match": "/docs/legal",
+    "element_type": "a",
+    "text_pattern": "Policies & Notices",
+    "zone": "nav",
+    "description": "Navigation link to Policies & Notices"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#create-an-api-key']",
+    "keyword_match": "/docs/quickstart#create-an-api-key",
+    "element_type": "a",
+    "text_pattern": "Create an API Key",
+    "zone": "nav",
+    "description": "Navigation link to Create an API Key"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#set-up-your-api-key-recommended']",
+    "keyword_match": "/docs/quickstart#set-up-your-api-key-recommended",
+    "element_type": "a",
+    "text_pattern": "Set up your API Key (recommended)",
+    "zone": "nav",
+    "description": "Navigation link to Set up your API Key (recommended)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#in-your-terminal-of-choice']",
+    "keyword_match": "/docs/quickstart#in-your-terminal-of-choice",
+    "element_type": "a",
+    "text_pattern": "In your terminal of choice:",
+    "zone": "nav",
+    "description": "Navigation link to In your terminal of choice:"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#requesting-your-first-chat-completion']",
+    "keyword_match": "/docs/quickstart#requesting-your-first-chat-completion",
+    "element_type": "a",
+    "text_pattern": "Requesting your first chat completion",
+    "zone": "nav",
+    "description": "Navigation link to Requesting your first chat completion"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#install-the-groq-python-library']",
+    "keyword_match": "/docs/quickstart#install-the-groq-python-library",
+    "element_type": "a",
+    "text_pattern": "Install the Groq Python library:",
+    "zone": "nav",
+    "description": "Navigation link to Install the Groq Python library:"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#performing-a-chat-completion']",
+    "keyword_match": "/docs/quickstart#performing-a-chat-completion",
+    "element_type": "a",
+    "text_pattern": "Performing a Chat Completion:",
+    "zone": "nav",
+    "description": "Navigation link to Performing a Chat Completion:"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#using-thirdparty-libraries-and-sdks']",
+    "keyword_match": "/docs/quickstart#using-thirdparty-libraries-and-sdks",
+    "element_type": "a",
+    "text_pattern": "Using third-party libraries and SDKs",
+    "zone": "nav",
+    "description": "Navigation link to Using third-party libraries and SDKs"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#using-ai-sdk']",
+    "keyword_match": "/docs/quickstart#using-ai-sdk",
+    "element_type": "a",
+    "text_pattern": "Using AI SDK:",
+    "zone": "nav",
+    "description": "Navigation link to Using AI SDK:"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/ai-sdk/']",
+    "keyword_match": "/docs/ai-sdk/",
+    "element_type": "a",
+    "text_pattern": "can be found here",
+    "zone": "nav",
+    "description": "Navigation link to can be found here"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/quickstart#next-steps']",
+    "keyword_match": "/docs/quickstart#next-steps",
+    "element_type": "a",
+    "text_pattern": "Next Steps",
+    "zone": "nav",
+    "description": "Navigation link to Next Steps"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models#featured-models-and-systems']",
+    "keyword_match": "/docs/models#featured-models-and-systems",
+    "element_type": "a",
+    "text_pattern": "Featured Models and Systems",
+    "zone": "nav",
+    "description": "Navigation link to Featured Models and Systems"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/image?url=%2Fgroq-circle.png&w=96&q=75']",
+    "keyword_match": "/_next/image?url=%2Fgroq-circle.png&w=96&q=75",
+    "element_type": "a",
+    "text_pattern": "![Image 2: Groq Compound icon",
+    "zone": "main",
+    "description": "Navigation link to ![Image 2: Groq Compound icon"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/static/media/openailogo.523c87a0.svg']",
+    "keyword_match": "/_next/static/media/openailogo.523c87a0.svg",
+    "element_type": "a",
+    "text_pattern": "![Image 3: OpenAI",
+    "zone": "main",
+    "description": "Navigation link to ![Image 3: OpenAI"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models#production-models']",
+    "keyword_match": "/docs/models#production-models",
+    "element_type": "a",
+    "text_pattern": "Production Models",
+    "zone": "nav",
+    "description": "Navigation link to Production Models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/deprecations']",
+    "keyword_match": "/docs/deprecations",
+    "element_type": "a",
+    "text_pattern": "here",
+    "zone": "nav",
+    "description": "Navigation link to here"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/image?url=%2FMeta_logo.png&w=48&q=75']",
+    "keyword_match": "/_next/image?url=%2FMeta_logo.png&w=48&q=75",
+    "element_type": "a",
+    "text_pattern": "![Image 4: Meta",
+    "zone": "main",
+    "description": "Navigation link to ![Image 4: Meta"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models#production-systems']",
+    "keyword_match": "/docs/models#production-systems",
+    "element_type": "a",
+    "text_pattern": "Production Systems",
+    "zone": "nav",
+    "description": "Navigation link to Production Systems"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/image?url=%2Fgroq-circle.png&w=48&q=75']",
+    "keyword_match": "/_next/image?url=%2Fgroq-circle.png&w=48&q=75",
+    "element_type": "a",
+    "text_pattern": "![Image 11: Groq",
+    "zone": "main",
+    "description": "Navigation link to ![Image 11: Groq"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models#preview-models']",
+    "keyword_match": "/docs/models#preview-models",
+    "element_type": "a",
+    "text_pattern": "Preview Models",
+    "zone": "nav",
+    "description": "Navigation link to Preview Models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/image?url=%2Fcanopylabs.png&w=48&q=75']",
+    "keyword_match": "/_next/image?url=%2Fcanopylabs.png&w=48&q=75",
+    "element_type": "a",
+    "text_pattern": "![Image 13: Canopy Labs",
+    "zone": "main",
+    "description": "Navigation link to ![Image 13: Canopy Labs"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/image?url=%2Fmoonshot_logo.png&w=48&q=75']",
+    "keyword_match": "/_next/image?url=%2Fmoonshot_logo.png&w=48&q=75",
+    "element_type": "a",
+    "text_pattern": "![Image 19: Moonshot AI",
+    "zone": "main",
+    "description": "Navigation link to ![Image 19: Moonshot AI"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/_next/image?url=%2Fqwen_logo.png&w=48&q=75']",
+    "keyword_match": "/_next/image?url=%2Fqwen_logo.png&w=48&q=75",
+    "element_type": "a",
+    "text_pattern": "![Image 21: Alibaba Cloud",
+    "zone": "main",
+    "description": "Navigation link to ![Image 21: Alibaba Cloud"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models#deprecated-models']",
+    "keyword_match": "/docs/models#deprecated-models",
+    "element_type": "a",
+    "text_pattern": "Deprecated Models",
+    "zone": "nav",
+    "description": "Navigation link to Deprecated Models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/models#get-all-available-models']",
+    "keyword_match": "/docs/models#get-all-available-models",
+    "element_type": "a",
+    "text_pattern": "Get All Available Models",
+    "zone": "nav",
+    "description": "Navigation link to Get All Available Models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#chat']",
+    "keyword_match": "/docs/api-reference#chat",
+    "element_type": "a",
+    "text_pattern": "Chat",
+    "zone": "nav",
+    "description": "Navigation link to Chat"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#chat-create']",
+    "keyword_match": "/docs/api-reference#chat-create",
+    "element_type": "a",
+    "text_pattern": "Create chat completion",
+    "zone": "nav",
+    "description": "Navigation link to Create chat completion"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#responses']",
+    "keyword_match": "/docs/api-reference#responses",
+    "element_type": "a",
+    "text_pattern": "Responses (beta)",
+    "zone": "nav",
+    "description": "Navigation link to Responses (beta)"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#responses-create']",
+    "keyword_match": "/docs/api-reference#responses-create",
+    "element_type": "a",
+    "text_pattern": "Create response",
+    "zone": "nav",
+    "description": "Navigation link to Create response"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio']",
+    "keyword_match": "/docs/api-reference#audio",
+    "element_type": "a",
+    "text_pattern": "Audio",
+    "zone": "nav",
+    "description": "Navigation link to Audio"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-transcription']",
+    "keyword_match": "/docs/api-reference#audio-transcription",
+    "element_type": "a",
+    "text_pattern": "Create transcription",
+    "zone": "nav",
+    "description": "Navigation link to Create transcription"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-translation']",
+    "keyword_match": "/docs/api-reference#audio-translation",
+    "element_type": "a",
+    "text_pattern": "Create translation",
+    "zone": "nav",
+    "description": "Navigation link to Create translation"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-speech']",
+    "keyword_match": "/docs/api-reference#audio-speech",
+    "element_type": "a",
+    "text_pattern": "Create speech",
+    "zone": "nav",
+    "description": "Navigation link to Create speech"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#models']",
+    "keyword_match": "/docs/api-reference#models",
+    "element_type": "a",
+    "text_pattern": "Models",
+    "zone": "nav",
+    "description": "Navigation link to Models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#models-list']",
+    "keyword_match": "/docs/api-reference#models-list",
+    "element_type": "a",
+    "text_pattern": "List models",
+    "zone": "nav",
+    "description": "Navigation link to List models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#models-retrieve']",
+    "keyword_match": "/docs/api-reference#models-retrieve",
+    "element_type": "a",
+    "text_pattern": "Retrieve model",
+    "zone": "nav",
+    "description": "Navigation link to Retrieve model"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches']",
+    "keyword_match": "/docs/api-reference#batches",
+    "element_type": "a",
+    "text_pattern": "Batches",
+    "zone": "nav",
+    "description": "Navigation link to Batches"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-create']",
+    "keyword_match": "/docs/api-reference#batches-create",
+    "element_type": "a",
+    "text_pattern": "Create batch",
+    "zone": "nav",
+    "description": "Navigation link to Create batch"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-retrieve']",
+    "keyword_match": "/docs/api-reference#batches-retrieve",
+    "element_type": "a",
+    "text_pattern": "Retrieve batch",
+    "zone": "nav",
+    "description": "Navigation link to Retrieve batch"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-list']",
+    "keyword_match": "/docs/api-reference#batches-list",
+    "element_type": "a",
+    "text_pattern": "List batches",
+    "zone": "nav",
+    "description": "Navigation link to List batches"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-cancel']",
+    "keyword_match": "/docs/api-reference#batches-cancel",
+    "element_type": "a",
+    "text_pattern": "Cancel batch",
+    "zone": "nav",
+    "description": "Navigation link to Cancel batch"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files']",
+    "keyword_match": "/docs/api-reference#files",
+    "element_type": "a",
+    "text_pattern": "Files",
+    "zone": "nav",
+    "description": "Navigation link to Files"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-upload']",
+    "keyword_match": "/docs/api-reference#files-upload",
+    "element_type": "a",
+    "text_pattern": "Upload file",
+    "zone": "nav",
+    "description": "Navigation link to Upload file"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-list']",
+    "keyword_match": "/docs/api-reference#files-list",
+    "element_type": "a",
+    "text_pattern": "List files",
+    "zone": "nav",
+    "description": "Navigation link to List files"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-delete']",
+    "keyword_match": "/docs/api-reference#files-delete",
+    "element_type": "a",
+    "text_pattern": "Delete file",
+    "zone": "nav",
+    "description": "Navigation link to Delete file"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-retrieve']",
+    "keyword_match": "/docs/api-reference#files-retrieve",
+    "element_type": "a",
+    "text_pattern": "Retrieve file",
+    "zone": "nav",
+    "description": "Navigation link to Retrieve file"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-download']",
+    "keyword_match": "/docs/api-reference#files-download",
+    "element_type": "a",
+    "text_pattern": "Download file",
+    "zone": "nav",
+    "description": "Navigation link to Download file"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning']",
+    "keyword_match": "/docs/api-reference#fine-tuning",
+    "element_type": "a",
+    "text_pattern": "Fine Tuning",
+    "zone": "nav",
+    "description": "Navigation link to Fine Tuning"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-list']",
+    "keyword_match": "/docs/api-reference#fine-tuning-list",
+    "element_type": "a",
+    "text_pattern": "List fine tunings",
+    "zone": "nav",
+    "description": "Navigation link to List fine tunings"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-create']",
+    "keyword_match": "/docs/api-reference#fine-tuning-create",
+    "element_type": "a",
+    "text_pattern": "Create fine tuning",
+    "zone": "nav",
+    "description": "Navigation link to Create fine tuning"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-get']",
+    "keyword_match": "/docs/api-reference#fine-tuning-get",
+    "element_type": "a",
+    "text_pattern": "Get fine tuning",
+    "zone": "nav",
+    "description": "Navigation link to Get fine tuning"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-delete']",
+    "keyword_match": "/docs/api-reference#fine-tuning-delete",
+    "element_type": "a",
+    "text_pattern": "Delete fine tuning",
+    "zone": "nav",
+    "description": "Navigation link to Delete fine tuning"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#chat-create-request-body']",
+    "keyword_match": "/docs/api-reference#chat-create-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/structured-outputs#supported-models']",
+    "keyword_match": "/docs/structured-outputs#supported-models",
+    "element_type": "a",
+    "text_pattern": "supported models",
+    "zone": "nav",
+    "description": "Navigation link to supported models"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/text-chat#streaming-a-chat-completion']",
+    "keyword_match": "/docs/text-chat#streaming-a-chat-completion",
+    "element_type": "a",
+    "text_pattern": "Example code",
+    "zone": "nav",
+    "description": "Navigation link to Example code"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#chat-create-returns']",
+    "keyword_match": "/docs/api-reference#chat-create-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#responses-create-request-body']",
+    "keyword_match": "/docs/api-reference#responses-create-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#responses-create-returns']",
+    "keyword_match": "/docs/api-reference#responses-create-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-transcription-request-body']",
+    "keyword_match": "/docs/api-reference#audio-transcription-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/speech-text']",
+    "keyword_match": "/docs/speech-text",
+    "element_type": "a",
+    "text_pattern": "prompt",
+    "zone": "nav",
+    "description": "Navigation link to prompt"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-transcription-returns']",
+    "keyword_match": "/docs/api-reference#audio-transcription-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-translation-request-body']",
+    "keyword_match": "/docs/api-reference#audio-translation-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/guides/speech-to-text/prompting']",
+    "keyword_match": "/docs/guides/speech-to-text/prompting",
+    "element_type": "a",
+    "text_pattern": "prompt",
+    "zone": "nav",
+    "description": "Navigation link to prompt"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-translation-returns']",
+    "keyword_match": "/docs/api-reference#audio-translation-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-speech-request-body']",
+    "keyword_match": "/docs/api-reference#audio-speech-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#audio-speech-returns']",
+    "keyword_match": "/docs/api-reference#audio-speech-returns",
+    "element_type": "a",
+    "text_pattern": "#### Returns",
+    "zone": "nav",
+    "description": "Navigation link to #### Returns"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#models-list-returns']",
+    "keyword_match": "/docs/api-reference#models-list-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#models-retrieve-returns']",
+    "keyword_match": "/docs/api-reference#models-retrieve-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-create-request-body']",
+    "keyword_match": "/docs/api-reference#batches-create-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-create-returns']",
+    "keyword_match": "/docs/api-reference#batches-create-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-retrieve-returns']",
+    "keyword_match": "/docs/api-reference#batches-retrieve-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-list-returns']",
+    "keyword_match": "/docs/api-reference#batches-list-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#batches-cancel-returns']",
+    "keyword_match": "/docs/api-reference#batches-cancel-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-upload-request-body']",
+    "keyword_match": "/docs/api-reference#files-upload-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-upload-returns']",
+    "keyword_match": "/docs/api-reference#files-upload-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-list-returns']",
+    "keyword_match": "/docs/api-reference#files-list-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-delete-returns']",
+    "keyword_match": "/docs/api-reference#files-delete-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-retrieve-returns']",
+    "keyword_match": "/docs/api-reference#files-retrieve-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#files-download-returns']",
+    "keyword_match": "/docs/api-reference#files-download-returns",
+    "element_type": "a",
+    "text_pattern": "#### Returns",
+    "zone": "nav",
+    "description": "Navigation link to #### Returns"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-list-returns']",
+    "keyword_match": "/docs/api-reference#fine-tuning-list-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-create-request-body']",
+    "keyword_match": "/docs/api-reference#fine-tuning-create-request-body",
+    "element_type": "a",
+    "text_pattern": "#### Request Body",
+    "zone": "nav",
+    "description": "Navigation link to #### Request Body"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-create-returns']",
+    "keyword_match": "/docs/api-reference#fine-tuning-create-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-get-returns']",
+    "keyword_match": "/docs/api-reference#fine-tuning-get-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/api-reference#fine-tuning-delete-returns']",
+    "keyword_match": "/docs/api-reference#fine-tuning-delete-returns",
+    "element_type": "a",
+    "text_pattern": "#### Response Object",
+    "zone": "nav",
+    "description": "Navigation link to #### Response Object"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground?model=meta-llama/llama-4-scout-17b-16e-instruct']",
+    "keyword_match": "/playground?model=meta-llama/llama-4-scout-17b-16e-instruct",
+    "element_type": "a",
+    "text_pattern": "Llama 4 Scout",
+    "zone": "main",
+    "description": "Navigation link to Llama 4 Scout"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/playground?model=meta-llama/llama-4-maverick-17b-128e-instruct']",
+    "keyword_match": "/playground?model=meta-llama/llama-4-maverick-17b-128e-instruct",
+    "element_type": "a",
+    "text_pattern": "Llama 4 Maverick",
+    "zone": "main",
+    "description": "Navigation link to Llama 4 Maverick"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/text-chat#generating-chat-completions-with-groq-sdk']",
+    "keyword_match": "/docs/text-chat#generating-chat-completions-with-groq-sdk",
+    "element_type": "a",
+    "text_pattern": "`chat.completions`",
+    "zone": "nav",
+    "description": "Navigation link to `chat.completions`"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/rate-limits#understanding-rate-limits']",
+    "keyword_match": "/docs/rate-limits#understanding-rate-limits",
+    "element_type": "a",
+    "text_pattern": "Understanding Rate Limits",
+    "zone": "nav",
+    "description": "Navigation link to Understanding Rate Limits"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/rate-limits#rate-limits']",
+    "keyword_match": "/docs/rate-limits#rate-limits",
+    "element_type": "a",
+    "text_pattern": "Rate Limits",
+    "zone": "nav",
+    "description": "Navigation link to Rate Limits"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/settings/limits']",
+    "keyword_match": "/settings/limits",
+    "element_type": "a",
+    "text_pattern": "limits page",
+    "zone": "main",
+    "description": "Navigation link to limits page"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/settings/billing/plans']",
+    "keyword_match": "/settings/billing/plans",
+    "element_type": "a",
+    "text_pattern": "Developer plan",
+    "zone": "main",
+    "description": "Navigation link to Developer plan"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/rate-limits#rate-limit-headers']",
+    "keyword_match": "/docs/rate-limits#rate-limit-headers",
+    "element_type": "a",
+    "text_pattern": "Rate Limit Headers",
+    "zone": "nav",
+    "description": "Navigation link to Rate Limit Headers"
+  },
+  {
+    "doc_type": "Visual_Hint",
+    "selector": "a[href*='/docs/rate-limits#handling-rate-limits']",
+    "keyword_match": "/docs/rate-limits#handling-rate-limits",
+    "element_type": "a",
+    "text_pattern": "Handling Rate Limits",
+    "zone": "nav",
+    "description": "Navigation link to Handling Rate Limits"
+  }
+]

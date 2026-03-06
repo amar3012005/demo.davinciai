@@ -37,3 +37,5 @@ env/
 # Caches
 .cache/
 *.resolved
+.env.eu
+.env-eu

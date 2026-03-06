@@ -1,6 +1,7 @@
 import json
 import time
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -34,6 +35,22 @@ class SessionAnalytics:
     def __init__(self, llm_provider: Any, model_name: str = "qwen/qwen3-32b"):
         self.llm_provider = llm_provider
         self.model_name = model_name
+
+    @staticmethod
+    def _strip_reasoning_artifacts(text: str) -> str:
+        """Remove leaked CoT/thinking markup from model output."""
+        if not text:
+            return ""
+        cleaned = text
+        # Remove explicit think blocks
+        cleaned = re.sub(r"<think>.*?</think>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        # Remove standalone think tags
+        cleaned = re.sub(r"</?think>", " ", cleaned, flags=re.IGNORECASE)
+        # Trim common reasoning prefaces that leak into final text
+        cleaned = re.sub(r"^\s*(okay[, ]+let me.*?:)\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        # Collapse whitespace
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
 
     def format_transcript(self, raw_logs: List[Dict[str, Any]]) -> str:
         """
@@ -83,6 +100,7 @@ class SessionAnalytics:
         # 5. Generate Brief Context (if not provided)
         if not brief_context:
             brief_context = await self._generate_brief_context(transcript, reasoning_output.get('session_summary', {}))
+        brief_context = self._strip_reasoning_artifacts(brief_context)
         
         # 6. Extract Final Report for Orchestrator/Backend
         report = {
@@ -93,6 +111,10 @@ class SessionAnalytics:
             "business_signals": business_signals,
             "analysis": reasoning_output.get('session_summary', {}),
             "distilled_knowledge": reasoning_output.get('distilled_knowledge', []),
+            "analysis_quality": {
+                "deterministic_metrics": True,
+                "llm_heuristics_present": True
+            },
             "processing_time": round(time.time() - start_time, 2)
         }
         
@@ -119,6 +141,7 @@ class SessionAnalytics:
             
             # Clean up the response
             summary = response.strip() if isinstance(response, str) else response.get('content', '').strip()
+            summary = self._strip_reasoning_artifacts(summary)
             
             # Fallback if response is too short or empty
             if not summary or len(summary) < 20:
@@ -199,7 +222,19 @@ Return ONLY valid JSON.
                 model=self.model_name,
                 response_format={"type": "json_object"}
             )
-            return json.loads(response)
+            raw = response if isinstance(response, str) else json.dumps(response)
+            raw = self._strip_reasoning_artifacts(raw)
+            # Extract JSON object defensively if extra text leaked
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                raw = raw[start:end + 1]
+            parsed = json.loads(raw)
+            # Basic shape hardening
+            parsed.setdefault("turns", [])
+            parsed.setdefault("session_summary", {"overall_sentiment": 0, "resolution_status": "Unknown", "customer_pain_points": []})
+            parsed.setdefault("distilled_knowledge", [])
+            return parsed
         except Exception as e:
             logger.error(f"Reasoning engine failed: {e}")
             return {"turns": [], "session_summary": {"overall_sentiment": 0, "resolution_status": "Unknown", "customer_pain_points": []}}
@@ -209,29 +244,53 @@ Return ONLY valid JSON.
         Phase 3: Davinci Post-Processing Logic
         Deterministic metrics like Frustration Velocity and Agent IQ.
         """
-        if not analyzed_turns:
-            return {"frustration_velocity": "STABLE", "agent_iq": 1.0, "avg_sentiment": 0.0}
-            
-        scores = [t.get('sentiment_score', 0) for t in analyzed_turns]
-        
-        # Velocity
-        start_avg = sum(scores[:2]) / len(scores[:2]) if scores else 0
-        end_avg = sum(scores[-2:]) / len(scores[-2:]) if scores else 0
-        velocity_val = end_avg - start_avg
+        # Deterministic, log-derived metrics:
+        # - correction_count: based on user utterances indicating correction/rejection
+        # - frustration_velocity: based on early vs late user correction intensity
+        # - agent_iq: 1 - (corrections / user_turns)
+        user_turn_texts = []
+        for log in raw_logs:
+            role = str(log.get("role", "")).strip().lower()
+            if role == "user":
+                txt = (log.get("content") or log.get("text") or "").strip().lower()
+                if txt:
+                    user_turn_texts.append(txt)
+
+        if not user_turn_texts:
+            scores = [float(t.get("sentiment_score", 0) or 0) for t in analyzed_turns if isinstance(t.get("sentiment_score", 0), (int, float))]
+            return {
+                "frustration_velocity": "STABLE",
+                "agent_iq": 1.0,
+                "avg_sentiment": round(sum(scores) / len(scores), 2) if scores else 0.0,
+                "correction_count": 0
+            }
+
+        correction_keywords = [
+            "no", "not what i meant", "wrong", "listen", "again", "stop",
+            "that's not", "not correct", "you misunderstood", "cancel", "interrupt"
+        ]
+
+        def has_correction(text: str) -> bool:
+            return any(kw in text for kw in correction_keywords)
+
+        correction_flags = [1 if has_correction(t) else 0 for t in user_turn_texts]
+        corrections = sum(correction_flags)
+        total_user_turns = len(user_turn_texts)
+
+        # Velocity from correction density shift between first and second half.
+        mid = max(1, total_user_turns // 2)
+        start_rate = sum(correction_flags[:mid]) / len(correction_flags[:mid])
+        end_rate = sum(correction_flags[mid:]) / len(correction_flags[mid:]) if correction_flags[mid:] else start_rate
+        velocity_val = start_rate - end_rate  # positive means improving
         
         velocity = "STABLE"
-        if velocity_val < -0.4: velocity = "CRITICAL_DEGRADATION"
-        elif velocity_val > 0.4: velocity = "SUCCESSFUL_RECOVERY"
-        
-        # Agent IQ (Correction Rate)
-        correction_keywords = ["no", "not what i meant", "wrong", "listen", "again", "stop"]
-        corrections = 0
-        for turn in analyzed_turns:
-            trace = turn.get('thought_trace', '').lower()
-            if any(word in trace for word in correction_keywords):
-                corrections += 1
-        
-        agent_iq = 1.0 - (corrections / len(analyzed_turns)) if analyzed_turns else 1.0
+        if velocity_val < -0.4:
+            velocity = "CRITICAL_DEGRADATION"
+        elif velocity_val > 0.4:
+            velocity = "SUCCESSFUL_RECOVERY"
+
+        agent_iq = max(0.0, 1.0 - (corrections / total_user_turns))
+        scores = [float(t.get("sentiment_score", 0) or 0) for t in analyzed_turns if isinstance(t.get("sentiment_score", 0), (int, float))]
         
         return {
             "frustration_velocity": velocity,

@@ -1,1 +1,1 @@
-"""Empty __init__.py for tests package."""
+"""Tests for FSM routing endpoint"""

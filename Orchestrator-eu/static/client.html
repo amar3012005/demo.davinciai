@@ -893,6 +893,9 @@
         const DEFAULT_TENANT_ID = (window.TARA_ENV && window.TARA_ENV.TENANT_ID)
             ? window.TARA_ENV.TENANT_ID
             : 'tenant';
+        const DEFAULT_AGENT_NAME = (window.TARA_ENV && window.TARA_ENV.AGENT_NAME)
+            ? window.TARA_ENV.AGENT_NAME
+            : 'tara';
 
 
         class TARAClient {
@@ -1098,13 +1101,14 @@
                         config: {
                             mode: 'voice',
                             tenant_id: DEFAULT_TENANT_ID,
+                            agent_name: DEFAULT_AGENT_NAME,
                             user_id: phone || 'anonymous_user',
                             stt_mode: this.mockMode ? 'text' : 'audio',
                             tts_mode: this.mockMode ? 'text' : 'audio',
                             language: this.fillerLanguage
                         }
                     });
-                    this.addLog(`Sent session config: mode=voice, tenant=${DEFAULT_TENANT_ID}`, 'info');
+                    this.addLog(`Sent session config: mode=voice, tenant=${DEFAULT_TENANT_ID}, agent=${DEFAULT_AGENT_NAME}`, 'info');
 
                     // Trigger greeting intro (same as phone sessions get automatically)
                     this.send({ type: 'start_session', timestamp: Date.now() / 1000 });

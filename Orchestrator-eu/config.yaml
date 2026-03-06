@@ -191,13 +191,38 @@ session:
   timeout_seconds: 30.0
   max_timeout_prompts: 2  # After 2 timeouts, play exit dialogue and end session
   ttl_seconds: 3600
-  ignore_stt_while_speaking: false
+  bargin_feature: false
+  ignore_stt_while_speaking: true
 
 performance:
   enable_incremental_rag: true
   prewarm_on_vad: false
   max_concurrent_sessions: 100
   enable_fillers: false  # Disable all immediate and latency filler phrases
+
+# FSM (Finite State Machine) Configuration for Appointment Booking
+# Schema-driven configuration for cross-surf behavior with RAG detours
+fsm:
+  # JSON schema for appointment fields (can also be set via FSM_APPOINTMENT_SCHEMA_JSON env var)
+  # appointment_schema_json: ''
+  
+  # Allow RAG detours during FSM flow (user asks general question during booking)
+  allow_rag_detour: true
+  
+  # Max detours allowed per pending field before forcing completion
+  max_detours_per_field: 2
+  
+  # Max retries per field before cancellation
+  max_retries: 3
+  
+  # Cancel keywords (can also be defined in schema JSON)
+  cancel_keywords:
+    - "cancel"
+    - "stop"
+    - "nevermind"
+    - "forget it"
+    - "quit"
+    - "exit"
 
 # Fallback responses when APIs fail or timeout
 fallback_responses:
@@ -216,6 +241,5 @@ fallback_responses:
     tts_error: "Ich habe Schwierigkeiten beim Sprechen, aber ich höre Ihnen noch zu."
     connection_lost: "Wir scheinen die Verbindung verloren zu haben. Bitte versuchen Sie, sich erneut zu verbinden."
     unknown_error: "Ich bin auf einen unerwarteten Fehler gestoßen. Bitte versuchen Sie es erneut oder kontaktieren Sie den Support."
-
 
 

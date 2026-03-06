@@ -48,6 +48,10 @@ class QdrantAddon:
         self.embedding_dim = embedding_dim
         self.enabled = False
         self.client = None
+        self._ensured_collections = set()
+        self._sync_clients = {}
+        self._async_clients = {}
+        self._vector_name_cache = {}
         
         if not QDRANT_AVAILABLE:
             logger.warning("⚠️ qdrant-client not installed. Memory features disabled.")
@@ -69,6 +73,7 @@ class QdrantAddon:
             sync_check = QdrantClient(url=self.url, api_key=self.api_key, check_compatibility=False)
             if sync_check.collection_exists(self.collection_name):
                 self.enabled = True
+                self._ensured_collections.add(self.collection_name)
             else:
                 logger.info(f"Creating Qdrant collection: {self.collection_name}")
                 sync_check.create_collection(
@@ -92,8 +97,9 @@ class QdrantAddon:
                 )
                 
                 # Add Payload Indexes for ultra-fast filtering
-                self._create_payload_indexes(sync_check)
+                self._create_payload_indexes(sync_check, self.collection_name)
                 self.enabled = True
+                self._ensured_collections.add(self.collection_name)
             
             if self.enabled:
                 logger.info(f"✅ Qdrant Memory initialized (URL: {self.url})")
@@ -101,13 +107,17 @@ class QdrantAddon:
             logger.error(f"❌ Qdrant connection failed: {e}")
             self.enabled = False
 
-    def _create_payload_indexes(self, client):
+    def _create_payload_indexes(self, client, collection_name: Optional[str] = None):
         """Create keyword indexes for common filter fields."""
-        fields = ["doc_type", "domain", "tenant_id", "type", "successful", "schema_version", "label"]
+        target_collection = collection_name or self.collection_name
+        fields = [
+            "doc_type", "domain", "tenant_id", "agent_id", "session_type", "session_id",
+            "type", "successful", "schema_version", "label"
+        ]
         for field in fields:
             try:
                 client.create_payload_index(
-                    collection_name=self.collection_name,
+                    collection_name=target_collection,
                     field_name=field,
                     field_schema=models.PayloadSchemaType.KEYWORD
                 )
@@ -115,6 +125,118 @@ class QdrantAddon:
             except Exception as e:
                 # Likely already exists
                 pass
+
+    def _get_vector_name_for_collection(self, sync_client, collection_name: str) -> Optional[str]:
+        """Return named vector key if collection uses named vectors, else None."""
+        cache_key = f"{id(sync_client)}:{collection_name}"
+        if cache_key in self._vector_name_cache:
+            return self._vector_name_cache[cache_key]
+        try:
+            info = sync_client.get_collection(collection_name)
+            vectors_cfg = getattr(getattr(info, "config", None), "params", None)
+            vectors = getattr(vectors_cfg, "vectors", None)
+            vector_name = next(iter(vectors.keys())) if isinstance(vectors, dict) and vectors else None
+            self._vector_name_cache[cache_key] = vector_name
+            return vector_name
+        except Exception:
+            self._vector_name_cache[cache_key] = None
+            return None
+
+    @staticmethod
+    def _sanitize_tenant(tenant_id: str) -> str:
+        tenant = (tenant_id or "tara").strip().lower()
+        return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
+
+    def _get_tenant_env(self, tenant_id: str, suffix: str) -> Optional[str]:
+        tenant = self._sanitize_tenant(tenant_id)
+        # Requested pattern first: <tenant>_<suffix>
+        val = os.getenv(f"{tenant}_{suffix}")
+        if val:
+            return val
+        # Compatibility fallback: <TENANT>_<SUFFIX>
+        return os.getenv(f"{tenant.upper()}_{suffix.upper()}")
+
+    def _resolve_tenant_qdrant(self, tenant_id: str = "tara") -> Dict[str, Optional[str]]:
+        """
+        Resolve Qdrant endpoint config per tenant.
+
+        Expected env pattern:
+        - <tenant>_qdrant_url
+        - <tenant>_apikey
+        - <tenant>_collectionname
+        """
+        url = self._get_tenant_env(tenant_id, "qdrant_url") or self.url
+        api_key = self._get_tenant_env(tenant_id, "apikey") or self.api_key
+        collection = self._get_tenant_env(tenant_id, "collectionname") or self.collection_name
+        return {"url": url, "api_key": api_key, "collection_name": collection}
+
+    def _resolve_collection_name(self, tenant_id: str = "tara") -> str:
+        """
+        Resolve tenant-specific collection name.
+
+        Priority:
+        1) <tenant>_collectionname
+        2) <tenant>_qdrant_collection (legacy)
+        3) <TENANT>_QDRANT_COLLECTION
+        4) default self.collection_name
+        """
+        tenant = self._sanitize_tenant(tenant_id)
+        collection_name = self._get_tenant_env(tenant_id, "collectionname")
+        if collection_name:
+            return collection_name
+        lower_key = f"{tenant}_qdrant_collection"
+        upper_key = f"{tenant.upper()}_QDRANT_COLLECTION"
+        return os.getenv(lower_key) or os.getenv(upper_key) or self.collection_name
+
+    def _get_clients_for_tenant(self, tenant_id: str = "tara"):
+        cfg = self._resolve_tenant_qdrant(tenant_id)
+        url = cfg["url"]
+        api_key = cfg["api_key"]
+        if not url:
+            return None, None, None
+        key = f"{url}|{api_key or ''}"
+        if key not in self._sync_clients:
+            self._sync_clients[key] = QdrantClient(url=url, api_key=api_key, check_compatibility=False)
+        if key not in self._async_clients:
+            self._async_clients[key] = AsyncQdrantClient(
+                url=url,
+                api_key=api_key,
+                check_compatibility=False,
+                timeout=5
+            )
+        return self._sync_clients[key], self._async_clients[key], cfg["collection_name"]
+
+    def _ensure_collection_for(self, sync_client, collection_name: str):
+        """Ensure target collection exists and has payload indexes."""
+        if sync_client is None or not collection_name:
+            return
+        client_key = f"{id(sync_client)}:{collection_name}"
+        if client_key in self._ensured_collections:
+            return
+        try:
+            if not sync_client.collection_exists(collection_name):
+                logger.info(f"Creating tenant collection: {collection_name}")
+                sync_client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=models.VectorParams(
+                        size=self.embedding_dim,
+                        distance=models.Distance.COSINE
+                    ),
+                    hnsw_config=models.HnswConfigDiff(
+                        m=16,
+                        ef_construct=100,
+                    ),
+                    quantization_config=models.ScalarQuantization(
+                        scalar=models.ScalarQuantizationConfig(
+                            type=models.ScalarType.INT8,
+                            always_ram=True,
+                        )
+                    )
+                )
+            self._create_payload_indexes(sync_client, collection_name)
+            self._ensured_collections.add(client_key)
+        except Exception as e:
+            logger.error(f"Failed ensuring tenant collection '{collection_name}': {e}")
 
     def _ensure_collection(self):
         """Create collection if it doesn't exist."""
@@ -145,7 +267,7 @@ class QdrantAddon:
             # Always check/create payload indexes on startup
             try:
                 sync_check = QdrantClient(url=self.url, api_key=self.api_key, check_compatibility=False)
-                self._create_payload_indexes(sync_check)
+                self._create_payload_indexes(sync_check, self.collection_name)
             except Exception as e:
                 logger.warning(f"Failed to verify payload indexes: {e}")
 
@@ -169,6 +291,12 @@ class QdrantAddon:
         if not self.enabled: return
         
         try:
+            sync_client, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                logger.warning(f"Qdrant not configured for tenant={tenant_id}; skipping upsert_case")
+                return
+            self._ensure_collection_for(sync_client, collection_name)
+            vector_name = self._get_vector_name_for_collection(sync_client, collection_name)
             payload = case_memory_payload(
                 issue=issue,
                 solution=solution,
@@ -181,18 +309,21 @@ class QdrantAddon:
                 payload.update(metadata)
             
             point_id = payload.pop("uuid")  # Use schema-generated UUID
-                
-            await self.client.upsert(
-                collection_name=self.collection_name,
+            
+            await async_client.upsert(
+                collection_name=collection_name,
                 points=[
                     models.PointStruct(
                         id=point_id,
-                        vector=vector,
+                        vector={vector_name: vector} if vector_name else vector,
                         payload=payload
                     )
                 ]
             )
-            logger.info(f"🧠 Learned new case from User {user_id}: {issue[:30]}...")
+            logger.info(
+                f"🧠 Learned new case | tenant={tenant_id} collection={collection_name} "
+                f"vector={vector_name or 'default'} user={user_id}"
+            )
         except Exception as e:
             logger.error(f"Failed to upsert case: {e}")
 
@@ -211,6 +342,10 @@ class QdrantAddon:
         if not self.enabled: return []
         
         try:
+            sync_client, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return []
+            vector_name = self._get_vector_name_for_collection(sync_client, collection_name)
             # Multi-tenant filter with optional domain filtering
             filter_conditions = [
                 models.FieldCondition(
@@ -233,9 +368,10 @@ class QdrantAddon:
             
             query_filter = models.Filter(must=filter_conditions)
 
-            response = await self.client.query_points(
-                collection_name=self.collection_name,
+            response = await async_client.query_points(
+                collection_name=collection_name,
                 query=query_vector,
+                using=vector_name,
                 query_filter=query_filter,
                 limit=limit,
                 score_threshold=score_threshold
@@ -282,9 +418,12 @@ class QdrantAddon:
             return False
         
         try:
+            _, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return False
             # Count points for this domain
-            result = await self.client.count(
-                collection_name=self.collection_name,
+            result = await async_client.count(
+                collection_name=collection_name,
                 count_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -327,6 +466,10 @@ class QdrantAddon:
             return {"skills": [], "rules": []}
 
         try:
+            sync_client, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return {"skills": [], "rules": []}
+            vector_name = self._get_vector_name_for_collection(sync_client, collection_name)
             # Filter for skills/rules — match both new doc_type AND legacy type
             type_filter = models.Filter(
                 must=[
@@ -366,9 +509,10 @@ class QdrantAddon:
                     )
                 )
 
-            response = await self.client.query_points(
-                collection_name=self.collection_name,
+            response = await async_client.query_points(
+                collection_name=collection_name,
                 query=query_vector,
+                using=vector_name,
                 query_filter=type_filter,
                 limit=limit,
                 score_threshold=score_threshold
@@ -409,6 +553,10 @@ class QdrantAddon:
         if not self.enabled: return []
         
         try:
+            sync_client, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return []
+            vector_name = self._get_vector_name_for_collection(sync_client, collection_name)
             query_filter = models.Filter(
                 must=[
                     models.FieldCondition(
@@ -422,9 +570,10 @@ class QdrantAddon:
                 ]
             )
 
-            response = await self.client.query_points(
-                collection_name=self.collection_name,
+            response = await async_client.query_points(
+                collection_name=collection_name,
                 query=query_vector,
+                using=vector_name,
                 query_filter=query_filter,
                 limit=limit
             )
@@ -470,8 +619,11 @@ class QdrantAddon:
         if not self.enabled: return
         
         try:
-            await self.client.delete(
-                collection_name=self.collection_name,
+            _, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return
+            await async_client.delete(
+                collection_name=collection_name,
                 points_selector=models.FilterSelector(
                     filter=models.Filter(
                         must=[
@@ -505,6 +657,10 @@ class QdrantAddon:
         if not self.enabled: return []
         
         try:
+            sync_client, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return []
+            vector_name = self._get_vector_name_for_collection(sync_client, collection_name)
             # Multi-tenant filter
             must_conditions = [
                 models.FieldCondition(
@@ -549,9 +705,10 @@ class QdrantAddon:
             else:
                  final_filter = models.Filter(must=must_conditions)
 
-            response = await self.client.query_points(
-                collection_name=self.collection_name,
+            response = await async_client.query_points(
+                collection_name=collection_name,
                 query=query_vector,
+                using=vector_name,
                 query_filter=final_filter,
                 limit=limit,
                 score_threshold=score_threshold
@@ -581,17 +738,21 @@ class QdrantAddon:
             return []
 
     # ── Batch upsert for population scripts ─────────────────────────────────
-    async def batch_upsert(self, points: List[models.PointStruct]) -> int:
+    async def batch_upsert(self, points: List[models.PointStruct], tenant_id: str = "tara") -> int:
         """Upsert a list of PointStruct objects in batches of 50."""
         if not self.enabled:
             return 0
+        sync_client, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+        if async_client is None:
+            return 0
+        self._ensure_collection_for(sync_client, collection_name)
         total = 0
         batch_size = 50
         for i in range(0, len(points), batch_size):
             batch = points[i : i + batch_size]
             try:
-                await self.client.upsert(
-                    collection_name=self.collection_name,
+                await async_client.upsert(
+                    collection_name=collection_name,
                     points=batch,
                 )
                 total += len(batch)

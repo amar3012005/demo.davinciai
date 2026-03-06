@@ -879,6 +879,63 @@ async def proxy_rag_skill_delete(point_id: str, tenant_id: Optional[str] = None)
         logger.error(f"RAG Proxy delete error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+# ════════════════════════════════════════════════════════════════════════════════
+# VISUAL COPILOT PROXY
+# ════════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/crawl-website")
+async def proxy_crawl_website(request: Request):
+    """Proxy crawler requests to visual-copilot service"""
+    copilot_url = os.getenv("VISUAL_COPILOT_SERVICE_URL", "http://visual-copilot-eu-local:4005")
+    try:
+        body = await request.json()
+        target_url = f"{copilot_url}/api/v1/crawl-website"
+        async with aiohttp.ClientSession() as session:
+            # We use a large timeout because deep crawling takes time
+            async with session.post(target_url, json=body, timeout=aiohttp.ClientTimeout(total=300)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"Crawler Proxy error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/v1/extract-pages")
+async def proxy_extract_pages(request: Request):
+    """Proxy extract pages to visual-copilot service"""
+    copilot_url = os.getenv("VISUAL_COPILOT_SERVICE_URL", "http://visual-copilot-eu-local:4005")
+    try:
+        body = await request.json()
+        target_url = f"{copilot_url}/api/v1/extract-pages"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(target_url, json=body, timeout=aiohttp.ClientTimeout(total=180)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"Extractor Proxy error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/v1/save-readme-to-hivemind")
+async def proxy_save_readme(request: Request):
+    """Proxy save readme to visual-copilot service"""
+    copilot_url = os.getenv("VISUAL_COPILOT_SERVICE_URL", "http://visual-copilot-eu-local:4005")
+    try:
+        body = await request.json()
+        target_url = f"{copilot_url}/api/v1/save-readme-to-hivemind"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(target_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"Save Readme Proxy error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 
 @app.get("/api/v1/hive-mind/{endpoint:path}")
 async def proxy_rag_hive_mind_api(endpoint: str, request: Request):

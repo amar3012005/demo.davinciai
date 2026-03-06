@@ -1,0 +1,55 @@
+# FastAPI and server
+fastapi>=0.115.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Pydantic for data validation
+pydantic>=2.5.0
+
+# Gemini API client
+google-genai>=1.33.0
+google-generativeai>=0.8.0
+
+# Google Custom Search API (for web search)
+google-api-python-client>=2.100.0
+
+# Vector search (CPU version - lighter than GPU)
+faiss-cpu>=1.7.4
+
+# Scientific computing
+numpy==1.24.3
+
+# Redis client
+redis[asyncio]>=5.0.0
+
+# HTTP client for health checks
+httpx>=0.24.0
+
+# Environment variables
+python-dotenv==1.0.1
+
+# ML/Embeddings (Moved to Microservice)
+
+# Document Processing (Added for File Upload Feature)
+pdfplumber>=0.11.0
+pymupdf>=1.26.3
+pymupdf4llm>=0.0.17
+python-docx>=1.1.0
+python-pptx>=0.6.23
+openpyxl>=3.1.2
+tiktoken>=0.7.0
+
+# Qdrant Client (for Vector DB)
+qdrant-client>=1.7.0
+
+# LLM Providers
+openai>=1.12.0
+anthropic>=0.18.0
+requests>=2.31.0
+ollama>=0.1.0
+groq>=0.4.2
+
+# Optimization (ONNX Runtime)
+# optimum[onnxruntime]>=1.16.0
+# safetensors>=0.4.0
+beautifulsoup4>=4.12.0

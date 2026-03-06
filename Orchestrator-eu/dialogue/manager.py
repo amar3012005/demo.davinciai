@@ -203,29 +203,11 @@ class MultiLangDialogueManager:
 
     def get_intro(self, language: str = "en") -> Optional[DialogueAsset]:
         """
-        Get intro greeting for language.
-        Prefers intro assets with audio files available.
+        Intro assets are intentionally disabled.
+        Intro text is resolved dynamically from flow/env in ws_handler.
         """
-        if language not in self._cache:
-            language = "en"
-        
-        intros = self._cache.get(language, {}).get(DialogueType.INTRO, [])
-        if not intros:
-            return None
-        
-        # Filter to only intros that have audio files available
-        intros_with_audio = [i for i in intros if i.audio_path and i.has_audio()]
-        
-        # If we have intros with audio, randomly select one
-        if intros_with_audio:
-            selected_intro = random.choice(intros_with_audio)
-            logger.debug(f"Selected intro with audio: {selected_intro.text[:30]}...")
-            return selected_intro
-        
-        # Fallback: use any intro (even without audio)
-        selected_intro = random.choice(intros)
-        logger.debug(f"Selected intro without audio: {selected_intro.text[:30]}...")
-        return selected_intro
+        logger.debug("Intro asset lookup disabled; using dynamic intro resolver")
+        return None
 
     def get_exit(self, language: str = "en") -> Optional[DialogueAsset]:
         """
@@ -401,6 +383,5 @@ class MultiLangDialogueManager:
     def get_supported_languages(self) -> List[str]:
         """Get list of supported languages"""
         return list(self.dialogue_config.keys())
-
 
 

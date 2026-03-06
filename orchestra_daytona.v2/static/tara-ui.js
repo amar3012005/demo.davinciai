@@ -654,6 +654,12 @@
 
             if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
                 let screenshotB64 = null;
+                let domContext = [];
+                try {
+                    domContext = window.TARA.Scanner.scanPageBlueprint(true) || [];
+                } catch (domErr) {
+                    console.warn('[TARA] text_input DOM capture failed:', domErr);
+                }
                 try {
                     screenshotB64 = await window.TARA.Scanner.captureScreenshot();
                 } catch (err) {
@@ -663,7 +669,10 @@
                     type: 'text_input',
                     text: text,
                     mode: widget.sessionMode,
-                    screenshot_b64: screenshotB64
+                    screenshot_b64: screenshotB64,
+                    dom_context: domContext,
+                    current_url: window.location.href,
+                    page_title: document.title
                 }));
             }
         },

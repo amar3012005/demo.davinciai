@@ -1,0 +1,287 @@
+# Coolify-compatible TARA EU Service
+# Domain: demo.davinciai.eu | Orchestrator WSS exposed on port 4014
+# Config synced from docker-compose.local-eu.yml + Coolify patterns from docker-compose.yml
+
+services:
+  # ═══════════════════════════════════════════════════════════
+  # Redis Cache
+  # ═══════════════════════════════════════════════════════════
+  redis-eu:
+    image: redis:7-alpine
+    volumes:
+      - redis_eu_data:/data
+    command: redis-server --appendonly yes --bind 0.0.0.0
+    networks:
+      eu-stack: null
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=redis-eu
+      - coolify.service.subType=database
+      - coolify.service.subName=redis
+    environment:
+      COOLIFY_CONTAINER_NAME: redis-eu
+    env_file:
+
+      - .env.eu
+
+  # ═══════════════════════════════════════════════════════════
+  # RAG Service (Internal port 4001)
+  # ═══════════════════════════════════════════════════════════
+  rag-eu:
+    build:
+      context: ./rag-eu
+      dockerfile: Dockerfile
+
+    command: >
+      sh -c 'export LLM_API_KEY="$${LLM_API_KEY:-$$GROQ_API_KEY}";
+      export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}";
+      python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001'
+    volumes:
+      - rag_eu_index:/app/index
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
+
+      REDIS_URL: redis://redis-eu:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_LOCATION: ${ORGANIZATION_LOCATION:-Global}
+      TENANT_ID: ${TENANT_ID:-bundb}
+
+      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
+      ENABLE_HIVE_MIND: "false"
+      ENABLE_LOCAL_RETRIEVAL: "false"
+      ENABLE_INGESTION_SERVICE: "false"
+      USE_ULTIMATE_TARA: "false"
+      HIVEMIND_IN_VISUAL_COPILOT: "false"
+
+      USE_NEW_DETECTIVE: "false"
+      USE_MISSION_BRAIN: "false"
+      USE_LIVE_GRAPH: "false"
+      USE_HIVE_INTERFACE: "false"
+
+      DAYTONA_RAG_ENABLE_CACHE: "false"
+      DAYTONA_RAG_CACHE_TTL: "0"
+
+      COOLIFY_CONTAINER_NAME: rag-eu
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    networks:
+      eu-stack: null
+    restart: unless-stopped
+    depends_on:
+      redis-eu:
+        condition: service_healthy
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=rag-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=rag
+    env_file:
+      - .env.eu
+
+
+  # ═══════════════════════════════════════════════════════════
+  # STT Service (Internal port 4002) — Groq Whisper
+  # ═══════════════════════════════════════════════════════════
+  stt-eu:
+    build:
+      context: ./stt_groq_whisper
+      dockerfile: Dockerfile
+
+    command: >
+      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}";
+      uvicorn app:app --host 0.0.0.0 --port 4002'
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3}
+      ENABLE_MICRO_CHUNKING: ${ENABLE_MICRO_CHUNKING:-false}
+      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-120}
+      OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-60}
+      CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-3}
+      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-850}
+      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-250}
+      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-900}
+      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-250}
+      GROQ_LANGUAGE: ${GROQ_LANGUAGE:-en}
+
+      STT_GROQ_HOST: 0.0.0.0
+      STT_GROQ_PORT: 4002
+
+      ORCHESTRATOR_WS_URL: "wss://orchestrator-eu:4004/ws"
+      STT_SKIP_SSL_VERIFY: "true"
+      ORCHESTRATOR_SKIP_SSL_VERIFY: "true"
+
+      COOLIFY_CONTAINER_NAME: stt-eu
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:4002/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      eu-stack: null
+    restart: unless-stopped
+    depends_on:
+      - orchestrator-eu
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=stt-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=stt
+    env_file:
+      - .env.eu
+
+  # ═══════════════════════════════════════════════════════════
+  # TTS Service (Internal port 4003) — Cartesia
+  # ═══════════════════════════════════════════════════════════
+  tts-eu:
+    build:
+      context: ./tts_cartesia
+      dockerfile: Dockerfile
+
+    command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
+    environment:
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-f786b574-daa5-4673-aa0c-cbe3e8534c02}
+      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
+      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+
+      TTS_CARTESIA_HOST: 0.0.0.0
+      TTS_CARTESIA_PORT: 4003
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      COOLIFY_CONTAINER_NAME: tts-eu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      eu-stack: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=tts-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=tts
+    env_file:
+      - .env.eu
+
+  # ═══════════════════════════════════════════════════════════
+  # Orchestrator (Internal 4004 → External 4014 with SSL for WSS)
+  # ═══════════════════════════════════════════════════════════
+  orchestrator-eu:
+    build:
+      context: ./Orchestrator-eu
+      dockerfile: Dockerfile
+
+    command: "uvicorn app:app --host 0.0.0.0 --port 4004 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem --ws-ping-interval 0"
+    ports:
+      - "${ORCHESTRATOR_EU_PORT:-4014}:4004"
+    volumes:
+      - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
+    environment:
+      REDIS_URL: redis://redis-eu:6379/0
+
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_FULL_NAME: ${ORGANIZATION_FULL_NAME:-Davinci AI}
+      KNOWLEDGE_BASE_PATH: "/app/daytona_knowledge_base"
+      AGENT_NAME: ${AGENT_NAME:-Tara}
+      AGENT_ID: ${AGENT_ID:-tara}
+      TENANT_ID: ${TENANT_ID:-tara}
+      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-"pdict_19NTe4RAAHgG8UbibcAcLG"}
+
+      RAG_SERVICE_URL: http://rag-eu:4001
+      STT_SERVICE_URL: http://stt-eu:4002
+      TTS_SERVICE_URL: http://tts-eu:4003
+
+      PUBLIC_URL: "${PUBLIC_URL:-https://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}}"
+      # Tenant-agnostic websocket base endpoint.
+      # Clients must pass tenant dynamically at runtime:
+      # wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws?tenant_id=<tenant_id>
+      ORCHESTRATOR_WS_URL: "${ORCHESTRATOR_WS_URL:-wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws}"
+      WIDGET_WS_URL: "${WIDGET_WS_URL:-wss://demo.davinciai.eu:${ORCHESTRATOR_EU_PORT:-4014}/ws}"
+
+      STREAM_OUT: ${STREAM_OUT:-auto}
+      SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
+      ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
+      BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
+      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-true}
+      FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-}
+      AGENT_HOST_SUFFIX: ${AGENT_HOST_SUFFIX:-}
+      GLOBAL_CLIENT_URL: ${GLOBAL_CLIENT_URL:-}
+      FORCE_GLOBAL_DOMAIN: ${FORCE_GLOBAL_DOMAIN:-false}
+      USE_ULTIMATE_TARA: "false"
+
+      # FSM Appointment Booking (Schema-Driven)
+      FSM_APPOINTMENT_SCHEMA_JSON: ${FSM_APPOINTMENT_SCHEMA_JSON:-}
+      FSM_ALLOW_RAG_DETOUR: ${FSM_ALLOW_RAG_DETOUR:-true}
+      FSM_MAX_DETOURS_PER_FIELD: ${FSM_MAX_DETOURS_PER_FIELD:-2}
+      FSM_MAX_RETRIES: ${FSM_MAX_RETRIES:-3}
+
+      COOLIFY_CONTAINER_NAME: orchestrator-eu
+    networks:
+      eu-stack: null
+    restart: unless-stopped
+    depends_on:
+      redis-eu:
+        condition: service_healthy
+      rag-eu:
+        condition: service_started
+      tts-eu:
+        condition: service_started
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=orchestrator-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=orchestrator
+      - traefik.enable=true
+      - traefik.http.middlewares.gzip.compress=true
+      - traefik.http.routers.orchestrator-eu-https.entryPoints=https
+      - traefik.http.routers.orchestrator-eu-https.rule=Host(`demo.davinciai.eu`)
+      - traefik.http.routers.orchestrator-eu-https.tls=true
+      - traefik.http.services.orchestrator-eu-https.loadbalancer.server.port=4004
+      - traefik.http.services.orchestrator-eu-https.loadbalancer.server.scheme=https
+    env_file:
+      - .env.eu
+
+volumes:
+  redis_eu_data:
+    name: redis_eu_data
+  rag_eu_index:
+    name: rag_eu_index
+
+networks:
+  coolify:
+    external: true
+  eu-stack:
+    name: eu-stack
+    external: true

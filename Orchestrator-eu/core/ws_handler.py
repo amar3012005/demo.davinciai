@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import time
+from copy import deepcopy
 from datetime import datetime
 import base64
 import uuid
@@ -35,7 +36,7 @@ from core.pipeline import ProcessingPipeline
 from core.history_manager import HistoryManager
 from dialogue.manager import MultiLangDialogueManager, DialogueType
 from utils.lang_detect import detect_language
-from fsm.appointment_fsm import SimpleAppointmentFSM
+from fsm.appointment_fsm import SimpleAppointmentFSM, DEFAULT_V1_SCHEMA
 from config_loader import OrchestratorConfig
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,10 @@ class OrchestratorWSHandler:
         
         logger.info(f"✅ OrchestratorWSHandler initialized (Stream Out: {self.config.languages.stream_out})")
 
+    def _is_bargin_enabled(self) -> bool:
+        """Feature gate for barge-in behavior."""
+        return bool(getattr(self.config.session, "bargin_feature", False))
+
     async def shutdown(self):
         """
         Gracefully shutdown the handler and all active sessions.
@@ -308,6 +313,54 @@ class OrchestratorWSHandler:
             # Empty value, fallback to auto behavior
             logger.warning("Empty stream_out value, using auto mode")
             return detected_language or self.config.languages.default
+
+    @staticmethod
+    def _intro_lang_suffix(language: str) -> str:
+        lang = (language or "").strip().lower()
+        if lang in ("de", "de-de", "german", "deu"):
+            return "DE"
+        return "EN"
+
+    def _resolve_intro_from_env(self, session: OrchestratorSession, output_language: str) -> str:
+        """
+        Resolve intro text from env (tenant-specific first, then compose fallback).
+        Env patterns:
+        - TENANT_ID_INTRO=<tenant_key>
+        - INTRO_<TENANT_KEY>_EN / INTRO_<TENANT_KEY>_DE
+        - <TENANT_KEY>_INTRO_EN / <TENANT_KEY>_INTRO_DE
+        - INTRO_<TENANT_KEY> / <TENANT_KEY>_INTRO
+        - DEFAULT_INTRO_EN / DEFAULT_INTRO_DE / DEFAULT_INTRO
+        """
+        suffix = self._intro_lang_suffix(output_language)
+
+        tenant_candidates: List[str] = []
+        if session.tenant_id:
+            tenant_candidates.append(str(session.tenant_id).strip().lower())
+        intro_tenant = (os.getenv("TENANT_ID_INTRO", "") or "").strip().lower()
+        if intro_tenant and intro_tenant not in tenant_candidates:
+            tenant_candidates.append(intro_tenant)
+
+        for tenant_key in tenant_candidates:
+            norm = tenant_key.upper().replace("-", "_")
+            tenant_keys = [
+                f"INTRO_{norm}_{suffix}",
+                f"{norm}_INTRO_{suffix}",
+                f"INTRO_{norm}",
+                f"{norm}_INTRO",
+            ]
+            for key in tenant_keys:
+                val = (os.getenv(key, "") or "").strip()
+                if val:
+                    return val
+
+        for key in (f"DEFAULT_INTRO_{suffix}", "DEFAULT_INTRO"):
+            val = (os.getenv(key, "") or "").strip()
+            if val:
+                return val
+
+        if suffix == "DE":
+            return "Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?"
+        return "Hello! I am TARA, your AI assistant. How can I help you today?"
 
     def _clear_playback_tracking(self, session: OrchestratorSession) -> None:
         """Reset playback timing metadata for the current turn."""
@@ -423,6 +476,43 @@ class OrchestratorWSHandler:
 
         return config
 
+    def _resolve_tenant_voice_id(self, tenant_id: Optional[str], fallback_voice_id: Optional[str] = None) -> Optional[str]:
+        """
+        Resolve voice id by tenant using env pattern:
+        - <tenant>_voice_id
+        - <TENANT>_VOICE_ID
+        Fallback to provided voice id, then CARTESIA_VOICE_ID.
+        """
+        tenant = (tenant_id or "").strip().lower()
+        if tenant:
+            safe_tenant = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
+            by_lower = os.getenv(f"{safe_tenant}_voice_id")
+            by_upper = os.getenv(f"{safe_tenant.upper()}_VOICE_ID")
+            if by_lower:
+                return by_lower
+            if by_upper:
+                return by_upper
+
+        return fallback_voice_id or os.getenv("DEFAULT_VOICE_ID") or os.getenv("CARTESIA_VOICE_ID")
+
+    async def _persist_session_runtime_config(self, session: OrchestratorSession):
+        """Persist dynamic runtime session routing config in Redis for stability/debugging."""
+        if not self.redis_client:
+            return
+        try:
+            redis_key = f"orchestra_daytona:session_config:{session.session_id}"
+            await self.redis_client.hset(redis_key, mapping={
+                "tenant_id": str(session.tenant_id or ""),
+                "agent_name": str(session.agent_name or ""),
+                "agent_id": str(session.agent_id or ""),
+                "voice_id": str(session.voice_id_override or ""),
+                "rag_url": str(session.rag_url or ""),
+                "updated_at": str(time.time())
+            })
+            await self.redis_client.expire(redis_key, int(getattr(self.config.session, "ttl_seconds", 3600)))
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] ⚠️ Failed to persist session runtime config: {e}")
+
     async def handle_connection(self,
                                websocket: WebSocket,
                                session_id: Optional[str] = None):
@@ -485,16 +575,23 @@ class OrchestratorWSHandler:
         host_config = self._resolve_host_config(host_header)
         
         # Priority: Query Param > Host Config > Default Config
+        if query_params.get("tenant_id"):
+            session.tenant_id = str(query_params.get("tenant_id"))
         session.agent_name = query_params.get("agent_name") or host_config["agent_name"]
         session.rag_url = query_params.get("rag_url") or host_config["rag_url"]
-        session.voice_id_override = query_params.get("voice_id") or host_config["voice_id"]
+        base_voice = query_params.get("voice_id") or host_config["voice_id"]
+        session.voice_id_override = self._resolve_tenant_voice_id(session.tenant_id, base_voice)
         
         if query_params.get("rag_url"):
             logger.info(f"[{session_id}] 🚀 DYNAMIC RAG OVERRIDE: {session.rag_url}")
         if query_params.get("voice_id"):
             logger.info(f"[{session_id}] 🎤 DYNAMIC VOICE OVERRIDE: {session.voice_id_override}")
 
-        logger.info(f"[{session_id}] 🌐 Final Session Config: RAG={session.rag_url}, Voice={session.voice_id_override}")
+        logger.info(
+            f"[{session_id}] 🌐 Final Session Config: tenant={session.tenant_id} "
+            f"RAG={session.rag_url}, Voice={session.voice_id_override}"
+        )
+        await self._persist_session_runtime_config(session)
 
         session.stt_client = STTClient(self.config.services.stt, skip_ssl=self.config.server.skip_ssl_verify)
         session.tts_client = TTSClient(self.config.services.tts, skip_ssl=self.config.server.skip_ssl_verify)
@@ -725,6 +822,7 @@ class OrchestratorWSHandler:
             agent_id=self.config.agent.id,
             tenant_id=self.config.agent.tenant_id
         )
+        session.metadata["session_type"] = "webcall"
         
         self.sessions[session_id] = session
         return session
@@ -786,9 +884,9 @@ class OrchestratorWSHandler:
             return
         
         state_mgr = session.state_manager
-        
-        # CRITICAL: Do NOT ignore audio during SPEAKING/THINKING to support barge-in
-        # Forward everything to STT so it can detect user speech
+        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
+            logger.debug(f"[{session.session_id}] ⏸️ Ignoring audio chunk during SPEAKING (BARGIN_FEATURE=false)")
+            return
         
         session.last_activity = time.time()
         session.audio_chunks_received += 1
@@ -821,15 +919,9 @@ class OrchestratorWSHandler:
     async def _handle_binary_audio(self, session: OrchestratorSession, audio_bytes: bytes):
         """Handle raw binary audio data - ALWAYS forward to STT regardless of state"""
         state_mgr = session.state_manager
-        
-        # CRITICAL: Always forward audio to STT, even in THINKING state
-        # This ensures the STT service can continue to receive complete utterances
-        # and handle barge-in/interrupt scenarios properly
-        # Only skip in SPEAKING state when we're actively playing TTS output
-        if state_mgr.state == State.SPEAKING:
-            # In SPEAKING state, we might want to detect interrupts
-            # For now, still forward audio to enable barge-in detection
-            pass
+        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
+            logger.debug(f"[{session.session_id}] ⏸️ Ignoring binary audio during SPEAKING (BARGIN_FEATURE=false)")
+            return
         
         session.last_activity = time.time()
         session.audio_chunks_received += 1
@@ -1043,6 +1135,10 @@ class OrchestratorWSHandler:
         # Check if session is closed
         if session.is_closed:
             return
+        state_mgr = session.state_manager
+        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
+            logger.debug(f"[{session.session_id}] ⏸️ Ignoring STT result during SPEAKING (BARGIN_FEATURE=false)")
+            return
 
         text = data.get("text", "")
         is_final = data.get("is_final", False)
@@ -1100,7 +1196,6 @@ class OrchestratorWSHandler:
             }
         
         # VALIDATED BARGE-IN: Check STT transcript to confirm real speech before interrupting
-        state_mgr = session.state_manager
         if state_mgr.state == State.SPEAKING or session.barge_in_pending:
             stripped = text.strip().rstrip(".!?,")
             no_speech_prob = data.get("no_speech_prob")
@@ -1115,12 +1210,13 @@ class OrchestratorWSHandler:
             }
             is_filler = stripped.lower() in NOISE_PHRASES
 
-            # Valid barge-in: meaningful text (>8 chars AND final) with low noise probability, not a filler
+            # Valid barge-in: meaningful FINAL text (low-noise) that is not filler.
+            # Keep this permissive enough for short but valid utterances like "stop", "wait", "no".
             is_valid = (
                 not is_filler
-                and len(stripped) > 8
+                and len(stripped) >= 3
                 and is_final
-                and (no_speech_prob is None or no_speech_prob < 0.4)
+                and (no_speech_prob is None or no_speech_prob < 0.7)
             )
 
             if is_valid:
@@ -1270,6 +1366,10 @@ class OrchestratorWSHandler:
         
         if signal_type == "SPEECH_END":
             state_mgr = session.state_manager
+            if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
+                session.barge_in_pending = False
+                logger.debug(f"[{session.session_id}] ⏸️ Ignoring SPEECH_END during SPEAKING (BARGIN_FEATURE=false)")
+                return
 
             # DEFERRED BARGE-IN: If SPEAKING, don't hard-interrupt — stay in SPEAKING,
             # pause browser playback, and wait for STT to validate real speech vs noise.
@@ -1288,7 +1388,7 @@ class OrchestratorWSHandler:
                         # If playback already completed or state moved on, do nothing.
                         if session.barge_in_pending and not session.is_closed and state_mgr.state == State.SPEAKING:
                             session.barge_in_pending = False
-                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after barge-in, resuming last response")
+                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after barge-in, returning to LISTENING")
                             await self._recover_from_noise_interrupt(session)
                         else:
                             session.barge_in_pending = False
@@ -1347,6 +1447,10 @@ class OrchestratorWSHandler:
 
             # BARGE-IN DETECTION: Defer interrupt on speech start (wait for STT validation)
             state_mgr = session.state_manager
+            if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
+                session.barge_in_pending = False
+                logger.debug(f"[{session.session_id}] ⏸️ Ignoring SPEECH_START during SPEAKING (BARGIN_FEATURE=false)")
+                return
             if state_mgr.state == State.SPEAKING:
                 logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_START) - deferring, waiting for STT validation")
                 session.barge_in_pending = True
@@ -1644,37 +1748,120 @@ class OrchestratorWSHandler:
         
         # Check if FSM is active OR if user wants to start appointment flow
         if session.fsm_active and session.appointment_fsm:
-            # ---- ACTIVE FSM: Route input to FSM ----
-            logger.info(f"[{session.session_id}] 📅 FSM ACTIVE: Routing to appointment FSM")
-            fsm_result = session.appointment_fsm.process_input(text)
+            # ---- ACTIVE FSM: Route input via RAG FSM router ----
+            logger.info(f"[{session.session_id}] 📅 FSM ACTIVE: Routing via RAG FSM router")
             
-            # Check if FSM is complete or cancelled
-            if fsm_result.get("complete") or fsm_result.get("cancelled"):
+            # Build FSM context for router
+            fsm_context = {
+                "active": True,
+                "pending_field": self._get_fsm_pending_field(session.appointment_fsm),
+                "collected_data": session.appointment_fsm.data.to_dict() if session.appointment_fsm.data else {},
+                "retry_counts": session.appointment_fsm.retry_counts,
+                "schema": self._get_fsm_schema()
+            }
+            
+            # Call RAG FSM router
+            rag_client = RAGClient(self.config.services.rag, skip_ssl=self.config.server.skip_ssl_verify)
+            route_result = await rag_client.route_fsm_turn(
+                user_text=text,
+                session_id=session.session_id,
+                tenant_id=session.tenant_id or "tara",
+                language=output_language,
+                fsm_context=fsm_context
+            )
+            
+            action = route_result.get("action", "invalid_retry")
+            cancelled = route_result.get("cancelled", False)
+            normalized_value = route_result.get("normalized_value")
+            resume_prompt = route_result.get("resume_prompt")
+            confidence = route_result.get("confidence", 0.0)
+            
+            logger.info(f"[{session.session_id}] 🔀 FSM ROUTE RESULT: action={action}, confidence={confidence:.2f}, cancelled={cancelled}")
+            
+            # Branch on action
+            if action == "cancel" or cancelled:
+                # Cancel FSM immediately
                 session.fsm_active = False
                 session.appointment_fsm = None
-                status = 'COMPLETE' if fsm_result.get('complete') else 'CANCELLED'
-                logger.info(f"[{session.session_id}] 📅 FSM {status}: Returning to RAG mode")
+                logger.info(f"[{session.session_id}] 📅 FSM CANCELLED via router")
                 
-                # If complete, send appointment data to client for EmailJS confirmation
-                if fsm_result.get("complete") and fsm_result.get("data"):
-                    appointment_data = fsm_result.get("data")
-                    logger.info(f"[{session.session_id}] 📧 Sending appointment_complete for email confirmation")
-                    await self._send_json(session.websocket, {
-                        "type": "appointment_complete",
-                        "appointment_data": appointment_data,
-                        "timestamp": time.time()
-                    }, session)
+                cancel_response = "No problem! If you'd like to book an appointment later, just let me know. Feel free to ask me anything else!"
+                await self._stream_fsm_response(session, cancel_response, output_language)
+                return
             
-            # Send FSM response to TTS
-            fsm_response = fsm_result.get("response", "")
-            if fsm_response:
-                await self._stream_fsm_response(session, fsm_response, output_language)
-            return
+            elif action in ("collect_field", "confirm_field"):
+                # Feed normalized value into FSM
+                field = route_result.get("field")
+                logger.info(f"[{session.session_id}] 📝 FSM FIELD ANSWER: field={field}, value='{normalized_value[:30] if normalized_value else None}...'")
+                if field:
+                    self._reset_fsm_detour_count(session, field)
+                
+                # Process the normalized value through FSM
+                fsm_result = session.appointment_fsm.process_input(normalized_value or text)
+                
+                # Check if FSM is complete or cancelled
+                if fsm_result.get("complete") or fsm_result.get("cancelled"):
+                    session.fsm_active = False
+                    session.appointment_fsm = None
+                    status = 'COMPLETE' if fsm_result.get('complete') else 'CANCELLED'
+                    logger.info(f"[{session.session_id}] 📅 FSM {status}: Returning to RAG mode")
+                    
+                    if fsm_result.get("complete") and fsm_result.get("data"):
+                        appointment_data = fsm_result.get("data")
+                        logger.info(f"[{session.session_id}] 📧 Sending appointment_complete for email confirmation")
+                        await self._send_json(session.websocket, {
+                            "type": "appointment_complete",
+                            "appointment_data": appointment_data,
+                            "timestamp": time.time()
+                        }, session)
+                
+                fsm_response = fsm_result.get("response", "")
+                if fsm_response:
+                    await self._stream_fsm_response(session, fsm_response, output_language)
+                return
+            
+            elif action == "detour_rag":
+                # Detour to RAG for general question, then resume FSM
+                pending_field = fsm_context.get("pending_field") or "unknown"
+                if not self.config.fsm.allow_rag_detour:
+                    logger.info(f"[{session.session_id}] 🚫 FSM DETOUR BLOCKED: allow_rag_detour=false")
+                    fsm_result = session.appointment_fsm.process_input(text)
+                    fsm_response = fsm_result.get("response", "")
+                    if fsm_response:
+                        await self._stream_fsm_response(session, fsm_response, output_language)
+                    return
+                if not self._can_take_fsm_detour(session, pending_field):
+                    logger.info(
+                        f"[{session.session_id}] 🚫 FSM DETOUR LIMIT reached for field={pending_field} "
+                        f"(max={self.config.fsm.max_detours_per_field})"
+                    )
+                    fsm_result = session.appointment_fsm.process_input(text)
+                    fsm_response = fsm_result.get("response", "")
+                    if fsm_response:
+                        await self._stream_fsm_response(session, fsm_response, output_language)
+                    return
+                self._increment_fsm_detour_count(session, pending_field)
+                logger.info(f"[{session.session_id}] 🔄 FSM DETOUR: Answering via RAG, then resuming")
+                
+                # Process via normal RAG pipeline
+                await self._process_rag_detour_and_resume(session, text, output_language, resume_prompt)
+                return
+            
+            elif action == "invalid_retry":
+                # Invalid input - use FSM retry logic
+                logger.warning(f"[{session.session_id}] ⚠️ FSM INVALID RETRY: {route_result.get('reason', '')}")
+                
+                fsm_result = session.appointment_fsm.process_input(text)
+                fsm_response = fsm_result.get("response", "")
+                if fsm_response:
+                    await self._stream_fsm_response(session, fsm_response, output_language)
+                return
         
         elif any(trigger in text.lower() for trigger in APPOINTMENT_TRIGGERS):
             # ---- START FSM: User wants to book appointment ----
             logger.info(f"[{session.session_id}] 📅 APPOINTMENT TRIGGER DETECTED: Starting FSM")
-            session.appointment_fsm = SimpleAppointmentFSM()
+            session.metadata["fsm_detour_counts"] = {}
+            session.appointment_fsm = SimpleAppointmentFSM(schema=self._get_fsm_schema())
             session.fsm_active = True
             
             # Get initial FSM response (greeting)
@@ -1980,11 +2167,12 @@ class OrchestratorWSHandler:
                 query=user_text,
                 session_id=session.session_id,
                 user_id=session.user_id,  # Pass user_id for Hive Mind
+                agent_name=session.agent_name,
                 language=output_language,  # Use output language for RAG response
                 history_context=history_context,
                 form_data=form_data,
                 rag_url=session.rag_url,
-                tenant_id=session.agent_name
+                tenant_id=session.tenant_id
             ):
                 # Check if session is closed (client disconnected)
                 if session.is_closed:
@@ -2308,10 +2496,12 @@ class OrchestratorWSHandler:
 
     async def _handle_session_config(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle session configuration changes (e.g., switching to visual-copilot)"""
-        mode = msg.get("mode")
+        config_payload = msg.get("config") if isinstance(msg.get("config"), dict) else {}
+        effective_msg = {**config_payload, **msg}
+        mode = effective_msg.get("mode")
 
         # Read interaction_mode (interactive/turbo) from client
-        interaction_mode = msg.get("interaction_mode", "interactive")
+        interaction_mode = effective_msg.get("interaction_mode", "interactive")
         if interaction_mode in ("interactive", "turbo"):
             session.interaction_mode = interaction_mode
             # In turbo mode, skip TTS audio generation entirely
@@ -2320,20 +2510,57 @@ class OrchestratorWSHandler:
                 session.speaker_muted = True
             logger.info(f"[{session.session_id}] 🎛️ Interaction mode: {interaction_mode}")
 
+        # Dynamic per-session identity/service routing metadata
+        if effective_msg.get("tenant_id"):
+            session.tenant_id = str(effective_msg.get("tenant_id"))
+        if effective_msg.get("user_id"):
+            session.user_id = str(effective_msg.get("user_id"))
+        if effective_msg.get("agent_name"):
+            session.agent_name = str(effective_msg.get("agent_name"))
+        if effective_msg.get("agent_id"):
+            session.agent_id = str(effective_msg.get("agent_id"))
+        if effective_msg.get("language"):
+            session.current_language = str(effective_msg.get("language"))
+        if effective_msg.get("stt_mode"):
+            session.stt_mode = str(effective_msg.get("stt_mode"))
+        if effective_msg.get("tts_mode"):
+            session.tts_mode = str(effective_msg.get("tts_mode"))
+        if effective_msg.get("session_type"):
+            session.metadata["session_type"] = str(effective_msg.get("session_type"))
+
+        # Dynamic tenant voice routing: once tenant is known, enforce tenant-specific voice.
+        # Explicit voice in payload still wins for that session.
+        requested_voice = effective_msg.get("voice_id")
+        session.voice_id_override = self._resolve_tenant_voice_id(
+            session.tenant_id,
+            str(requested_voice) if requested_voice else session.voice_id_override
+        )
+        await self._persist_session_runtime_config(session)
+
         if mode in ["voice", "visual-copilot"]:
             prev_mode = session.mode
             session.mode = mode
-            logger.info(f"[{session.session_id}] 🛠️ Session mode changed from {prev_mode} to: {mode}")
+            logger.info(
+                f"[{session.session_id}] 🛠️ Session mode changed from {prev_mode} to: {mode} | "
+                f"tenant={session.tenant_id} agent={session.agent_name} stt={session.stt_mode} tts={session.tts_mode}"
+            )
             
             await self._send_json(session.websocket, {
                 "type": "session_config_ack",
                 "mode": mode,
+                "tenant_id": session.tenant_id,
+                "agent_name": session.agent_name,
+                "agent_id": session.agent_id,
+                "session_type": session.metadata.get("session_type", "webcall"),
+                "voice_id": session.voice_id_override,
+                "stt_mode": session.stt_mode,
+                "tts_mode": session.tts_mode,
                 "timestamp": time.time()
             }, session)
 
             # Proactively trigger Intro if switching to visual-copilot for the first time
-            is_resume = msg.get("session_id") is not None
-            pending_goal = msg.get("pending_goal")
+            is_resume = effective_msg.get("session_id") is not None
+            pending_goal = effective_msg.get("pending_goal")
             
             if mode == "visual-copilot" and is_resume and pending_goal:
                 # ── STICKY AGENT RESUME ────────────────────────────────────────
@@ -2342,8 +2569,8 @@ class OrchestratorWSHandler:
                 logger.info(f"[{session.session_id}] 🔁 STICKY AGENT: Resuming mission across navigation: '{pending_goal[:60]}'")
                 
                 # Update URL
-                if msg.get("current_url"):
-                    session.current_url = msg.get("current_url")
+                if effective_msg.get("current_url"):
+                    session.current_url = effective_msg.get("current_url")
                 
                 # Brief resume narration
                 async def sticky_resume():
@@ -2369,7 +2596,7 @@ class OrchestratorWSHandler:
                 logger.info(f"[{session.session_id}] 👋 Triggering Visual Co-Pilot Intro | Resume: {is_resume}")
                 
                 # Check if elements were sent together with the config
-                elements = msg.get("elements") or msg.get("visible_elements") or msg.get("payload")
+                elements = effective_msg.get("elements") or effective_msg.get("visible_elements") or effective_msg.get("payload")
                 if isinstance(elements, list):
                     session.dom_context = elements
                     logger.info(f"[{session.session_id}] 👁️ DOM elements found in session_config: {len(elements)} items")
@@ -3522,6 +3749,30 @@ class OrchestratorWSHandler:
             session.audio_playback_server_timer.cancel()
             logger.debug(f"[{session.session_id}] ⏸️ Cancelled playback timer due to interrupt")
         self._clear_playback_tracking(session)
+
+        # Drop any queued TTS audio so stale chunks don't leak into the next turn.
+        while not session.tts_audio_queue.empty():
+            try:
+                session.tts_audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        # Best-effort: abort TTS stream generation without flushing buffered text.
+        # Using stream_end() here can flush stale chunk buffer from old turn.
+        try:
+            if session.tts_client and session.tts_client.ws and not session.tts_client.ws.closed:
+                await session.tts_client.abort_stream()
+                logger.info(f"[{session.session_id}] 🛑 Aborted active TTS stream due to interrupt")
+        except Exception:
+            # Non-fatal; local cancellation + queue flush already handles interruption.
+            pass
+
+        # Drain queue again after abort to drop any in-flight tail chunks enqueued during close.
+        while not session.tts_audio_queue.empty():
+            try:
+                session.tts_audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         
         # Notify browser
         await self._send_json(session.websocket, {
@@ -3561,7 +3812,7 @@ class OrchestratorWSHandler:
         await self._broadcast_state(session, State.LISTENING)
 
     async def _recover_from_noise_interrupt(self, session: OrchestratorSession):
-        """Recover from noise barge-in by silently re-triggering the last query."""
+        """Recover from false/noise barge-in by returning to LISTENING only."""
         sid = session.session_id
         state_mgr = session.state_manager
 
@@ -3585,11 +3836,7 @@ class OrchestratorWSHandler:
             await state_mgr.transition(State.LISTENING, trigger="noise_recovery")
         await self._broadcast_state(session, State.LISTENING)
 
-        if session.last_query_text:
-            logger.info(f"[{sid}] 🔄 Silent noise recovery; re-triggering last query: '{session.last_query_text[:50]}...'")
-            await self._process_user_input(session, session.last_query_text, session.last_query_language)
-        else:
-            logger.info(f"[{sid}] 🔄 Noise recovery but no previous query to resume - staying in LISTENING")
+        logger.info(f"[{sid}] 🔄 Noise recovery complete - staying in LISTENING (no replay)")
 
     async def _handle_start_session(self, session: OrchestratorSession, msg: Dict[str, Any] = None):
         """Handle session start with mode configuration and metadata"""
@@ -3622,6 +3869,14 @@ class OrchestratorWSHandler:
         output_language = self._get_output_language(detected_language, session)
 
         logger.info(f"[{session.session_id}] 🎬 Starting session - Agent: {session.agent_name} ({session.agent_id}), Tenant: {session.tenant_id}, STT: {stt_mode}, TTS: {tts_mode}")
+        logger.info("============================================================")
+        logger.info("============================================================")
+        logger.info(
+            f"[{session.session_id}] SESSION START | TENANT_ID={session.tenant_id} | "
+            f"AGENT={session.agent_name}({session.agent_id}) | STT={stt_mode} | TTS={tts_mode}"
+        )
+        logger.info("============================================================")
+        logger.info("============================================================")
 
         # Connect to STT/TTS service if needed (handled by _stt_receive_loop and _stream_tts_to_browser)
         # We no longer connect here to avoid double connection race with background tasks
@@ -3639,15 +3894,18 @@ class OrchestratorWSHandler:
             except asyncio.TimeoutError:
                 logger.warning(f"[{session.session_id}] ⚠️ Proceeding with intro despite connection instability")
 
-        # 5. Play Introduction (Prioritize flow_config)
+        # 5. Play Introduction (flow_config first, then env-driven intro mapping)
         intro_text = None
         if output_language == session.current_language:
             intro_text = flow_config.get("intro_in_primary_lang")
         elif output_language == session.secondary_language:
             intro_text = flow_config.get("intro_in_secondary_lang")
 
+        if not intro_text:
+            intro_text = self._resolve_intro_from_env(session, output_language)
+
         if intro_text:
-            logger.info(f"[{session.session_id}] 🔊 Playing custom intro from flow_config ({output_language})")
+            logger.info(f"[{session.session_id}] 🔊 Playing intro ({output_language})")
             # Transition to SPEAKING
             speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start", data={"response": intro_text})
             await self._execute_side_effects(session, speaking_side_effects, output_language)
@@ -3655,34 +3913,6 @@ class OrchestratorWSHandler:
             session.tts_task = asyncio.create_task(
                 self._stream_tts_to_browser(session, intro_text, output_language)
             )
-        else:
-            # Fallback to dialogue manager assets
-            intro_asset = self.dialogue_manager.get_intro(output_language)
-            if not intro_asset:
-                logger.warning(f"[{session.session_id}] ⚠️ No intro asset found for language '{output_language}', using fallback")
-                fallback_text = f"Hello! Welcome to {session.agent_name}."
-                # Transition to SPEAKING
-                speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start")
-                await self._execute_side_effects(session, speaking_side_effects, output_language)
-                await self._broadcast_state(session, State.SPEAKING)
-                session.tts_task = asyncio.create_task(
-                    self._stream_tts_to_browser(session, fallback_text, output_language)
-                )
-            else:
-                # Transition to SPEAKING (with side effects: cancel_filler)
-                speaking_side_effects = await session.state_manager.transition(State.SPEAKING, trigger="intro_start", data={"response": intro_asset.text})
-                await self._execute_side_effects(session, speaking_side_effects, output_language)
-                await self._broadcast_state(session, State.SPEAKING)
-                
-                # Prefer audio file if available
-                if intro_asset.has_audio():
-                    logger.info(f"[{session.session_id}] 💿 Using pre-generated intro: {intro_asset.audio_path}")
-                    session.tts_task = asyncio.create_task(self._stream_audio_file(session, intro_asset.audio_path))
-                else:
-                    logger.info(f"[{session.session_id}] 🔊 Generating intro via TTS: {intro_asset.text[:50]}...")
-                    session.tts_task = asyncio.create_task(
-                        self._stream_tts_to_browser(session, intro_asset.text, output_language)
-                    )
 
     async def _handle_text_input(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """
@@ -4184,6 +4414,7 @@ class OrchestratorWSHandler:
             call_sid=call_sid,
             audio_format="g711"
         )
+        session.metadata["session_type"] = "telephony"
 
         try:
             # Use existing connection logic but with phone session
@@ -4220,6 +4451,10 @@ class OrchestratorWSHandler:
             "agent_name": session.agent_name,
             "agent_id": session.agent_id,
             "tenant_id": session.tenant_id,
+            "session_type": (
+                session.metadata.get("session_type")
+                or ("telephony" if isinstance(session, PhoneOrchestratorSession) else "webcall")
+            ),
             "start_time": datetime.fromtimestamp(session.created_at).isoformat(),
             "end_time": datetime.fromtimestamp(now_ts).isoformat(),
             "timestamp": datetime.fromtimestamp(now_ts).isoformat(),
@@ -4248,6 +4483,15 @@ class OrchestratorWSHandler:
             report["avg_ttfc_ms"] = sum(ttfc_values) / len(ttfc_values)
             
         logger.info(f"[{session.session_id}] 📑 SESSION REPORT: {json.dumps(report)}")
+        logger.info("============================================================")
+        logger.info("============================================================")
+        logger.info(
+            f"[{session.session_id}] SESSION END | TENANT_ID={report.get('tenant_id')} | "
+            f"AGENT={report.get('agent_name')}({report.get('agent_id')}) | "
+            f"TYPE={report.get('session_type')} | TURNS={report.get('total_turns')} | DURATION={report.get('duration_seconds'):.2f}s"
+        )
+        logger.info("============================================================")
+        logger.info("============================================================")
         
         # 2. 🧠 DEVINCIAI SENTIMENT & REASONING PIPELINE
         if session.history_manager:
@@ -4270,7 +4514,29 @@ class OrchestratorWSHandler:
                                 "metadata": {
                                     "agent_name": session.agent_name,
                                     "agent_id": session.agent_id,
-                                    "source": "orchestrator_cleanup"
+                                    "session_type": report.get("session_type"),
+                                    "source": "orchestrator_cleanup",
+                                    "report": {
+                                        "session_id": report.get("session_id"),
+                                        "tenant_id": report.get("tenant_id"),
+                                        "session_type": report.get("session_type"),
+                                        "agent_name": report.get("agent_name"),
+                                        "agent_id": report.get("agent_id"),
+                                        "user_id": report.get("user_id"),
+                                        "start_time": report.get("start_time"),
+                                        "end_time": report.get("end_time"),
+                                        "duration_seconds": report.get("duration_seconds"),
+                                        "total_turns": report.get("total_turns"),
+                                        "avg_ttft_ms": report.get("avg_ttft_ms"),
+                                        "avg_ttfc_ms": report.get("avg_ttfc_ms"),
+                                        "llm_model": report.get("llm_model"),
+                                        "total_prompt_tokens": report.get("total_prompt_tokens"),
+                                        "total_completion_tokens": report.get("total_completion_tokens"),
+                                        "total_llm_tokens": report.get("total_llm_tokens"),
+                                        "tts_streamed_chars": report.get("tts_streamed_chars"),
+                                        "tts_total_time_ms": report.get("tts_total_time_ms"),
+                                        "status": report.get("status"),
+                                    }
                                 }
                             }
                             
@@ -4465,7 +4731,28 @@ class OrchestratorWSHandler:
             return
 
         # Handle response
-        action_payload = plan.get("action", {})
+        # Planner may return either:
+        #   - action: { ... }                (legacy single action)
+        #   - action: [ { ... }, { ... } ]   (bundled multi-action pipeline)
+        raw_action_payload = plan.get("action", {})
+        if isinstance(raw_action_payload, list):
+            action_sequence = [a for a in raw_action_payload if isinstance(a, dict)]
+        elif isinstance(raw_action_payload, dict):
+            action_sequence = [raw_action_payload]
+        else:
+            action_sequence = []
+
+        # Representative action for routing/guards/logging:
+        # prefer first non-wait step so click+wait bundles are treated as click.
+        action_payload = {}
+        for _a in action_sequence:
+            _t = (_a.get("type") or "").strip().lower()
+            if _t and _t != "wait":
+                action_payload = _a
+                break
+        if not action_payload and action_sequence:
+            action_payload = action_sequence[0]
+
         action_type = action_payload.get("type", "none")
         
         # GUARD RAIL: Anti-Loop Protection
@@ -4649,10 +4936,15 @@ class OrchestratorWSHandler:
                 }, session)
 
             else:
-                await self._send_json(session.websocket, {
+                # Send bundled actions through `action` for modular frontend path,
+                # while preserving legacy compatibility via representative `payload`.
+                command_msg = {
                     "type": "command",
                     "payload": action_payload
-                }, session)
+                }
+                if isinstance(raw_action_payload, list):
+                    command_msg["action"] = raw_action_payload
+                await self._send_json(session.websocket, command_msg, session)
             
             # CONDITIONAL SYNC: Wait for voice to finish ONLY if speaker is NOT muted
             # When muted, go to TURBO MODE (execute immediately)
@@ -4802,6 +5094,139 @@ class OrchestratorWSHandler:
                 plan["_fast_speech"] = fast_response["speech"]
 
             return plan
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # FSM Helper Methods (Schema-Driven Appointment Booking)
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def _get_fsm_pending_field(self, fsm) -> Optional[str]:
+        """
+        Extract pending field from FSM state.
+        Maps FSM state to field name for router context.
+        """
+        if not fsm or not hasattr(fsm, 'state'):
+            return None
+        
+        state_name = fsm.state.name if hasattr(fsm.state, 'name') else str(fsm.state)
+        
+        # Map states to fields
+        if 'NAME' in state_name:
+            return 'name'
+        elif 'EMAIL' in state_name:
+            return 'email'
+        elif 'QUERY' in state_name:
+            return 'topic'
+        
+        return None
+
+    def _get_fsm_schema(self) -> Dict[str, Any]:
+        """
+        Build FSM schema from orchestrator config.
+        Returns schema dict for router validation.
+        """
+        schema = deepcopy(DEFAULT_V1_SCHEMA)
+        raw_schema = getattr(self.config.fsm, "appointment_schema_json", "") or ""
+        if raw_schema:
+            try:
+                parsed = json.loads(raw_schema)
+                if isinstance(parsed, dict):
+                    parsed_fields = parsed.get("fields", {})
+                    if isinstance(parsed_fields, dict):
+                        for field_name, field_cfg in parsed_fields.items():
+                            if field_name not in schema["fields"] or not isinstance(field_cfg, dict):
+                                schema["fields"][field_name] = field_cfg
+                            else:
+                                schema["fields"][field_name].update(field_cfg)
+                    for key in ("cancel_keywords", "max_retries", "fallback_messages", "resume_prompt_template"):
+                        if key in parsed and parsed[key]:
+                            schema[key] = parsed[key]
+            except json.JSONDecodeError as exc:
+                logger.warning(f"Failed to parse FSM_APPOINTMENT_SCHEMA_JSON from config: {exc}")
+
+        # Apply explicit FSM config overrides
+        if getattr(self.config.fsm, "cancel_keywords", None):
+            schema["cancel_keywords"] = self.config.fsm.cancel_keywords
+        schema["max_retries"] = int(getattr(self.config.fsm, "max_retries", schema.get("max_retries", 3)))
+        return schema
+
+    def _get_fsm_detour_counts(self, session: OrchestratorSession) -> Dict[str, int]:
+        counts = session.metadata.get("fsm_detour_counts")
+        if not isinstance(counts, dict):
+            counts = {}
+            session.metadata["fsm_detour_counts"] = counts
+        return counts
+
+    def _can_take_fsm_detour(self, session: OrchestratorSession, field_name: str) -> bool:
+        limit = max(int(getattr(self.config.fsm, "max_detours_per_field", 0)), 0)
+        if limit == 0:
+            return True
+        counts = self._get_fsm_detour_counts(session)
+        return int(counts.get(field_name, 0)) < limit
+
+    def _increment_fsm_detour_count(self, session: OrchestratorSession, field_name: str) -> None:
+        counts = self._get_fsm_detour_counts(session)
+        counts[field_name] = int(counts.get(field_name, 0)) + 1
+
+    def _reset_fsm_detour_count(self, session: OrchestratorSession, field_name: str) -> None:
+        counts = self._get_fsm_detour_counts(session)
+        counts[field_name] = 0
+
+    async def _process_rag_detour_and_resume(
+        self,
+        session: OrchestratorSession,
+        user_text: str,
+        output_language: str,
+        resume_prompt: Optional[str]
+    ):
+        """
+        Process a RAG detour during FSM flow, then resume with pending FSM question.
+        
+        Flow:
+        1. Answer user's question via RAG
+        2. Immediately follow up with resume prompt
+        """
+        try:
+            # Get history context from history manager
+            history_context = session.history_manager.get_context_window(max_turns=5)
+            
+            # Stream RAG response for the detour question
+            logger.info(f"[{session.session_id}] 🔄 Starting RAG detour for: '{user_text[:50]}...'")
+            
+            rag_client = RAGClient(self.config.services.rag, skip_ssl=self.config.server.skip_ssl_verify)
+            full_response = ""
+            
+            async for token in rag_client.query_streaming(
+                query=user_text,
+                session_id=session.session_id,
+                user_id=session.user_id,
+                agent_name=session.agent_name,
+                language=output_language,
+                context={"language": output_language},
+                history_context=history_context,
+                base_url=session.rag_url,
+                tenant_id=session.tenant_id
+            ):
+                if isinstance(token, str):
+                    full_response += token
+                    logger.debug(f"[{session.session_id}] RAG detour token: '{token}'")
+            
+            # Send RAG response to TTS
+            if full_response:
+                logger.info(f"[{session.session_id}] 📤 Streaming RAG detour response ({len(full_response)} chars)")
+                await self._stream_fsm_response(session, full_response, output_language)
+            
+            # Now resume FSM with pending question
+            if resume_prompt:
+                logger.info(f"[{session.session_id}] 🔄 Resuming FSM: '{resume_prompt[:50]}...'")
+                # Small delay to separate detour answer from resume prompt
+                await asyncio.sleep(0.3)
+                await self._stream_fsm_response(session, resume_prompt, output_language)
+            
+        except Exception as e:
+            logger.error(f"[{session.session_id}] RAG detour error: {e}", exc_info=True)
+            # Fallback: just resume FSM
+            if resume_prompt:
+                await self._stream_fsm_response(session, resume_prompt, output_language)
 
 
 @dataclass

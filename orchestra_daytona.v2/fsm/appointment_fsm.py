@@ -1,5 +1,5 @@
 """
-Simple Appointment FSM for LEXI (Daytona Expert Assistant)
+Simple Appointment FSM (Expert Assistant)
 
 A lightweight 3-question appointment booking flow:
 1. Name (with spelling confirmation)
@@ -91,7 +91,7 @@ class SimpleAppointmentFSM:
         if any(keyword in user_input.lower() for keyword in self.CANCEL_KEYWORDS):
             self.state = AppointmentState.CANCELLED
             return {
-                "response": "No problem! If you'd like to book an appointment later, just let me know. Feel free to ask me anything else about Daytona!",
+                "response": "No problem! If you'd like to book an appointment later, just let me know. Feel free to ask me anything.",
                 "state": self.state.value,
                 "complete": False,
                 "cancelled": True,
@@ -146,7 +146,7 @@ class SimpleAppointmentFSM:
         """Start the appointment booking flow"""
         self.state = AppointmentState.COLLECT_NAME
         return (
-            "Great! I'd be happy to help you connect with a Daytona expert. "
+            "Great! I'd be happy to help you connect with our experts "
             "I just need a few quick details. You can say 'cancel' anytime to stop.\n\n"
             "First, please spell out your name letter by letter. For example, 'J-O-H-N S-M-I-T-H'."
         )
@@ -182,7 +182,7 @@ class SimpleAppointmentFSM:
             
             if retry_num >= self.MAX_RETRIES:
                 self.state = AppointmentState.CANCELLED
-                return "I'm having trouble understanding. No worries! Feel free to ask me anything else about Daytona, or we can try booking an appointment later."
+                return "I'm having trouble understanding. No worries! Feel free to ask me anything , or we can try booking an appointment later."
             
             # Progressive prompts based on retry attempt
             if retry_num == 1:
@@ -286,7 +286,7 @@ class SimpleAppointmentFSM:
                 self.state = AppointmentState.CANCELLED
                 return "I need a bit more detail about what you'd like to discuss. No worries! Feel free to reach out when you're ready."
             
-            return "Could you tell me a bit more about what you'd like to discuss? For example, 'I need help with Daytona installation'."
+            return "Could you tell me a bit more about what you'd like to discuss?"
         
         # Truncate if too long
         if len(query) > 500:
@@ -318,7 +318,7 @@ class SimpleAppointmentFSM:
                 f"• Name: {self.data.name}\n"
                 f"• Email: {self.data.email}\n"
                 f"• Topic: {self.data.query[:50]}{'...' if len(self.data.query) > 50 else ''}\n\n"
-                f"One of our Daytona experts will reach out to you at {self.data.email} within 24 hours.\n\n"
+                f"One of our experts will reach out to you at {self.data.email} within 24 hours.\n\n"
                 f"Is there anything else I can help you with?"
             )
         

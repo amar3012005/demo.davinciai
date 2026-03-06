@@ -1,4 +1,3 @@
-from .context_architecture import ContextArchitect
 """
 RAG Engine Core Logic - Daytona V2 Optimized
 """
@@ -10,16 +9,78 @@ import logging
 import hashlib
 import re
 import asyncio
-from typing import Dict, Any, Optional, List, Callable
+import importlib
+from typing import Dict, Any, Optional, List, Callable, Union
 import numpy as np
-import faiss
-from .llm_providers import create_provider, create_fallback_provider
-from .config import RAGConfig
-from .prompts import prompt_manager
-from .optimized_embeddings import OptimizedEmbeddings
-from .xml_prompts import XMLPromptManager
-from .qdrant_addon import QdrantAddon
-from .distillprompt_hivemind_savecase import CaseDistiller
+faiss = None
+def _missing_dep(*args, **kwargs):
+    raise RuntimeError("Required RAG dependency is not installed in this environment")
+
+
+try:
+    from .context_architecture import ContextArchitect
+except Exception:
+    try:
+        from context_architecture import ContextArchitect
+    except Exception:
+        ContextArchitect = None
+
+try:
+    from .llm_providers import create_provider, create_fallback_provider
+except Exception:
+    try:
+        from llm_providers import create_provider, create_fallback_provider
+    except Exception:
+        create_provider = _missing_dep
+        create_fallback_provider = _missing_dep
+
+try:
+    from .config import RAGConfig
+except Exception:
+    try:
+        from config import RAGConfig
+    except Exception:
+        RAGConfig = Any
+
+try:
+    from .prompts import prompt_manager
+except Exception:
+    try:
+        from prompts import prompt_manager
+    except Exception:
+        prompt_manager = None
+
+try:
+    from .optimized_embeddings import OptimizedEmbeddings
+except Exception:
+    try:
+        from optimized_embeddings import OptimizedEmbeddings
+    except Exception:
+        OptimizedEmbeddings = None
+
+try:
+    from .xml_prompts import XMLPromptManager
+except Exception:
+    try:
+        from xml_prompts import XMLPromptManager
+    except Exception:
+        XMLPromptManager = None
+
+try:
+    from .qdrant_addon import QdrantAddon
+except Exception:
+    try:
+        from qdrant_addon import QdrantAddon
+    except Exception:
+        QdrantAddon = None
+
+try:
+    from .distillprompt_hivemind_savecase import CaseDistiller
+except Exception:
+    try:
+        from distillprompt_hivemind_savecase import CaseDistiller
+    except Exception:
+        CaseDistiller = None
 
 try:
     from groq import Groq
@@ -39,6 +100,7 @@ class RAGEngine:
         Initialize RAG engine with configuration.
         """
         self.config = config
+        self._tenant_architect_cache: Dict[str, Any] = {}
         
         # Initialize Embeddings if Local Retrieval OR Hive Mind is enabled
         if self.config.enable_local_retrieval or self.config.enable_hive_mind:
@@ -134,7 +196,7 @@ class RAGEngine:
         self.xml_prompts = XMLPromptManager()
         self.cache_manager = None # Caching handled by providers if enabled
 
-        # Storage
+        # Storage - Local Indexing Disabled (Using Qdrant Hivemind exclusively)
         self.vector_store = None
         self.documents: List[str] = []
         self.doc_metadata: List[Dict[str, Any]] = []
@@ -184,53 +246,10 @@ class RAGEngine:
                 "priority": 0
             }
         }
-        
-        # Always load the index data (texts/metadata) so we can do rule-based retrieval even if vector search is off
-        self.load_index()
     
     def load_index(self) -> bool:
-        """Load pre-built FAISS index and document data from disk."""
-        try:
-            index_path = os.path.join(self.config.vector_store_path, "index.faiss")
-            metadata_path = os.path.join(self.config.vector_store_path, "metadata.json")
-            texts_path = os.path.join(self.config.vector_store_path, "texts.json")
-            
-            # 1. ALWAYS load JSON data (these are small and used for rule-based retrieval)
-            if os.path.exists(metadata_path) and os.path.exists(texts_path):
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    self.doc_metadata = json.load(f)
-                with open(texts_path, 'r', encoding='utf-8') as f:
-                    self.documents = json.load(f)
-                logger.info(f"📄 Loaded document data: {len(self.documents)} documents")
-            else:
-                logger.error(f"❌ Document files not found at {self.config.vector_store_path}")
-                return False
-
-            # 2. OPTIONALLY load FAISS index (only if local retrieval is enabled)
-            if self.config.enable_local_retrieval:
-                if os.path.exists(index_path):
-                    self.vector_store = faiss.read_index(index_path)
-                    
-                    # Validate dimension match
-                    if self.embeddings:
-                        test_embedding = self.embeddings.embed_query("dimension validation test")
-                        index_dim = self.vector_store.d
-                        embedding_dim = len(test_embedding)
-                        
-                        if index_dim != embedding_dim:
-                            logger.error(f"❌ DIMENSION MISMATCH: Index {index_dim} vs Model {embedding_dim}")
-                            self.vector_store = None
-                            return False
-                        logger.info(f"✅ FAISS index loaded and validated ({embedding_dim}-D)")
-                else:
-                    logger.warning(f"⚠️ FAISS index file not found at {index_path}")
-            else:
-                logger.info("ℹ️ Skipping FAISS vector store loading (local retrieval disabled)")
-            
-            return True
-        except Exception as e:
-            logger.error(f" Error loading index: {e}")
-            return False
+        """Deprecated: Local FAISS index loading removed. Relying on Qdrant Hivemind."""
+        return True
 
     def _detect_query_pattern(self, query: str) -> Optional[Dict]:
         """Detect if query matches known patterns."""
@@ -271,120 +290,126 @@ class RAGEngine:
 
         return reduced
 
+    def _build_org_safe_prompt(
+        self,
+        query: str,
+        language: str,
+        history: List[Dict[str, Any]],
+        relevant_docs: List[Dict[str, Any]],
+        agent_skills: List[str],
+        agent_rules: List[str]
+    ) -> str:
+        """Build a tenant/org-safe prompt when local retrieval is disabled or sparse."""
+        org = (self.config.organization_name or "the organization").strip()
+        location = (self.config.organization_location or "").strip()
+        lang = (language or "english").strip().lower()
+
+        history_lines = []
+        for turn in history[-6:]:
+            role = str(turn.get("role", "user")).strip()
+            content = str(turn.get("content", "")).strip()
+            if content:
+                history_lines.append(f"{role}: {content}")
+        history_block = "\n".join(history_lines) if history_lines else "(none)"
+
+        docs_block = "\n".join(
+            f"- {str(d.get('text', '')).strip()[:300]}"
+            for d in relevant_docs[:6]
+            if str(d.get("text", "")).strip()
+        ) or "(none)"
+        skills_block = "\n".join(f"- {s[:220]}" for s in agent_skills[:10]) or "(none)"
+        rules_block = "\n".join(f"- {r[:220]}" for r in agent_rules[:10]) or "(none)"
+
+        return (
+            f"You are TARA, the AI assistant for {org}"
+            f"{f' ({location})' if location else ''}.\n"
+            f"Language for this reply: {lang}.\n"
+            "Identity guardrails:\n"
+            f"- You must identify ONLY as assistant for {org}.\n"
+            "- Never claim to belong to TASK, B&B, or any other organization unless explicitly present in provided context documents.\n"
+            "- If information is missing, say so briefly and ask a clarifying question.\n"
+            "- Keep answers concise, accurate, and helpful.\n\n"
+            f"Conversation history:\n{history_block}\n\n"
+            f"Retrieved context docs:\n{docs_block}\n\n"
+            f"Agent skills:\n{skills_block}\n\n"
+            f"Agent rules:\n{rules_block}\n\n"
+            f"User query: {query}\n"
+            "Answer:"
+        )
+
+    @staticmethod
+    def _sanitize_tenant(tenant_id: Optional[str]) -> str:
+        tenant = (tenant_id or "default").strip().lower()
+        return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
+
+    def _resolve_context_architect(self, tenant_id: Optional[str]):
+        """
+        Resolve tenant-specific context architecture module/class.
+
+        Env override keys:
+        - <tenant>_context_architecture_module (e.g. context_architecture_davinci)
+        - <TENANT>_CONTEXT_ARCHITECTURE_MODULE
+        - <tenant>_context_architecture_class (optional, default ContextArchitect)
+        """
+        tenant = self._sanitize_tenant(tenant_id)
+        if tenant in self._tenant_architect_cache:
+            return self._tenant_architect_cache[tenant]
+
+        module_env = (
+            os.getenv(f"{tenant}_context_architecture_module")
+            or os.getenv(f"{tenant.upper()}_CONTEXT_ARCHITECTURE_MODULE")
+        )
+        class_name = (
+            os.getenv(f"{tenant}_context_architecture_class")
+            or os.getenv(f"{tenant.upper()}_CONTEXT_ARCHITECTURE_CLASS")
+            or "ContextArchitect"
+        )
+
+        candidates: List[str] = []
+        if module_env:
+            candidates.append(module_env)
+        candidates.extend([
+            f"context_architecture.context_architecture_{tenant}",
+            f"context_architecture_{tenant}",
+            "context_architecture.context_architecture",
+            "context_architecture",
+        ])
+
+        architect_cls = None
+        for module_name in candidates:
+            try:
+                mod = None
+                if module_name.startswith("."):
+                    mod = importlib.import_module(module_name, package=__package__)
+                elif "." in module_name:
+                    mod = importlib.import_module(module_name)
+                else:
+                    # Try package-relative first, then top-level import.
+                    if __package__:
+                        try:
+                            mod = importlib.import_module(f".{module_name}", package=__package__)
+                        except Exception:
+                            mod = importlib.import_module(module_name)
+                    else:
+                        mod = importlib.import_module(module_name)
+
+                if hasattr(mod, class_name):
+                    architect_cls = getattr(mod, class_name)
+                    logger.info(f"🧩 Context architect tenant={tenant} -> {module_name}.{class_name}")
+                    break
+            except Exception:
+                continue
+
+        if architect_cls is None:
+            architect_cls = ContextArchitect
+            logger.warning(f"⚠️ Using default ContextArchitect for tenant={tenant}")
+
+        self._tenant_architect_cache[tenant] = architect_cls
+        return architect_cls
+
     async def _do_local_rag(self, query: str, context: Dict, boost_categories: list, max_chars: int, precomputed_embedding: Optional[np.ndarray] = None) -> tuple:
-        """Helper for parallel execution of FAISS retrieval."""
-        return self._retrieve_with_boosting(query, context, boost_categories, max_chars, precomputed_embedding=precomputed_embedding)
-
-    def _retrieve_with_boosting(self, query: str, context: Dict, boost_categories: list, max_context_chars: int, precomputed_embedding: Optional[np.ndarray] = None) -> tuple:
-        """FAISS retrieval with category boosting."""
-        # 1. Check if local retrieval is explicitly disabled
-        if not self.config.enable_local_retrieval:
-            logger.info("🚫 Local retrieval is DISABLED (config.enable_local_retrieval=False). Returning 0 docs.")
-            return [], {"embedding_ms": 0, "search_ms": 0}
-
-        # 1b. Fallback to rule-based retrieval if vector store is missing but retrieval is ENABLED
-        if self.vector_store is None:
-            return self._retrieve_rule_based(query, context, boost_categories, max_context_chars)
-        
-        timing = {}
-        t_start = time.time()
-        
-        # 2. Use precomputed embedding or compute it now
-        if precomputed_embedding is not None:
-            query_embedding = precomputed_embedding
-            timing['embedding_ms'] = 0 # Already accounted for or shared
-        else:
-            query_embedding = self.embeddings.embed_query(query)
-            query_embedding = np.array(query_embedding, dtype=np.float32).reshape(1, -1)
-            timing['embedding_ms'] = (time.time() - t_start) * 1000
-        
-        # FAISS search
-        s_start = time.time()
-        distances, indices = self.vector_store.search(query_embedding, k=self.config.top_k + 5)
-        timing['search_ms'] = (time.time() - s_start) * 1000
-        
-        candidates = []
-        for i, idx in enumerate(indices[0]):
-            if idx < len(self.documents):
-                distance = float(distances[0][i])
-                similarity = 1.0 - min(1.0, distance / 2.0)
-                
-                if similarity < self.config.similarity_threshold:
-                    continue
-                
-                doc_meta = self.doc_metadata[idx] if idx < len(self.doc_metadata) else {}
-                boosted_similarity = similarity
-                
-                # Check for category boost
-                doc_cat = doc_meta.get('category', '').lower()
-                if any(bc.lower() in doc_cat for bc in boost_categories):
-                    boosted_similarity *= 1.2
-                
-                candidates.append({
-                    'text': self.documents[idx],
-                    'metadata': doc_meta,
-                    'similarity': similarity,
-                    'boosted_similarity': boosted_similarity
-                })
-        
-        candidates.sort(key=lambda x: x['boosted_similarity'], reverse=True)
-        
-        # Truncate to max_chars
-        final_docs = []
-        current_chars = 0
-        for doc in candidates:
-            if current_chars + len(doc['text']) > max_context_chars:
-                break
-            final_docs.append(doc)
-            current_chars += len(doc['text'])
-        
-        logger.info(f"📚 FAISS retrieval: {len(final_docs)} chunks ({current_chars} chars)")
-        return final_docs, timing
-
-    def _retrieve_rule_based(self, query: str, context: Dict, categories: list, max_context_chars: int) -> tuple:
-        """Lightweight keyword and category based retrieval (no embeddings)."""
-        timing = {"embedding_ms": 0, "search_ms": 0}
-        start = time.time()
-        
-        query_words = set(re.findall(r'\w+', query.lower()))
-        candidates = []
-        
-        # Scan documents for keyword matches and category matches
-        for idx, text in enumerate(self.documents):
-            meta = self.doc_metadata[idx] if idx < len(self.doc_metadata) else {}
-            score = 0
-            
-            # Category match (high weight)
-            doc_cat = meta.get('category', '').lower()
-            if any(c.lower() in doc_cat for c in categories):
-                score += 10
-                
-            # Keyword match in text (count unique word overlaps)
-            doc_words = set(re.findall(r'\w+', text.lower()))
-            overlap = len(query_words.intersection(doc_words))
-            score += overlap
-            
-            if score > 0:
-                candidates.append({
-                    'text': text,
-                    'metadata': meta,
-                    'similarity': min(0.9, score / 20.0), # Mock similarity
-                    'boosted_similarity': score
-                })
-        
-        # Sort and truncate
-        candidates.sort(key=lambda x: x['boosted_similarity'], reverse=True)
-        final_docs = []
-        current_chars = 0
-        for doc in candidates[:10]: # Top 10 rule-based
-            if current_chars + len(doc['text']) > max_context_chars:
-                break
-            final_docs.append(doc)
-            current_chars += len(doc['text'])
-            
-        timing['search_ms'] = (time.time() - start) * 1000
-        logger.info(f"📏 Rule-based retrieval: {len(final_docs)} chunks ({current_chars} chars)")
-        return final_docs, timing
+        """Deprecated: Local FARSS index retrieval removed. Always returns empty docs."""
+        return [], {"embedding_ms": 0, "search_ms": 0}
 
     async def retrieve_context(
         self,
@@ -433,18 +458,9 @@ class RAGEngine:
             except Exception as e:
                 logger.error(f"Translation failed: {e}")
 
-        # 2. ULTRA FAST-PATH: Static/Conversational queries
+        # No fast-path bypasses: all responses must flow through full context architecture.
         query_clean = query_english.lower().strip()
-        
-        # Identity Fast-Path logic handled in process_query, but we return metadata here
         fast_path_type = None
-        identity_keywords = ["who are you", "your name", "what are you", "who built you", "who created you", "built by", "created by", "work for", "your employer", "who is your boss"]
-        if any(x in query_clean for x in identity_keywords):
-            fast_path_type = "identity"
-        elif "pricing" in query_clean or "cost" in query_clean:
-            fast_path_type = "pricing"
-        elif re.match(r'^(hi|hello|hey|thanks|thank you|morning|evening|greetings)', query_clean):
-            fast_path_type = "conversational"
 
         # 2.5 Context-dependent query detection
         CONTEXT_DEPENDENT_PATTERNS = [
@@ -678,6 +694,21 @@ class RAGEngine:
     ) -> Dict[str, Any]:
         """High-performance RAG pipeline with parallel retrieval and FAST-PATH."""
         start_time = time.time()
+
+        # Fail fast with a clear response if LLM initialization failed at startup.
+        if self.llm is None:
+            logger.error("LLM provider is not initialized (self.llm is None). Check LLM_API_KEY/GROQ_API_KEY and provider config.")
+            msg = "I am currently unavailable due to an LLM configuration issue. Please try again in a moment."
+            if streaming_callback:
+                streaming_callback(msg, True)
+            return {
+                "answer": msg,
+                "sources": [],
+                "confidence": 0.0,
+                "timing_breakdown": {"total_ms": (time.time() - start_time) * 1000},
+                "llm_usage": {},
+                "metadata": {"method": "error", "reason": "llm_not_initialized"},
+            }
         
         # 1-3. Retrieve Context
         retrieval_data = await self.retrieve_context(query, context, history_context, tenant_id=tenant_id)
@@ -703,48 +734,6 @@ class RAGEngine:
             logger.info("🌐 User requested English response (explicit intent detected)")
             original_language = "english"
         
-        # 2. ULTRA FAST-PATH (Execution)
-        query_clean = query_english.lower().strip()
-        
-        if fast_path_type == "identity":
-            org = self.config.organization_name
-            response = (
-                f"I am TARA, an advanced AI Assistant built by Davinci AI for {org}. "
-                "Just to clarify: I work for the organization TASK (Telangana Academy for Skill and Knowledge), not to perform generic tasks. "
-                "I'm here to help you with skilling, employment, and career development opportunities!"
-            )
-            if original_language == "telugu":
-                response = f"నేను TARA, {org} కోసం Davinci AI ద్వారా నిర్మించబడిన అధునాతన AI సహాయకుడిని. మీకు నైపుణ్యాభివృద్ధి, ఉపాధి మరియు కెరీర్ అవకాశాలలో సహాయం చేయడానికి నేను ఇక్కడ ఉన్నాను!"
-            if streaming_callback: streaming_callback(response, True)
-            duration = (time.time() - start_time) * 1000
-            return {
-                "answer": response,
-                "sources": [],
-                "confidence": 1.0,
-                "timing_breakdown": {"total_ms": duration},
-                "metadata": {"method": "fast-path", "type": "identity"}
-            }
-
-        if fast_path_type == "pricing":
-            response = (
-                "TASK services are primarily government-funded and focused on skilling and employment enhancement. "
-                "Registration fees are nominal: ₹500 + GST for SC/ST students and ₹1000 + GST for others (valid for 4 years). "
-                "You can access various skilling courses, placement drives, and internships through this membership."
-            )
-            if streaming_callback: streaming_callback(response, True)
-            duration = (time.time() - start_time) * 1000
-            return {
-                "answer": response,
-                "sources": [],
-                "confidence": 1.0,
-                "timing_breakdown": {"total_ms": duration},
-                "metadata": {"method": "fast-path", "type": "pricing"}
-            }
-
-        if fast_path_type == "conversational":
-            return await self._handle_conversational_fast_path(query_clean, timing, streaming_callback, original_language)
-
-
         # Prepare Context Data
         # Build Hive Mind state with team knowledge and web results
         hive_mind_state = {"insights": {}, "variables": {}}
@@ -774,7 +763,8 @@ class RAGEngine:
         skill_texts = [s.get("text", "") for s in agent_skills if s.get("text")]
         rule_texts = [r.get("text", "") for r in agent_rules if r.get("text")]
 
-        prompt = ContextArchitect.assemble_prompt(
+        architect_cls = self._resolve_context_architect(tenant_id)
+        prompt = architect_cls.assemble_prompt(
             query=query_english,
             raw_query=query,
             retrieved_docs=relevant_docs,
@@ -872,6 +862,20 @@ class RAGEngine:
             
         except Exception as e:
             logger.error(f"Generation failed: {e}")
+            if self.llm is None:
+                msg = "I am currently unavailable due to an LLM configuration issue. Please try again in a moment."
+                if streaming_callback:
+                    streaming_callback(msg, True)
+                timing['generation_ms'] = (time.time() - gen_start) * 1000
+                timing['total_ms'] = (time.time() - start_time) * 1000
+                return {
+                    "answer": msg,
+                    "sources": list(set([d['metadata'].get('source', 'Unknown') for d in relevant_docs])),
+                    "confidence": 0.0,
+                    "timing_breakdown": timing,
+                    "llm_usage": {},
+                    "metadata": {"method": "error", "reason": "llm_not_initialized_post_generation"},
+                }
             # Fallback (handle both sync and async)
             fallback_result = self.llm.generate(
                 prompt=prompt,
@@ -1086,3 +1090,338 @@ class RAGEngine:
     def _extract_template_fields(self, docs: list, pattern: Dict) -> Dict:
          # Simplified extraction for Daytona
          return {}
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # FSM Routing Logic (Schema-Driven Appointment Booking)
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    async def route_fsm_turn(
+        self,
+        user_text: str,
+        session_id: str,
+        tenant_id: str,
+        language: str,
+        fsm_context: Dict[str, Any],
+        history_context: Optional[Union[str, List[Dict[str, Any]]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Route FSM turn during appointment booking flow.
+        
+        Decision order:
+        1. Cancel detection (strong lexical + confidence gate) -> cancel
+        2. Field-answer classification for pending field -> collect_field/confirm_field
+        3. Detour classification (general RAG query) -> detour_rag
+        4. Fallback -> invalid_retry
+        
+        Args:
+            user_text: User input text
+            session_id: Session identifier
+            tenant_id: Tenant identifier
+            language: Response language
+            fsm_context: Current FSM state (active, pending_field, collected_data, retry_counts, schema)
+            history_context: Optional conversation history
+            
+        Returns:
+            Dict with: action, field, normalized_value, confidence, reason, resume_prompt, cancelled
+        """
+        import re
+        import time
+        start_time = time.time()
+        
+        # Extract FSM context
+        active = fsm_context.get('active', False)
+        pending_field = fsm_context.get('pending_field')
+        collected_data = fsm_context.get('collected_data', {})
+        retry_counts = fsm_context.get('retry_counts', {})
+        schema = fsm_context.get('schema', {})
+        
+        # Get schema configuration
+        fields_schema = schema.get('fields', {}) if isinstance(schema, dict) else {}
+        cancel_keywords = schema.get('cancel_keywords', ['cancel', 'stop', 'nevermind', 'forget it', 'quit', 'exit']) if isinstance(schema, dict) else []
+        max_retries = schema.get('max_retries', 3) if isinstance(schema, dict) else 3
+        
+        user_text_lower = user_text.lower().strip()
+        user_text_clean = user_text.strip()
+        
+        logger.info(f"🔀 FSM Route | Pending field: {pending_field} | Text: '{user_text[:50]}...'")
+        
+        # =========================================================================
+        # 1. CANCEL DETECTION (Strong lexical gate)
+        # =========================================================================
+        cancel_confidence = 0.0
+        for keyword in cancel_keywords:
+            if keyword.lower() in user_text_lower:
+                cancel_confidence = 0.95
+                break
+        
+        # Additional cancel patterns
+        cancel_patterns = [
+            r"\b(cancel|stop|quit|exit|abort|end)\b",
+            r"\b(nevermind|never mind|forget it|forget about it)\b",
+            r"\b(i don't want|i do not want|i don't need|i do not need)\b",
+            r"\b(no thanks|no thank you|not interested)\b",
+        ]
+        for pattern in cancel_patterns:
+            if re.search(pattern, user_text_lower):
+                cancel_confidence = max(cancel_confidence, 0.9)
+        
+        if cancel_confidence >= 0.85:
+            logger.info(f"✅ FSM Route | CANCEL detected (confidence={cancel_confidence:.2f})")
+            return {
+                'action': 'cancel',
+                'field': None,
+                'normalized_value': None,
+                'confidence': cancel_confidence,
+                'reason': 'Cancel keyword detected',
+                'resume_prompt': None,
+                'cancelled': True
+            }
+        
+        # =========================================================================
+        # 2. FIELD-ANSWER CLASSIFICATION (Pending field validation)
+        # =========================================================================
+        if pending_field and pending_field in fields_schema:
+            field_config = fields_schema[pending_field]
+            field_result = self._classify_field_answer(
+                user_text_clean,
+                pending_field,
+                field_config,
+                collected_data
+            )
+            
+            if field_result['is_valid']:
+                elapsed_ms = (time.time() - start_time) * 1000
+                logger.info(f"✅ FSM Route | FIELD ANSWER | Field: {pending_field} | Value: '{field_result['normalized_value'][:30]}...' (confidence={field_result['confidence']:.2f}, {elapsed_ms:.0f}ms)")
+                return {
+                    'action': 'collect_field' if field_result.get('requires_confirm', True) else 'confirm_field',
+                    'field': pending_field,
+                    'normalized_value': field_result['normalized_value'],
+                    'confidence': field_result['confidence'],
+                    'reason': field_result['reason'],
+                    'resume_prompt': None,
+                    'cancelled': False
+                }
+        
+        # =========================================================================
+        # 3. DETOUR CLASSIFICATION (General RAG query)
+        # =========================================================================
+        # Check if this looks like a general question (not a field answer)
+        is_question = any([
+            user_text_clean.endswith('?'),
+            user_text_lower.startswith(('what', 'how', 'why', 'when', 'where', 'who', 'can', 'could', 'would', 'is', 'are', 'do', 'does')),
+            re.search(r'\b(help|information|explain|tell me about|what about)\b', user_text_lower),
+        ])
+        
+        # Check if this is NOT a field answer (too long, no field-like patterns)
+        is_not_field_answer = (
+            len(user_text_clean) > 50 or  # Field answers are usually short
+            (pending_field == 'name' and not re.match(r'^[A-Za-z\s\-\'\.\,]+$', user_text_clean)) or
+            (pending_field == 'email' and '@' not in user_text_clean and not re.match(r'^[A-Za-z\s\-]+$', user_text_clean)) or
+            (pending_field == 'topic' and len(user_text_clean) < 5)  # Too short for topic
+        )
+        
+        if is_question and is_not_field_answer:
+            elapsed_ms = (time.time() - start_time) * 1000
+            resume_prompt = self._build_resume_prompt(pending_field, fields_schema, collected_data)
+            
+            logger.info(f"🔄 FSM Route | DETOUR RAG | Resume prompt: '{resume_prompt[:50]}...' ({elapsed_ms:.0f}ms)")
+            return {
+                'action': 'detour_rag',
+                'field': pending_field,
+                'normalized_value': None,
+                'confidence': 0.85,
+                'reason': 'General question detected during FSM flow',
+                'resume_prompt': resume_prompt,
+                'cancelled': False
+            }
+        
+        # =========================================================================
+        # 4. FALLBACK: Invalid retry
+        # =========================================================================
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.warning(f"⚠️ FSM Route | INVALID RETRY | No pattern matched ({elapsed_ms:.0f}ms)")
+        return {
+            'action': 'invalid_retry',
+            'field': pending_field,
+            'normalized_value': None,
+            'confidence': 0.5,
+            'reason': 'Input does not match expected patterns',
+            'resume_prompt': self._build_resume_prompt(pending_field, fields_schema, collected_data),
+            'cancelled': False
+        }
+    
+    def _classify_field_answer(
+        self,
+        user_text: str,
+        field_name: str,
+        field_config: Dict[str, Any],
+        collected_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Classify and validate a field answer.
+        
+        Returns:
+            Dict with: is_valid, normalized_value, confidence, reason, requires_confirm
+        """
+        import re
+        
+        user_text_lower = user_text.lower().strip()
+        user_text_clean = user_text.strip()
+        
+        # Strip common prefixes
+        prefixes = ["my name is", "i'm", "this is", "i am", "call me", "it's", "its", "name is", "my email is", "email:", "it is"]
+        for prefix in prefixes:
+            if user_text_lower.startswith(prefix):
+                user_text_clean = user_text[len(prefix):].strip()
+                user_text_lower = user_text_clean.lower()
+                break
+        
+        # =======================================================================
+        # NAME field validation
+        # =======================================================================
+        if field_name == 'name':
+            # Handle spelled-out names like "A-M-A-R" or "A M A R"
+            name_tokens = re.findall(r"[A-Za-z]+", user_text_clean)
+            if name_tokens and len(name_tokens) >= 2 and all(len(token) == 1 for token in name_tokens):
+                user_text_clean = ''.join(name_tokens).capitalize()
+                user_text_lower = user_text_clean.lower()
+            
+            # Validate: at least 2 characters, only letters and spaces
+            min_len = field_config.get('min_length', 2)
+            max_len = field_config.get('max_length', 50)
+            validation_regex = field_config.get('validation_regex', r'^[a-zA-Z\s\-\']+$')
+            
+            if len(user_text_clean) >= min_len and len(user_text_clean) <= max_len and re.match(validation_regex, user_text_clean):
+                normalized = user_text_clean.title()
+                return {
+                    'is_valid': True,
+                    'normalized_value': normalized,
+                    'confidence': 0.9,
+                    'reason': 'Valid name format',
+                    'requires_confirm': True
+                }
+            
+            return {
+                'is_valid': False,
+                'normalized_value': None,
+                'confidence': 0.7,
+                'reason': 'Invalid name format',
+                'requires_confirm': False
+            }
+        
+        # =======================================================================
+        # EMAIL field validation
+        # =======================================================================
+        if field_name == 'email':
+            # Parse spelled-out email
+            email = self._parse_spelled_email(user_text_clean)
+            
+            # Email validation regex
+            validation_regex = field_config.get('validation_regex', r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+            
+            if re.match(validation_regex, email):
+                return {
+                    'is_valid': True,
+                    'normalized_value': email.lower(),
+                    'confidence': 0.95,
+                    'reason': 'Valid email format',
+                    'requires_confirm': True
+                }
+            
+            return {
+                'is_valid': False,
+                'normalized_value': None,
+                'confidence': 0.8,
+                'reason': 'Invalid email format',
+                'requires_confirm': False
+            }
+        
+        # =======================================================================
+        # TOPIC field validation
+        # =======================================================================
+        if field_name == 'topic':
+            min_len = field_config.get('min_length', 5)
+            max_len = field_config.get('max_length', 500)
+            
+            if len(user_text_clean) >= min_len and len(user_text_clean) <= max_len:
+                return {
+                    'is_valid': True,
+                    'normalized_value': user_text_clean.strip(),
+                    'confidence': 0.9,
+                    'reason': 'Valid topic description',
+                    'requires_confirm': True
+                }
+            
+            return {
+                'is_valid': False,
+                'normalized_value': None,
+                'confidence': 0.6,
+                'reason': 'Topic too short or too long',
+                'requires_confirm': False
+            }
+        
+        # =======================================================================
+        # Unknown field - accept as-is
+        # =======================================================================
+        return {
+            'is_valid': True,
+            'normalized_value': user_text_clean,
+            'confidence': 0.5,
+            'reason': f'Unknown field "{field_name}", accepting as-is',
+            'requires_confirm': False
+        }
+    
+    def _parse_spelled_email(self, email_input: str) -> str:
+        """
+        Parse spelled-out email like 'J-O-H-N at G-M-A-I-L dot C-O-M' to 'john@gmail.com'
+        Also handles: 'john at gmail dot com', 'j o h n at gmail dot com'
+        """
+        import re
+        
+        text = email_input.lower().strip()
+        
+        # Replace spoken words with symbols
+        text = re.sub(r'\s+at\s+', '@', text)
+        text = re.sub(r'\s+dot\s+', '.', text)
+        
+        # Remove spaces, dashes, and other separators from spelled letters
+        parts = text.split('@')
+        if len(parts) == 2:
+            # Clean user part (before @)
+            user_part = re.sub(r'[\s\-,\.]+', '', parts[0])
+            # Clean domain part (after @)
+            domain_parts = parts[1].split('.')
+            cleaned_domain = '.'.join(re.sub(r'[\s\-,]+', '', p) for p in domain_parts)
+            text = f"{user_part}@{cleaned_domain}"
+        else:
+            # No @ found, try to clean the whole thing
+            text = re.sub(r'[\s\-,]+', '', text)
+        
+        return text
+    
+    def _build_resume_prompt(
+        self,
+        pending_field: Optional[str],
+        fields_schema: Dict[str, Any],
+        collected_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Build the resume prompt for returning to FSM after detour.
+        """
+        if not pending_field or not fields_schema:
+            return None
+        
+        field_config = fields_schema.get(pending_field, {})
+        collect_prompt = field_config.get('collect_prompt', '')
+        
+        # Customize prompt based on field
+        if pending_field == 'name':
+            return "Back to booking - please spell out your name letter by letter."
+        elif pending_field == 'email':
+            return "Back to booking - please spell out your email address."
+        elif pending_field == 'topic':
+            return "Back to booking - what would you like to discuss with our expert?"
+        elif collect_prompt:
+            return f"Back to booking - {collect_prompt}"
+        else:
+            return f"Back to booking - please provide your {pending_field}."

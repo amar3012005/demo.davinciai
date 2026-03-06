@@ -20,6 +20,8 @@ services:
       context: ./rag-daytona.v2
       dockerfile: Dockerfile
     container_name: rag-local
+    env_file:
+      - .env
     environment:
       # LLM Configuration
       LLM_PROVIDER: groq
@@ -92,7 +94,6 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-      - qdrant
 
   # ═══════════════════════════════════════════════════════════
   # STT Service
@@ -173,6 +174,8 @@ services:
       context: ./orchestra_daytona.v2
       dockerfile: Dockerfile
     container_name: orchestrator-local
+    env_file:
+      - .env
     ports:
       - '8004:8004'
       - '8080:8004'
@@ -225,16 +228,7 @@ services:
   # Qdrant (Optional - Local Vector Database)
   # Comment out if using cloud Qdrant
   # ═══════════════════════════════════════════════════════════
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: qdrant-local
-    ports:
-      - '6333:6333'
-    volumes:
-      - qdrant-storage:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: '6334'
-    restart: unless-stopped
+  
 
 volumes:
   redis-data:

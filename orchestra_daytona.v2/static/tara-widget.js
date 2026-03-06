@@ -2580,6 +2580,32 @@
                 this.simulateTyping(msg.text);
             }
             else if (msg.type === 'command') {
+                // Modular-first routing: if modular WS handler exists, delegate
+                // command execution to it and skip legacy monolith execution.
+                const modularWs = window.TARA && window.TARA.WS;
+                if (modularWs && typeof modularWs.handleBackendMessage === 'function') {
+                    try {
+                        // Minimal compatibility shim for modular executor path.
+                        if (!this.executor && typeof this.executeCommand === 'function') {
+                            this.executor = {
+                                executeCommand: async (type, targetId, text, forceClick) => {
+                                    try {
+                                        await this.executeCommand(type, targetId, text, forceClick);
+                                        return { executed: true };
+                                    } catch (err) {
+                                        return { executed: false, reason: (err && err.message) || 'legacy_execute_failed' };
+                                    }
+                                }
+                            };
+                        }
+                        console.log('🧩 MODULAR_COMMAND_BRIDGE: Delegating command to window.TARA.WS.handleBackendMessage');
+                        await modularWs.handleBackendMessage(this, msg);
+                        return;
+                    } catch (bridgeErr) {
+                        console.warn('⚠️ MODULAR_COMMAND_BRIDGE failed, falling back to legacy command path:', bridgeErr);
+                    }
+                }
+
                 const payload = msg.payload || msg;
                 const type = payload.type;
                 const target_id = payload.target_id || payload.id; // Support both naming styles

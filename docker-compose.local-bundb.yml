@@ -1,0 +1,250 @@
+name: bundb-eu
+
+services:
+  redis-eu-local:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --bind 0.0.0.0
+    volumes:
+      - redis_eu_local_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - eu-local
+  rag-eu-local:
+    build:
+      context: ./rag-eu
+      dockerfile: Dockerfile
+    command: >
+      sh -c 'export LLM_API_KEY="$${LLM_API_KEY:-$$GROQ_API_KEY}"; export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001'
+    ports:
+      - "${RAG_EU_PORT:-4011}:4001"
+    volumes:
+      - rag_eu_local_index:/app/index
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+
+      REDIS_URL: redis://redis-eu-local:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_LOCATION: ${ORGANIZATION_LOCATION:-Global}
+      TENANT_ID: ${TENANT_ID:-tara}
+
+      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
+      ENABLE_HIVE_MIND: "true"
+      ENABLE_LOCAL_RETRIEVAL: "true"
+      ENABLE_INGESTION_SERVICE: "true"
+      USE_ULTIMATE_TARA: "false"
+      HIVEMIND_IN_VISUAL_COPILOT: "true"
+
+      USE_NEW_DETECTIVE: "false"
+      USE_MISSION_BRAIN: "false"
+      USE_LIVE_GRAPH: "false"
+      USE_HIVE_INTERFACE: "false"
+    restart: unless-stopped
+    depends_on:
+      redis-eu-local:
+        condition: service_healthy
+      embeddings-eu-local:
+        condition: service_started
+    networks:
+      - eu-local
+    env_file:
+      - .env.eu
+
+  embeddings-eu-local:
+    build:
+      context: ./bindings-eu/embeddings-eu
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 4006
+    ports:
+      - "4016:4006"
+    environment:
+      EMBEDDINGS_MODEL: "all-MiniLM-L6-v2"
+      PORT: "4006"
+      HF_HOME: "/root/.cache/huggingface"
+    volumes:
+      - hf_cache_eu_local:/root/.cache/huggingface
+    restart: unless-stopped
+    networks:
+      - eu-local
+
+  visual-copilot-eu-local:
+    build:
+      context: ./rag-visual-copilot
+      dockerfile: Dockerfile
+    command: >
+      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn app:app --host 0.0.0.0 --port 4005'
+    ports:
+      - "${VC_EU_PORT:-4015}:4005"
+    environment:
+      GROQ_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
+
+      REDIS_URL: redis://redis-eu-local:6379/0
+
+      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TENANT_ID: ${TENANT_ID:-bundb}
+      PORT: "4005"
+    restart: unless-stopped
+    depends_on:
+      redis-eu-local:
+        condition: service_healthy
+    networks:
+      - eu-local
+    env_file:
+      - .env.eu
+
+  orchestrator-eu-local:
+    build:
+      context: ./Orchestrator-eu
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 4004 --ws-ping-interval 0
+    ports:
+      - "${ORCHESTRATOR_EU_PORT:-4014}:4004"
+    environment:
+      REDIS_URL: redis://redis-eu-local:6379/0
+
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_FULL_NAME: ${ORGANIZATION_FULL_NAME:-Davinci AI}
+      AGENT_NAME: ${AGENT_NAME:-Tara}
+      AGENT_ID: ${AGENT_ID:-tara}
+      TENANT_ID: ${TENANT_ID:-bundb}
+
+      RAG_SERVICE_URL: http://rag-eu-local:4001
+      STT_SERVICE_URL: http://stt-eu-local:4002
+      TTS_SERVICE_URL: http://tts-eu-local:4003
+      VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu-local:4005
+
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${ORCHESTRATOR_EU_PORT:-4014}}
+      ORCHESTRATOR_WS_URL: ${ORCHESTRATOR_WS_URL:-ws://localhost:${ORCHESTRATOR_EU_PORT:-4014}/ws}
+      WIDGET_WS_URL: ${WIDGET_WS_URL:-ws://localhost:${ORCHESTRATOR_EU_PORT:-4014}/ws}
+
+      STREAM_OUT: ${STREAM_OUT:-auto}
+      SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
+      ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
+      BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
+      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-}
+      AGENT_HOST_SUFFIX: ${AGENT_HOST_SUFFIX:-}
+      GLOBAL_CLIENT_URL: ${GLOBAL_CLIENT_URL:-}
+      FORCE_GLOBAL_DOMAIN: ${FORCE_GLOBAL_DOMAIN:-false}
+      USE_ULTIMATE_TARA: "false"
+
+      # FSM Appointment Booking (Schema-Driven)
+      FSM_APPOINTMENT_SCHEMA_JSON: ${FSM_APPOINTMENT_SCHEMA_JSON:-}
+      FSM_ALLOW_RAG_DETOUR: ${FSM_ALLOW_RAG_DETOUR:-true}
+      FSM_MAX_DETOURS_PER_FIELD: ${FSM_MAX_DETOURS_PER_FIELD:-2}
+      FSM_MAX_RETRIES: ${FSM_MAX_RETRIES:-3}
+    restart: unless-stopped
+    depends_on:
+      redis-eu-local:
+        condition: service_healthy
+      rag-eu-local:
+        condition: service_started
+      visual-copilot-eu-local:
+        condition: service_started
+      tts-eu-local:
+        condition: service_started
+    networks:
+      - eu-local
+    env_file:
+      - .env.eu
+
+  stt-eu-local:
+    build:
+      context: ./stt_groq_whisper
+      dockerfile: Dockerfile
+    command: >
+      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; uvicorn app:app --host 0.0.0.0 --port 4002'
+    ports:
+      - "${STT_EU_PORT:-4012}:4002"
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3}
+      ENABLE_MICRO_CHUNKING: ${ENABLE_MICRO_CHUNKING:-false}
+      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-120}
+      OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-60}
+      CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-3}
+      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-850}
+      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-250}
+      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-900}
+      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-250}
+      GROQ_LANGUAGE: ${GROQ_LANGUAGE:-en}
+
+      STT_GROQ_HOST: 0.0.0.0
+      STT_GROQ_PORT: 4002
+
+      ORCHESTRATOR_WS_URL: ws://orchestrator-eu-local:4004/ws
+      STT_SKIP_SSL_VERIFY: "true"
+      ORCHESTRATOR_SKIP_SSL_VERIFY: "true"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:4002/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - orchestrator-eu-local
+    networks:
+      - eu-local
+    env_file:
+      - .env.eu
+
+  tts-eu-local:
+    build:
+      context: ./tts_cartesia
+      dockerfile: Dockerfile
+    command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
+    ports:
+      - "${TTS_EU_PORT:-4013}:4003"
+    environment:
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-f786b574-daa5-4673-aa0c-cbe3e8534c02}
+      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
+      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+
+      TTS_CARTESIA_HOST: 0.0.0.0
+      TTS_CARTESIA_PORT: 4003
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:4003/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - eu-local
+    env_file:
+      - .env.eu
+
+volumes:
+  redis_eu_local_data:
+  rag_eu_local_index:
+  hf_cache_eu_local:
+networks:
+  eu-local:

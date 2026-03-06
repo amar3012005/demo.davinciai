@@ -34,11 +34,15 @@ def _base(
     **extra: Any,
 ) -> Dict[str, Any]:
     """Shared base payload builder."""
+    agent_id = str(extra.pop("agent_id", "") or "unknown")
+    session_type = str(extra.pop("session_type", "") or "unknown")
     payload: Dict[str, Any] = {
         # ── Universal fields ──
         "doc_type": doc_type,
         "domain": domain,
         "tenant_id": tenant_id,
+        "agent_id": agent_id,
+        "session_type": session_type,
         "text": text,
         "summary": summary,
         "created_at": int(time.time()),
@@ -61,20 +65,27 @@ def case_memory_payload(
     successful: bool = True,
 ) -> Dict[str, Any]:
     """Factory for Case Memory points."""
+    clean_issue = (issue or "").strip()
+    clean_solution = (solution or "").strip()
+    narrative_issue = clean_issue
+    if clean_issue and not clean_issue.endswith((".", "?", "!")):
+        narrative_issue = f"{clean_issue}."
+    narrative_text = f"A user asked: {narrative_issue}" if narrative_issue else "A user asked a question."
+
     return _base(
         doc_type="Case_Memory",
         domain=domain,
         tenant_id=tenant_id,
-        text=issue,
-        summary=solution,
+        text=narrative_text,
+        summary=clean_solution,
         # ── Type-specific ──
         user_id=user_id,
         issue_type=issue_type,
         severity=severity,
         successful=successful,
         # ── Backward compat ──
-        issue=issue,
-        solution=solution,
+        issue=clean_issue,
+        solution=clean_solution,
     )
 
 

@@ -24,25 +24,27 @@ class GroqWhisperConfig:
     # Groq API settings
     api_key: str = os.getenv("GROQ_API_KEY", "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")
     base_url: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-    model: str = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+    model: str = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
     
     # Audio format settings
     sample_rate: int = int(os.getenv("GROQ_SAMPLE_RATE", "16000"))
     audio_format: str = os.getenv("GROQ_AUDIO_FORMAT", "wav")  # wav, flac, mp3
     
     # Micro-chunking settings (ultra-low latency per user preference)
-    enable_micro_chunking: bool = os.getenv("ENABLE_MICRO_CHUNKING", "true").lower() == "true"  # Toggle chunking mode
-    chunk_duration_ms: int = int(os.getenv("CHUNK_DURATION_MS", "300"))  # 300ms chunks for low latency
-    overlap_duration_ms: int = int(os.getenv("OVERLAP_DURATION_MS", "50"))  # 50ms overlap to avoid word cutoff
-    context_window_segments: int = int(os.getenv("CONTEXT_WINDOW_SEGMENTS", "2"))  # Last 2 transcripts for context
+    enable_micro_chunking: bool = os.getenv("ENABLE_MICRO_CHUNKING", "false").lower() == "true"  # Toggle chunking mode
+    chunk_duration_ms: int = int(os.getenv("CHUNK_DURATION_MS", "120"))  # larger chunks improve noise robustness
+    overlap_duration_ms: int = int(os.getenv("OVERLAP_DURATION_MS", "60"))  # overlap for continuity
+    context_window_segments: int = int(os.getenv("CONTEXT_WINDOW_SEGMENTS", "3"))  # larger context reduces drift
     
     # Base prompt for spelling guidance (e.g., proper nouns, acronyms)
     base_prompt: str = os.getenv("GROQ_BASE_PROMPT", "")
     
     # VAD settings (local pre-filtering)
-    vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "600"))  # RMS energy threshold
-    min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "100"))
-    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "300"))
+    vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "850"))  # RMS energy threshold
+    min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "250"))
+    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "700"))
+    final_silence_padding_ms: int = int(os.getenv("FINAL_SILENCE_PADDING_MS", "500"))
+    pre_speech_padding_ms: int = int(os.getenv("PRE_SPEECH_PADDING_MS", "500"))
     
     # Groq API parameters
     language: Optional[str] = os.getenv("GROQ_LANGUAGE", "")  # ISO-639-1 for faster processing

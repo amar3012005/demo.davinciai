@@ -153,12 +153,16 @@ class PlanStepRequest(BaseModel):
     page_title: Optional[str] = Field("", description="Document title from widget")
     # v6: Vision — base64-encoded JPEG screenshot of the current viewport (optional)
     screenshot_b64: Optional[str] = Field(None, description="Base64 JPEG screenshot of current page (for Groq Vision in last mile)")
+    # Pre-route handoff (optional): produced by /api/v1/get_map_hints
+    pre_decision: Optional[Dict[str, Any]] = Field(None, description="Pre-route decision payload from get_map_hints")
+    route_hint: Optional[str] = Field("", description="Pre-route route hint from get_map_hints")
 
 class MapHintsRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
     client_id: Optional[str] = Field("tara", description="Client/Tenant ID")
     current_url: Optional[str] = Field("", description="Current page URL for domain filtering")
     session_id: Optional[str] = Field("", description="Session ID for screenshot cache fallback")
+    dom_context: Optional[List[Dict[str, Any]]] = Field(None, description="Optional DOM elements to pre-seed LiveGraph")
     screenshot_b64: Optional[str] = Field(
         None,
         description="Optional base64 JPEG screenshot for vision pre-routing",
@@ -168,6 +172,12 @@ class FastSenseRequest(BaseModel):
     goal: str = Field(..., description="The user's mission goal")
     dom_context: List[Dict[str, Any]] = Field(..., description="List of visible DOM elements")
     session_id: str = Field(..., description="Session identifier")
+
+class LiveGraphSeedRequest(BaseModel):
+    session_id: str = Field(..., description="Session identifier")
+    dom_context: List[Dict[str, Any]] = Field(..., description="Current visible DOM elements")
+    current_url: Optional[str] = Field("", description="Current page URL")
+    page_title: Optional[str] = Field("", description="Page title")
 
 
 class EmbedRequest(BaseModel):
@@ -728,12 +738,38 @@ async def plan_next_step(request: PlanStepRequest):
             step_number=request.step_number,
             action_history=request.action_history or [],
             screenshot_b64=request.screenshot_b64 or "",
+            pre_decision=request.pre_decision,
+            route_hint=request.route_hint or "",
         )
 
         if isinstance(result, dict):
+            action_obj = result.get("action")
+            action_type = "none"
+            action_target = "none"
+            if isinstance(action_obj, dict):
+                action_type = action_obj.get("type", "none") or "none"
+                action_target = action_obj.get("target_id", "none") or "none"
+            elif isinstance(action_obj, list):
+                # Bundled pipeline: report the first meaningful actionable step.
+                for step in action_obj:
+                    if not isinstance(step, dict):
+                        continue
+                    step_type = (step.get("type") or "").strip()
+                    if step_type in {"", "wait", "scroll"}:
+                        continue
+                    action_type = step_type
+                    action_target = step.get("target_id", "none") or "none"
+                    break
+                if action_type == "none" and action_obj:
+                    # Fallback to last valid step if pipeline has only passive actions.
+                    for step in reversed(action_obj):
+                        if isinstance(step, dict):
+                            action_type = (step.get("type") or "none") or "none"
+                            action_target = step.get("target_id", "none") or "none"
+                            break
             logger.info(
                 f"✅ Ultimate TARA { 'success' if result.get('success') else 'failure' }: "
-                f"{result.get('action', {}).get('type')} on {result.get('action', {}).get('target_id', 'none')}"
+                f"{action_type} on {action_target}"
             )
             return result
 
@@ -829,19 +865,21 @@ async def fast_sense(request: FastSenseRequest):
     # Try Ultimate TARA fast sense first
     if app.state.mind_reader:
         try:
-            # Fast intent parsing with Mind Reader
-            schema = await app.state.mind_reader.translate(
-                user_input=request.goal,
-                current_url=""
-            )
+            # Bypass Mind Reader LLM for fast_sense, just do basic extraction
+            goal_lower = request.goal.lower()
+            prefixes_to_strip = ["i want to ", "can you ", "please ", "show me ", "find ", "click ", "go to ", "navigate to ", "what is "]
+            extracted_entity = request.goal
+            for prefix in prefixes_to_strip:
+                if goal_lower.startswith(prefix):
+                    extracted_entity = request.goal[len(prefix):]
+                    break
             
-            # Simple speech generation based on intent
-            speech = f"Looking for {schema.target_entity}..."
+            speech = f"Looking for {extracted_entity}..."
             
             return {
                 "speech": speech,
                 "relevant_ids": [],
-                "intent": schema.action.value,
+                "intent": "navigation",
                 "pipeline": "ultimate_fast"
             }
         except Exception as e:
@@ -874,6 +912,24 @@ async def get_map_hints(request: MapHintsRequest):
         cache = getattr(app.state, "latest_screenshots", {}) or {}
         screenshot_b64 = cache.get(request.session_id)
 
+    # Optional inline seed: allows frontend to warm LiveGraph in the same map_hints call.
+    if request.session_id and request.dom_context and getattr(app.state, "live_graph", None):
+        try:
+            from tara_models import GraphNode
+            seed_nodes = [GraphNode.from_dict(el) for el in request.dom_context if isinstance(el, dict)]
+            seed_delta = {
+                "delta_type": "full_scan",
+                "nodes": [n.to_redis_dict() for n in seed_nodes],
+                "url": request.current_url or "",
+                "timestamp": time.time(),
+            }
+            await app.state.live_graph.ingest_delta(request.session_id, seed_delta)
+            logger.info(
+                f"🗺️ Map Hints pre-seed | Session: {request.session_id} | nodes={len(seed_nodes)}"
+            )
+        except Exception as seed_err:
+            logger.warning(f"Map Hints pre-seed skipped due to error: {seed_err}")
+
     return await build_map_hints(
         goal=request.goal,
         client_id=request.client_id or "tara",
@@ -881,7 +937,178 @@ async def get_map_hints(request: MapHintsRequest):
         screenshot_b64=screenshot_b64,
         mind_reader=app.state.mind_reader,
         hive_interface=app.state.hive_interface,
+        mission_brain=getattr(app.state, "mission_brain", None),
+        live_graph=getattr(app.state, "live_graph", None),
+        session_id=getattr(request, "session_id", "") or "",
     )
+
+
+class PushScreenshotRequest(BaseModel):
+    session_id: str = Field(..., description="Session identifier")
+    screenshot_b64: str = Field(..., description="Base64-encoded JPEG screenshot")
+    source: Optional[str] = Field("orchestrator", description="Who pushed this screenshot")
+
+@app.post("/api/v1/push_screenshot")
+async def push_screenshot(request: PushScreenshotRequest):
+    """
+    Called by the Orchestrator whenever it receives a fresh screenshot from the browser.
+    Caches it in app.state.latest_screenshots so the Last-Mile screenshot broker
+    can retrieve a live image without needing its own direct WebSocket to the browser.
+    """
+    if not request.screenshot_b64:
+        return {"success": False, "reason": "empty_screenshot"}
+
+    cache = getattr(app.state, "latest_screenshots", None)
+    if cache is None:
+        cache = {}
+        app.state.latest_screenshots = cache
+
+    prev_len = len(cache.get(request.session_id, "") or "")
+    cache[request.session_id] = request.screenshot_b64
+    new_len = len(request.screenshot_b64)
+    logger.info(
+        f"📸 PUSH_SCREENSHOT | session={request.session_id} "
+        f"source={request.source} size={new_len // 1024}KB (prev={prev_len // 1024}KB)"
+    )
+    return {"success": True, "size_kb": new_len // 1024}
+
+
+@app.post("/api/v1/livegraph_seed")
+async def livegraph_seed(request: LiveGraphSeedRequest):
+    """
+    Seed LiveGraph early (e.g., when widget opens) so pre-route has DOM ready.
+    """
+    if not getattr(app.state, "live_graph", None):
+        raise HTTPException(status_code=503, detail="LiveGraph not initialized")
+
+    start = time.time()
+    try:
+        from tara_models import GraphNode
+
+        # ── Seed throttling: avoid burst full-scans for identical/near-identical payloads ──
+        now = time.time()
+        throttle = getattr(app.state, "livegraph_seed_throttle", None)
+        if throttle is None:
+            throttle = {}
+            app.state.livegraph_seed_throttle = throttle
+
+        min_interval_s = float(os.getenv("LIVEGRAPH_SEED_MIN_INTERVAL_MS", "700")) / 1000.0
+        hard_min_interval_s = float(os.getenv("LIVEGRAPH_SEED_HARD_MIN_INTERVAL_MS", "120")) / 1000.0
+        max_small_delta_ratio = float(os.getenv("LIVEGRAPH_SEED_SMALL_DELTA_RATIO", "0.06"))
+        dedupe_ttl_s = float(os.getenv("LIVEGRAPH_SEED_DEDUPE_TTL_MS", "2500")) / 1000.0
+        cleanup_ttl_s = float(os.getenv("LIVEGRAPH_SEED_CLEANUP_TTL_SEC", "600"))
+
+        dom_context = request.dom_context or []
+        node_count = len(dom_context)
+
+        # Lightweight signature from URL + node count + sampled IDs/text
+        head = dom_context[:20]
+        tail = dom_context[-8:] if node_count > 20 else []
+        sample = head + tail
+        sample_tokens: List[str] = []
+        for el in sample:
+            if not isinstance(el, dict):
+                continue
+            token = (
+                str(el.get("id", "")) or str(el.get("node_id", ""))
+            )[:32] or (str(el.get("text", ""))[:24])
+            if token:
+                sample_tokens.append(token)
+        signature_src = f"{request.current_url or ''}|{node_count}|{'|'.join(sample_tokens)}"
+        dom_signature = hashlib.md5(signature_src.encode("utf-8")).hexdigest()[:16]
+
+        sess = request.session_id
+        prev = throttle.get(sess, {})
+        prev_ts = float(prev.get("ts", 0.0) or 0.0)
+        prev_count = int(prev.get("count", 0) or 0)
+        prev_sig = str(prev.get("sig", "") or "")
+        age = now - prev_ts
+        delta_ratio = abs(node_count - prev_count) / max(prev_count, 1) if prev_count else 1.0
+
+        # Hard guard for request storms
+        if age < hard_min_interval_s:
+            logger.info(
+                f"🌱 LiveGraph Seed SKIP(hard-throttle) | Session: {sess} | "
+                f"nodes={node_count} age_ms={int(age*1000)}"
+            )
+            return {
+                "success": True,
+                "session_id": sess,
+                "seeded_nodes": prev_count,
+                "visible_nodes": 0,
+                "duration_ms": int((time.time() - start) * 1000),
+                "skipped": True,
+                "skip_reason": "hard_throttle",
+            }
+
+        # Soft dedupe: repeated same/near-identical seeds inside short window
+        if prev_ts and age < min_interval_s:
+            if prev_sig == dom_signature or delta_ratio <= max_small_delta_ratio:
+                logger.info(
+                    f"🌱 LiveGraph Seed SKIP(soft-dedupe) | Session: {sess} | "
+                    f"nodes={node_count} prev={prev_count} Δ={delta_ratio:.3f} age_ms={int(age*1000)}"
+                )
+                return {
+                    "success": True,
+                    "session_id": sess,
+                    "seeded_nodes": prev_count,
+                    "visible_nodes": 0,
+                    "duration_ms": int((time.time() - start) * 1000),
+                    "skipped": True,
+                    "skip_reason": "soft_dedupe",
+                }
+
+        # Dedupe identical signature for a longer TTL window
+        if prev_ts and prev_sig == dom_signature and age < dedupe_ttl_s:
+            logger.info(
+                f"🌱 LiveGraph Seed SKIP(signature-ttl) | Session: {sess} | "
+                f"nodes={node_count} age_ms={int(age*1000)}"
+            )
+            return {
+                "success": True,
+                "session_id": sess,
+                "seeded_nodes": prev_count,
+                "visible_nodes": 0,
+                "duration_ms": int((time.time() - start) * 1000),
+                "skipped": True,
+                "skip_reason": "signature_ttl",
+            }
+
+        nodes = [GraphNode.from_dict(el) for el in dom_context if isinstance(el, dict)]
+        delta = {
+            "delta_type": "full_scan",
+            "nodes": [n.to_redis_dict() for n in nodes],
+            "url": request.current_url or "",
+            "timestamp": time.time(),
+        }
+        await app.state.live_graph.ingest_delta(request.session_id, delta)
+        visible_nodes = await app.state.live_graph.get_visible_nodes(request.session_id)
+        duration_ms = int((time.time() - start) * 1000)
+
+        logger.info(
+            f"🌱 LiveGraph Seed | Session: {request.session_id} | "
+            f"seeded={len(nodes)} visible={len(visible_nodes)} ({duration_ms}ms)"
+        )
+
+        throttle[sess] = {"ts": now, "count": len(nodes), "sig": dom_signature}
+        # Opportunistic cleanup to keep memory bounded
+        if len(throttle) > 512:
+            cutoff = now - cleanup_ttl_s
+            stale = [k for k, v in throttle.items() if float(v.get("ts", 0.0) or 0.0) < cutoff]
+            for k in stale[:256]:
+                throttle.pop(k, None)
+
+        return {
+            "success": True,
+            "session_id": request.session_id,
+            "seeded_nodes": len(nodes),
+            "visible_nodes": len(visible_nodes),
+            "duration_ms": duration_ms,
+            "skipped": False,
+        }
+    except Exception as e:
+        logger.error(f"❌ LiveGraph Seed failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/generate_exit")
 async def generate_exit(request_data: DynamicExitRequest):
@@ -1608,6 +1835,34 @@ async def analyze_session(request: AnalyzeSessionRequest):
         analytics_engine = app.state.session_analytics
         if not analytics_engine:
             raise HTTPException(status_code=503, detail="Session Analytics engine not initialized")
+
+        # Guardrail: do not finalize analytics while a mission is still actively running.
+        mission_brain = getattr(app.state, "mission_brain", None)
+        if mission_brain:
+            try:
+                active_mission = await mission_brain._load_session_mission(request.session_id)
+            except Exception as mission_lookup_err:
+                active_mission = None
+                logger.warning(
+                    f"analyze_session mission lookup failed for {request.session_id}: {mission_lookup_err}"
+                )
+            if active_mission and getattr(active_mission, "status", "") == "in_progress":
+                phase = str(getattr(active_mission, "phase", "strategy") or "strategy")
+                if phase != "done":
+                    logger.info(
+                        f"📊 ANALYZE_SESSION_DEFERRED: mission still active "
+                        f"session={request.session_id} mission={active_mission.mission_id} phase={phase}"
+                    )
+                    return AnalyzeSessionResponse(
+                        status="deferred",
+                        report={
+                            "session_id": request.session_id,
+                            "deferred": True,
+                            "reason": "mission_in_progress",
+                            "mission_id": active_mission.mission_id,
+                            "phase": phase,
+                        },
+                    )
             
         # 1. Run full analysis (Reasoning + Sentiment + Distillation)
         # Pass brief_context if provided, otherwise it will be auto-generated

@@ -24,28 +24,41 @@
             /**
              * Execute a command dispatched by the backend.
              */
-            async executeCommand(type, targetId, text) {
+            async executeCommand(type, targetId, text, forceClick = false) {
                 widget.setOrbState('executing');
 
                 try {
                     if (type === 'wait') {
-                        console.log("⏳ TARA Waiting (as requested)...");
-                        await new Promise(r => setTimeout(r, 2000));
+                        const delay = forceClick || 2000; // forceClick repurposed as wait_ms when type=wait
+                        console.log(`⏳ TARA Waiting ${delay}ms (pipeline)...`);
+                        await new Promise(r => setTimeout(r, delay));
+                        return { executed: true };
                     }
                     else if (type === 'click') {
                         const el = Executor.findElement(targetId, text);
                         if (el) {
-                            await widget.ghostCursor.moveTo(el);
-                            await widget.ghostCursor.click();
+                            if (forceClick) {
+                                console.log("🔥 Force Click triggered: Applying 'Triple-Threat' dropdown sequence");
+                                el.scrollIntoView({ block: 'center', inline: 'center' });
+                                el.focus();
 
-                            // Robust click strategy
-                            const opts = { bubbles: true, cancelable: true, view: window };
-                            el.dispatchEvent(new MouseEvent('mousedown', opts));
-                            el.dispatchEvent(new MouseEvent('mouseup', opts));
-                            el.dispatchEvent(new MouseEvent('click', opts));
+                                const opts = { bubbles: true, cancelable: true, view: window, buttons: 1 };
+                                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                                el.dispatchEvent(new MouseEvent('click', opts));
+                            } else {
+                                await widget.ghostCursor.moveTo(el);
+                                await widget.ghostCursor.click();
 
-                            if (typeof el.click === 'function') el.click();
-                            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus();
+                                // Robust click strategy
+                                const opts = { bubbles: true, cancelable: true, view: window };
+                                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                                el.dispatchEvent(new MouseEvent('click', opts));
+
+                                if (typeof el.click === 'function') el.click();
+                                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus();
+                            }
 
                             // Phoenix Protocol: Protect against click navigation
                             Phoenix.plantSessionSeeds(widget._currentMissionGoal, widget.pendingMissionGoal);
@@ -68,6 +81,10 @@
                                 console.log("📡 No hard navigation detected after click. Clearing flag for WS handler...");
                                 sessionStorage.removeItem('tara_is_navigating');
                             }
+                            return { executed: true };
+                        } else {
+                            console.warn(`⚠️ Click target not found: ${targetId} fallback='${text || ''}'`);
+                            return { executed: false, reason: "target_not_found" };
                         }
                     }
                     else if (type === 'type_text') {
@@ -93,49 +110,59 @@
                             el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
                             el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
-                            // Phoenix Protocol: Protect against Enter key navigation
-                            Phoenix.plantSessionSeeds(widget._currentMissionGoal, widget.pendingMissionGoal);
-                            const currentSessionId = sessionStorage.getItem('tara_session_id') || localStorage.getItem('tara_session_id');
-                            sessionStorage.setItem('tara_is_navigating', 'true');
+                            // forceClick is re-used as a press_enter flag from pipeline steps.
+                            // Legacy callers always pass forceClick=false, so Enter defaults to ON
+                            // for legacy compatibility. Bundled callers set forceClick=true to force Enter
+                            // or rely on the explicit step.press_enter field parsed upstream.
+                            const shouldPressEnter = (forceClick !== false) || true;
 
-                            // Fire Enter key
-                            const enterOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
-                            el.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
-                            el.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
-                            el.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
+                            if (shouldPressEnter) {
+                                // Phoenix Protocol: Protect against Enter key navigation
+                                Phoenix.plantSessionSeeds(widget._currentMissionGoal, widget.pendingMissionGoal);
+                                sessionStorage.setItem('tara_is_navigating', 'true');
 
-                            // Form submit fallback
-                            if (el.form) {
-                                setTimeout(() => {
-                                    try {
-                                        if (typeof el.form.requestSubmit === 'function') {
-                                            el.form.requestSubmit();
-                                        } else {
-                                            el.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                                // Fire Enter key
+                                const enterOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+                                el.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
+                                el.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
+                                el.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
+
+                                // Form submit fallback
+                                if (el.form) {
+                                    setTimeout(() => {
+                                        try {
+                                            if (typeof el.form.requestSubmit === 'function') {
+                                                el.form.requestSubmit();
+                                            } else {
+                                                el.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                                            }
+                                        } catch (e) {
+                                            console.warn('Tara: Form requestSubmit failed', e);
+                                            el.form.submit();
                                         }
-                                    } catch (e) {
-                                        console.warn('Tara: Form requestSubmit failed', e);
-                                        el.form.submit();
-                                    }
-                                }, 100);
-                            }
-
-                            widget.isNavigating = true;
-                            // Wait a bit to block execution_complete, just like click
-                            await new Promise(resolve => {
-                                setTimeout(() => {
-                                    widget.isNavigating = false;
-                                    resolve();
-                                }, 2000);
-                            });
-
-                            // Safety net: if no navigation happened, clear flag for WS handler
-                            setTimeout(() => {
-                                if (sessionStorage.getItem('tara_is_navigating') === 'true') {
-                                    console.log("📡 No navigation detected after typing. Clearing flag for WS handler...");
-                                    sessionStorage.removeItem('tara_is_navigating');
+                                    }, 100);
                                 }
-                            }, 1500);
+
+                                widget.isNavigating = true;
+                                await new Promise(resolve => {
+                                    setTimeout(() => {
+                                        widget.isNavigating = false;
+                                        resolve();
+                                    }, 2000);
+                                });
+
+                                // Safety net: if no navigation happened, clear flag for WS handler
+                                setTimeout(() => {
+                                    if (sessionStorage.getItem('tara_is_navigating') === 'true') {
+                                        console.log("📡 No navigation detected after typing. Clearing flag for WS handler...");
+                                        sessionStorage.removeItem('tara_is_navigating');
+                                    }
+                                }, 1500);
+                            }
+                            return { executed: true };
+                        } else {
+                            console.warn(`⚠️ Type target not found: ${targetId}`);
+                            return { executed: false, reason: "target_not_found" };
                         }
                     }
                     else if (type === 'scroll_to') {
@@ -143,8 +170,10 @@
                         if (el) {
                             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             Executor.highlightElement(el);
+                            return { executed: true };
                         } else {
                             Executor.robustScroll(1, window.innerHeight * 0.5);
+                            return { executed: true };
                         }
                     }
                     else if (type === 'scroll') {
@@ -160,26 +189,32 @@
                         `;
                         document.body.appendChild(flash);
                         setTimeout(() => { flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 200);
+                        return { executed: true };
                     }
                     else if (type === 'highlight') {
                         Executor.executeHighlight(targetId, text);
+                        return { executed: true };
                     }
                     else if (type === 'spotlight') {
                         if (widget.spotlight) {
                             widget.spotlight.classList.add('active');
                             setTimeout(() => widget.spotlight.classList.remove('active'), 3000);
                         }
+                        return { executed: true };
                     }
                     else if (type === 'clear') {
                         Executor.clearHighlights();
+                        return { executed: true };
                     }
 
                     // Adaptive DOM settle
                     const settleTime = (type === 'scroll' || type === 'scroll_to') ? 800 : 300;
                     await Scanner.waitForDOMSettle(3000, settleTime);
+                    return { executed: true };
 
                 } catch (err) {
                     console.warn("Execution partial error:", err);
+                    return { executed: false, reason: String(err) };
                 }
             },
 

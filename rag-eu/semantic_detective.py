@@ -116,20 +116,18 @@ class SemanticDetective:
         self._model_available = False
         self._shared_embeddings = None
 
-        # Prefer shared embeddings (avoids double model load)
         if embeddings is not None:
-            self._shared_embeddings = embeddings
+            self.model = embeddings
             self._model_available = True
-            logger.info("🔍 SemanticDetective using shared embeddings instance")
-        elif SENTENCE_TRANSFORMERS_AVAILABLE:
-            try:
-                self.model = SentenceTransformer(model_name)
-                self._model_available = True
-                logger.info(f"🔍 SemanticDetective loaded model: {model_name}")
-            except Exception as e:
-                logger.warning(f"Could not load sentence transformer: {e}")
+            logger.info("🔍 SemanticDetective using provided embeddings instance")
         else:
-            logger.warning("sentence-transformers not available, using keyword fallback")
+            try:
+                from remote_embeddings import RemoteEmbeddings
+                self.model = RemoteEmbeddings()
+                self._model_available = True
+                logger.info("🔍 SemanticDetective using RemoteEmbeddings via microservice")
+            except Exception as e:
+                logger.warning(f"Failed to load RemoteEmbeddings: {e}")
 
         logger.info(
             f"🔍 SemanticDetective initialized: "
@@ -189,27 +187,34 @@ class SemanticDetective:
         if self._model_available and NUMPY_AVAILABLE:
             try:
                 # 1. Embed the query ONCE
-                if self._shared_embeddings is not None:
-                    query_vector = np.array(self._shared_embeddings.embed_query(query))
-                elif self.model is not None:
-                    query_vector = self.model.encode([query], show_progress_bar=False, convert_to_numpy=True)[0]
+                if self.model is not None:
+                    if hasattr(self.model, 'encode'):
+                        # Using our RemoteEmbeddings or standard SentenceTransformer with encode
+                        query_kwargs = {}
+                        if not hasattr(self.model, 'endpoint_url'): # Not our wrapper
+                            query_kwargs = {"show_progress_bar": False, "convert_to_numpy": True}
+                        query_vector = self.model.encode([query], **query_kwargs)[0]
+                    elif hasattr(self.model, 'embed_query'):
+                        query_vector = np.array(self.model.embed_query(query))
                 
                 # 2. Batch-embed ALL node texts in a single call
                 all_texts = [n.text or "" for n in interactive_nodes]
-                if self._shared_embeddings is not None:
-                    # OptimizedEmbeddings may not have embed_documents; fallback to loop
-                    if hasattr(self._shared_embeddings, 'embed_documents'):
-                        all_embeddings = self._shared_embeddings.embed_documents(all_texts)
+                if self.model is not None:
+                    if hasattr(self.model, 'encode'):
+                        encode_kwargs = {}
+                        if not hasattr(self.model, 'endpoint_url'): # Not our wrapper
+                            encode_kwargs = {"show_progress_bar": False, "convert_to_numpy": True}
+                        all_embeddings = self.model.encode(all_texts, **encode_kwargs)
+                        for i, node in enumerate(interactive_nodes):
+                            node_vectors[node.id] = all_embeddings[i]
+                    elif hasattr(self.model, 'embed_documents'):
+                        all_embeddings = self.model.embed_documents(all_texts)
                         for i, node in enumerate(interactive_nodes):
                             node_vectors[node.id] = np.array(all_embeddings[i])
-                    else:
-                        all_embeddings = [self._shared_embeddings.embed_query(t) for t in all_texts]
+                    elif hasattr(self.model, 'embed_query'):
+                        all_embeddings = [self.model.embed_query(t) for t in all_texts]
                         for i, node in enumerate(interactive_nodes):
                             node_vectors[node.id] = np.array(all_embeddings[i])
-                elif self.model is not None:
-                    all_embeddings = self.model.encode(all_texts, show_progress_bar=False, convert_to_numpy=True)
-                    for i, node in enumerate(interactive_nodes):
-                        node_vectors[node.id] = all_embeddings[i]
                 
                 logger.debug(f"🔍 Batch embedded: 1 query + {len(all_texts)} nodes")
             except Exception as e:
@@ -389,13 +394,16 @@ class SemanticDetective:
                 return float(similarity)
             
             # SLOW PATH (fallback): Compute individually
-            if self._shared_embeddings is not None:
-                query_embedding = np.array(self._shared_embeddings.embed_query(query))
-                node_embedding = np.array(self._shared_embeddings.embed_query(node.text or ""))
-            else:
-                query_embedding = self.model.encode([query], show_progress_bar=False, convert_to_numpy=True)[0]
-                node_embedding = self.model.encode([node.text], show_progress_bar=False, convert_to_numpy=True)[0]
-            
+            if hasattr(self.model, 'encode'):
+                kwargs = {}
+                if not hasattr(self.model, 'endpoint_url'): # Not our wrapper
+                    kwargs = {"show_progress_bar": False, "convert_to_numpy": True}
+                query_embedding = self.model.encode([query], **kwargs)[0]
+                node_embedding = self.model.encode([node.text or ""], **kwargs)[0]
+            elif hasattr(self.model, 'embed_query'):
+                query_embedding = np.array(self.model.embed_query(query))
+                node_embedding = np.array(self.model.embed_query(node.text or ""))
+                
             similarity = self._cosine_similarity(query_embedding, node_embedding)
             return float(similarity)
             

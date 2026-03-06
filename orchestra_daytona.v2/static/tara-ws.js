@@ -203,6 +203,18 @@
 
             console.log('📡 Phoenix: Sending resume messages after session_config...', sessionId);
 
+            let savedActionHistory = [];
+            try {
+                savedActionHistory = JSON.parse(
+                    sessionStorage.getItem('tara_action_history') ||
+                    localStorage.getItem('tara_action_history') ||
+                    '[]'
+                );
+                if (!Array.isArray(savedActionHistory)) savedActionHistory = [];
+            } catch (e) {
+                savedActionHistory = [];
+            }
+
             // Phase 1: Request History (for chat turns + bridging)
             if (sessionId && widget.ws && widget.ws.readyState === WebSocket.OPEN) {
                 widget.ws.send(JSON.stringify({
@@ -222,24 +234,12 @@
                     mission_id: sessionStorage.getItem('tara_mission_id') || localStorage.getItem('tara_mission_id') || null,
                     subgoal_index: parseInt(sessionStorage.getItem('tara_subgoal_index') || localStorage.getItem('tara_subgoal_index') || '0', 10),
                     step_count: parseInt(sessionStorage.getItem('tara_step_count') || localStorage.getItem('tara_step_count') || '0', 10),
+                    action_history: savedActionHistory.slice(-5),
+                    outcome: {
+                        current_url: window.location.href
+                    },
                     dom_context: window.TARA.Scanner.scanPageBlueprint(true) || []
                 }));
-            }
-
-            // Fresh DOM scan
-            try {
-                const blueprint = window.TARA.Scanner.scanPageBlueprint(true);
-                if (blueprint && widget.ws && widget.ws.readyState === WebSocket.OPEN) {
-                    widget.ws.send(JSON.stringify({
-                        type: 'dom_update',
-                        elements: blueprint,
-                        url: window.location.href,
-                        title: document.title
-                    }));
-                    console.log('📡 Phoenix: Fresh DOM sent');
-                }
-            } catch (e) {
-                console.warn('Phoenix DOM scan failed:', e);
             }
 
             widget.wasNavigating = false;
@@ -336,14 +336,18 @@
             else if (msg.type === 'mission_started') {
                 widget._currentMissionGoal = msg.goal;
                 // Save mission context for persistence
+                sessionStorage.setItem('tara_goal', msg.goal || '');
+                localStorage.setItem('tara_goal', msg.goal || '');
                 if (msg.mission_id) {
                     sessionStorage.setItem('tara_mission_id', msg.mission_id);
                     localStorage.setItem('tara_mission_id', msg.mission_id);
                 }
                 sessionStorage.setItem('tara_step_count', '0');
                 sessionStorage.setItem('tara_subgoal_index', '0');
+                sessionStorage.setItem('tara_action_history', '[]');
                 localStorage.setItem('tara_step_count', '0');
                 localStorage.setItem('tara_subgoal_index', '0');
+                localStorage.setItem('tara_action_history', '[]');
                 console.log('🎯 Mission goal tracked:', msg.goal, 'mission_id:', msg.mission_id || 'pending');
             }
             else if (msg.type === 'mission_complete') {
@@ -355,9 +359,11 @@
                 sessionStorage.removeItem('tara_mission_id');
                 sessionStorage.removeItem('tara_subgoal_index');
                 sessionStorage.removeItem('tara_step_count');
+                sessionStorage.removeItem('tara_action_history');
                 localStorage.removeItem('tara_mission_id');
                 localStorage.removeItem('tara_subgoal_index');
                 localStorage.removeItem('tara_step_count');
+                localStorage.removeItem('tara_action_history');
                 window.TARA.Phoenix.clearMissionState();
                 widget._currentMissionGoal = null;
                 widget.pendingMissionGoal = null;
@@ -416,14 +422,24 @@
                 UI.simulateTyping(widget, msg.text);
             }
             else if (msg.type === 'command') {
-                // Extract action details from the command message
-                const payload = msg.payload || msg;
-                const actionType = (msg.payload ? payload.type : null) || msg.action || payload.action_type || payload.type;
-                const target_id = payload.target_id || payload.id || msg.target_id;
-                const text = payload.text || msg.text;
-                const type = (actionType === 'command') ? 'click' : actionType;
+                // ═══════════════════════════════════════════════════════════
+                // 🚀 MULTI-ACTION PIPELINE — Handles bundled action arrays
+                //
+                // The backend now returns either:
+                //   msg.action = { type, target_id, ... }   (single action, legacy)
+                //   msg.action = [ {...}, {...}, {...} ]     (bundled pipeline)
+                //
+                // For bundled arrays, we execute each action sequentially with
+                // a micro-delay between steps and only send ONE execution_complete
+                // at the very end. This eliminates the 4-5s per-step latency tax.
+                // ═══════════════════════════════════════════════════════════
 
-                // Track mission progress from backend
+                // Normalise payload — backend may send msg.action (array or object)
+                // or the legacy msg.payload wrapper.
+                const rawAction = msg.action || msg.payload || msg;
+                const actionList = Array.isArray(rawAction) ? rawAction : [rawAction];
+
+                // Track mission progress from backend (once, before the sequence)
                 if (msg.mission_id) {
                     sessionStorage.setItem('tara_mission_id', msg.mission_id);
                     localStorage.setItem('tara_mission_id', msg.mission_id);
@@ -432,34 +448,98 @@
                     sessionStorage.setItem('tara_subgoal_index', String(msg.subgoal_index));
                     localStorage.setItem('tara_subgoal_index', String(msg.subgoal_index));
                 }
-                // Increment step count
                 const currentStep = parseInt(sessionStorage.getItem('tara_step_count') || '0', 10);
-                sessionStorage.setItem('tara_step_count', String(currentStep + 1));
-                localStorage.setItem('tara_step_count', String(currentStep + 1));
-
-                console.log(`🤖 Executing: ${type} on ${target_id} (step ${currentStep + 1})`);
+                sessionStorage.setItem('tara_step_count', String(currentStep + actionList.length));
+                localStorage.setItem('tara_step_count', String(currentStep + actionList.length));
 
                 const preActionUrl = window.location.href;
                 const preActionHash = Scanner.lastDOMHash;
                 const settleStart = Date.now();
+                let abortedForNavigation = false;
+                let actionableSteps = 0;
+                let executedActionable = 0;
+                const actionErrors = [];
 
-                await widget.executor.executeCommand(type, target_id, text);
+                console.log(`🤖 Pipeline: executing ${actionList.length} action(s) (step ${currentStep + 1})`);
 
-                // Phoenix Guard
-                const willNavigate = sessionStorage.getItem('tara_is_navigating') === 'true';
-                if (willNavigate) {
-                    console.log('🛡️ Phoenix Guard: Skipping execution_complete — navigating.');
+                // ── Execute each action in sequence ──
+                for (let i = 0; i < actionList.length; i++) {
+                    const step = actionList[i];
+                    if (!step || typeof step !== 'object') continue;
+
+                    const rawType = step.type || step.action_type || step.action || '';
+                    const type = rawType === 'command' ? 'click' : rawType;
+                    const target_id = step.target_id || step.id || '';
+                    const text = step.text || step.target_label || step.label || step.speech || '';
+                    const force_click = step.force_click || false;
+                    // Bundled waits may carry explicit wait_ms (from search injection)
+                    const wait_ms = step.wait_ms || null;
+
+                    console.log(`  ↳ [${i + 1}/${actionList.length}] ${type} ${target_id || ''}`);
+
+                    // Persist compact action history for Phoenix resume
+                    try {
+                        const actionSig = `${type}:${target_id || 'none'}`;
+                        let hist = JSON.parse(
+                            sessionStorage.getItem('tara_action_history') ||
+                            localStorage.getItem('tara_action_history') ||
+                            '[]'
+                        );
+                        if (!Array.isArray(hist)) hist = [];
+                        hist.push(actionSig);
+                        hist = hist.slice(-5);
+                        sessionStorage.setItem('tara_action_history', JSON.stringify(hist));
+                        localStorage.setItem('tara_action_history', JSON.stringify(hist));
+                    } catch (e) {
+                        console.warn('⚠️ Failed to persist action history:', e);
+                    }
+
+                    // Execute the action
+                    if (type === 'wait') {
+                        const delay = wait_ms || ((step.seconds || 2) * 1000);
+                        console.log(`  ⏳ Wait ${delay}ms`);
+                        await new Promise(r => setTimeout(r, delay));
+                    } else {
+                        actionableSteps += 1;
+                        const execResult = await widget.executor.executeCommand(type, target_id, text, force_click);
+                        if (execResult && execResult.executed) {
+                            executedActionable += 1;
+                        } else {
+                            actionErrors.push({
+                                step: i + 1,
+                                type,
+                                target_id,
+                                reason: (execResult && execResult.reason) || 'unknown'
+                            });
+                        }
+                    }
+
+                    // Phoenix Guard: if navigation triggered mid-sequence, abort and skip execution_complete
+                    if (sessionStorage.getItem('tara_is_navigating') === 'true') {
+                        console.log('🛡️ Phoenix Guard: Navigation detected mid-pipeline — aborting sequence.');
+                        abortedForNavigation = true;
+                        break;
+                    }
+
+                    // Micro-delay between sequential actions (not after last one)
+                    if (i < actionList.length - 1 && type !== 'wait') {
+                        await new Promise(r => setTimeout(r, 150));
+                    }
+                }
+
+                if (abortedForNavigation) {
                     widget.waitingForExecution = false;
                     return;
                 }
 
+                // ── Post-sequence: gather state and report back ──
                 const settleTime = Date.now() - settleStart;
                 const freshDOM = Scanner.scanPageBlueprint(true);
                 const urlChanged = window.location.href !== preActionUrl;
                 const newElements = freshDOM ? freshDOM.filter(el => el.isNew).length : 0;
                 const domChanged = freshDOM !== null || Scanner.lastDOMHash !== preActionHash;
 
-                // 📸 Capture post-action screenshot for Groq Vision (non-blocking)
+                // 📸 Capture post-sequence screenshot for Groq Vision (non-blocking)
                 let screenshotB64 = null;
                 try {
                     screenshotB64 = await Scanner.captureScreenshot();
@@ -467,13 +547,34 @@
                     console.warn('📸 Screenshot capture skipped:', snapErr);
                 }
 
+                const execStatus = executedActionable > 0 || actionableSteps === 0 ? 'success' : 'no_action';
+                if (execStatus !== 'success') {
+                    console.warn(`⚠️ Pipeline executed no actionable UI steps (attempted=${actionableSteps})`, actionErrors);
+                }
+
                 widget.ws.send(JSON.stringify({
                     type: 'execution_complete',
-                    status: 'success',
+                    status: execStatus,
                     mission_id: sessionStorage.getItem('tara_mission_id') || null,
                     subgoal_index: parseInt(sessionStorage.getItem('tara_subgoal_index') || '0', 10),
                     step_count: parseInt(sessionStorage.getItem('tara_step_count') || '0', 10),
+                    action_history: (() => {
+                        try {
+                            const hist = JSON.parse(
+                                sessionStorage.getItem('tara_action_history') ||
+                                localStorage.getItem('tara_action_history') ||
+                                '[]'
+                            );
+                            return Array.isArray(hist) ? hist.slice(-5) : [];
+                        } catch {
+                            return [];
+                        }
+                    })(),
+                    pipeline_length: actionList.length,
                     outcome: {
+                        action_attempted_count: actionableSteps,
+                        action_executed_count: executedActionable,
+                        action_errors: actionErrors,
                         dom_changed: domChanged,
                         url_changed: urlChanged,
                         new_elements_count: newElements,
@@ -487,11 +588,11 @@
                     active_states: Scanner.detectActiveStates(),
                     data_tables: Scanner.extractVisibleTables(),
                     title: document.title,
-                    screenshot_b64: screenshotB64,  // 👁️ for Groq Vision in last mile
+                    screenshot_b64: screenshotB64,
                     timestamp: Date.now()
                 }));
 
-                console.log(`✅ Execution complete (${settleTime}ms, ${newElements} new, url_changed=${urlChanged}, screenshot=${screenshotB64 ? Math.round(screenshotB64.length / 1024) + 'KB' : 'none'})`);
+                console.log(`✅ Pipeline complete: ${actionList.length} actions in ${settleTime}ms (url_changed=${urlChanged}, screenshot=${screenshotB64 ? Math.round(screenshotB64.length / 1024) + 'KB' : 'none'})`);
                 widget.waitingForExecution = false;
                 widget.setOrbState('listening');
             }

@@ -10,7 +10,7 @@ import logging
 import hashlib
 import re
 import asyncio
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, Union
 import numpy as np
 import faiss
 from .llm_providers import create_provider, create_fallback_provider

@@ -50,6 +50,7 @@ class ProcessingPipeline:
                            query: str,
                            session_id: str,
                            user_id: Optional[str] = None,
+                           agent_name: Optional[str] = None,
                            stt_metadata: Optional[Dict[str, Any]] = None,
                            language: Optional[str] = None,
                            history_context: Optional[str] = None,
@@ -118,6 +119,7 @@ class ProcessingPipeline:
                 query=query,
                 session_id=session_id,
                 user_id=user_id,
+                agent_name=agent_name,
                 language=language,
                 context=context,
                 history_context=history_context,
@@ -256,6 +258,5 @@ class ProcessingPipeline:
                 "confidence": 0.0,
                 "error": str(e)
             }
-
 
 

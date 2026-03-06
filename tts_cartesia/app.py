@@ -316,12 +316,17 @@ async def websocket_stream(
     
     # Generate session ID if not provided
     session_id = session_id or f"ws_{uuid.uuid4().hex[:16]}"
+    tenant_id = os.getenv("TENANT_ID", "tenant")
     
     # Create session state
     session = SessionState(session_id)
     active_sessions[session_id] = session
     
-    logger.info(f"🔌 WebSocket connected: {session_id}")
+    logger.info("============================================================")
+    logger.info("============================================================")
+    logger.info(f"🔌 TTS SESSION START | TENANT_ID={tenant_id} | SESSION_ID={session_id}")
+    logger.info("============================================================")
+    logger.info("============================================================")
     
     # Send connection confirmation
     await websocket.send_json({
@@ -571,6 +576,15 @@ async def websocket_stream(
             del active_sessions[session_id]
         
         duration = time.time() - session.created_at
+        logger.info("============================================================")
+        logger.info("============================================================")
+        logger.info(
+            f"🔌 TTS SESSION END | TENANT_ID={tenant_id} | SESSION_ID={session_id} | "
+            f"(duration: {duration:.1f}s, chunks: {session.chunks_sent}, "
+            f"bytes: {session.total_audio_bytes})"
+        )
+        logger.info("============================================================")
+        logger.info("============================================================")
         logger.info(
             f"🔌 [{session_id}] Session ended "
             f"(duration: {duration:.1f}s, chunks: {session.chunks_sent}, "
