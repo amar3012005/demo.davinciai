@@ -46,6 +46,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def _resolve_effective_tenant_id(
+    tenant_id: Optional[str],
+    agent_name: Optional[str] = None,
+    default: str = "tara",
+) -> str:
+    """
+    Normalize tenant identity so retrieval and hivemind writes use the same namespace.
+    If tenant_id looks like a UUID/system id, fall back to agent_name slug (e.g. "BUNDB Agent" -> "bundb").
+    """
+    raw_tenant = (tenant_id or default).strip().lower()
+    effective_tenant = raw_tenant or default
+    clean_agent = (agent_name or "").strip().lower().replace(" agent", "").strip()
+
+    if len(raw_tenant) > 20 and clean_agent and clean_agent != "unknown":
+        effective_tenant = clean_agent
+
+    effective_tenant = effective_tenant.split("/")[0]
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in effective_tenant) or default
+
 
 # Pydantic Models
 class QueryRequest(BaseModel):
@@ -1136,13 +1155,12 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             return result
 
         # Original query logic proceeds...
-        original_tenant_id = (request_data.tenant_id or "demo").strip().lower()
         effective_agent_name = (request_data.agent_name or "unknown").strip()
-        effective_tenant_id = original_tenant_id
-        if len(original_tenant_id) > 20 and effective_agent_name and effective_agent_name.lower() != "unknown":
-            clean_agent = effective_agent_name.lower().replace(" agent", "").strip()
-            if clean_agent:
-                effective_tenant_id = clean_agent
+        effective_tenant_id = _resolve_effective_tenant_id(
+            request_data.tenant_id,
+            effective_agent_name,
+            default="tara",
+        )
 
         # Generate cache key with tenant + org + context to avoid cross-brand cache bleed.
         lang_suffix = f":{request_data.language}" if request_data.language else ""
@@ -1241,15 +1259,13 @@ async def stream_query_knowledge_base(request: QueryRequest):
     Returns a stream of JSON objects: {"text": "...", "is_final": bool}
     """
     async def event_generator():
-        original_tenant_id = (request.tenant_id or "tara").strip().lower()
         effective_session_id = (request.session_id or "unknown").strip()
         effective_agent_name = (request.agent_name or ((request.context or {}).get("agent_name")) or "unknown").strip()
-
-        effective_tenant_id = original_tenant_id
-        if len(original_tenant_id) > 20 and effective_agent_name and effective_agent_name.lower() != "unknown":
-            clean_agent = effective_agent_name.lower().replace(" agent", "").strip()
-            if clean_agent:
-                effective_tenant_id = clean_agent
+        effective_tenant_id = _resolve_effective_tenant_id(
+            request.tenant_id,
+            effective_agent_name,
+            default="tara",
+        )
 
         # Emit one banner per session at first stream query (session handshake into RAG path)
         if effective_session_id not in session_banner_logged:
@@ -1633,7 +1649,11 @@ async def analyze_session(request: AnalyzeSessionRequest):
     If backend_url is provided, the full report (including brief_context) will be sent there.
     """
     try:
-        effective_tenant_id = request.tenant_id or "tara"
+        effective_tenant_id = _resolve_effective_tenant_id(
+            request.tenant_id,
+            ((request.metadata or {}).get("agent_name") or "unknown"),
+            default="tara",
+        )
         effective_agent_id = ((request.metadata or {}).get("agent_id") or "unknown")
         effective_session_type = ((request.metadata or {}).get("session_type") or "unknown")
         logger.info("============================================================")
@@ -1809,7 +1829,11 @@ async def save_case(request: SaveCaseRequest):
     If history_context is provided, distills it into issue/solution first.
     """
     try:
-        effective_tenant_id = request.tenant_id or "tara"
+        effective_tenant_id = _resolve_effective_tenant_id(
+            request.tenant_id,
+            ((request.metadata or {}).get("agent_name") or "unknown"),
+            default="tara",
+        )
         if not app.state.rag_engine:
             raise HTTPException(status_code=503, detail="RAG engine not initialized")
         

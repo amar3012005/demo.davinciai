@@ -2361,6 +2361,11 @@ class OrchestratorWSHandler:
             session.mode = mode
             logger.info(f"[{session.session_id}] 🛠️ Session mode changed from {prev_mode} to: {mode}")
 
+            # Send requests from visual copilot to rag-visualcopilot
+            if mode == "visual-copilot":
+                import os
+                session.rag_url = os.environ.get('RAG_VISUAL_COPILOT_URL', 'http://rag-visualcopilot:8003')
+
             # analyse_only: lightweight mode — just TTS + WebSocket, no intro, no mission
             if mode == "analyse_only":
                 await self._send_json(session.websocket, {

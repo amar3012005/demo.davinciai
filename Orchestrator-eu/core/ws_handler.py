@@ -14,6 +14,8 @@ import asyncio
 import json
 import logging
 import time
+from urllib.parse import parse_qs
+from urllib.parse import urlparse, urlunparse
 from copy import deepcopy
 from datetime import datetime
 import base64
@@ -756,6 +758,24 @@ class OrchestratorWSHandler:
         """
         # Resolve session_id from query params if not provided
         query_params = dict(websocket.query_params)
+        tenant_id = query_params.get("tenant_id")
+
+        # Defensive parsing for malformed URLs like:
+        # /stream?tenant_id=bundb/ws?session_id=<sid>
+        # In such cases, session_id is embedded inside tenant_id.
+        if tenant_id and "/ws?" in tenant_id:
+            tenant_prefix, embedded_query = tenant_id.split("/ws?", 1)
+            if tenant_prefix:
+                query_params["tenant_id"] = tenant_prefix
+            parsed_embedded = parse_qs(embedded_query, keep_blank_values=True)
+            embedded_session = (parsed_embedded.get("session_id") or [None])[0]
+            if embedded_session and not query_params.get("session_id"):
+                query_params["session_id"] = embedded_session
+            logger.warning(
+                "Malformed audio stream query normalized: tenant_id contained '/ws?'. "
+                f"tenant_id={query_params.get('tenant_id')}, session_id={query_params.get('session_id')}"
+            )
+
         if not session_id:
             session_id = query_params.get("session_id")
 
@@ -764,6 +784,8 @@ class OrchestratorWSHandler:
             return
 
         session = self.sessions[session_id]
+        if query_params.get("tenant_id"):
+            session.tenant_id = str(query_params.get("tenant_id"))
 
         # Only allow audio WS for interactive mode sessions
         if session.interaction_mode == "turbo":
@@ -4587,7 +4609,16 @@ class OrchestratorWSHandler:
 
         # 3. 📡 EXTERNAL METRICS WEBHOOK (BACKEND)
         webhook_url = self.config.services.davinciai_backend_url
+        if webhook_url:
+            parsed = urlparse(webhook_url)
+            # If only base host is configured, target the expected webhook endpoint.
+            if not parsed.path or parsed.path == "/":
+                webhook_url = urlunparse(parsed._replace(path="/api/webhooks/session"))
+                logger.info(f"[{session.session_id}] ℹ️ Normalized backend webhook URL to: {webhook_url}")
         try:
+            if not webhook_url:
+                logger.info(f"[{session.session_id}] ℹ️ Skipping backend delivery: DAVINCIAI_BACKEND_URL is empty")
+                raise ValueError("backend webhook URL not configured")
             logger.info(f"[{session.session_id}] 📡 Sending enriched session report to backend...")
             async with aiohttp.ClientSession() as http_session:
                 async with http_session.post(
@@ -4600,6 +4631,11 @@ class OrchestratorWSHandler:
                     else:
                         resp_text = await resp.text()
                         logger.warning(f"[{session.session_id}] ⚠️ Backend rejected report: {resp.status} - {resp_text}")
+                        if resp.status == 405:
+                            logger.warning(
+                                f"[{session.session_id}] ⚠️ 405 suggests wrong endpoint or HTTP method. "
+                                "Expected POST endpoint is typically /api/webhooks/session."
+                            )
         except Exception as e:
             logger.warning(f"[{session.session_id}] ⚠️ Could not deliver report to backend: {e}")
 

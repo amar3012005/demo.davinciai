@@ -74,7 +74,7 @@ services:
       DAYTONA_RAG_CACHE_TTL: "0"
 
       EMBEDDINGS_SERVICE_URL: ${EMBEDDINGS_SERVICE_URL:-http://embeddings-eu:4006/embed}
-      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450}
+      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
       COOLIFY_CONTAINER_NAME: rag-eu
     dns:
       - 8.8.8.8
