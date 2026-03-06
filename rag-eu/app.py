@@ -1927,12 +1927,15 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
         # Fetch vectors with payloads from Qdrant
         from qdrant_client import QdrantClient
         from qdrant_client.http import models
-        
-        sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key)
+        sync_client, _, collection_name = qdrant._get_clients_for_tenant(tenant_id)  # pylint: disable=protected-access
+        if sync_client is None:
+            # Fallback to default collection if tenant is not configured
+            sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key)
+            collection_name = qdrant.collection_name
         
         # Scroll through collection to get all points (filtered by tenant)
         scroll_result = sync_client.scroll(
-            collection_name=qdrant.collection_name,
+            collection_name=collection_name,
             scroll_filter=models.Filter(
                 must=[
                     models.FieldCondition(
@@ -1951,7 +1954,7 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
         if not points_data:
             return HiveMindVisualizationResponse(
                 points=[],
-                collection_name=qdrant.collection_name,
+                collection_name=collection_name,
                 total_points=0,
                 dimension=qdrant.embedding_dim,
                 algorithm=algorithm
@@ -1965,7 +1968,13 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
         
         for point in points_data:
             if point.vector:
-                vectors.append(point.vector)
+                # Named vectors support: point.vector can be dict{name: list}
+                vec = point.vector
+                if isinstance(vec, dict):
+                    vec = next(iter(vec.values())) if vec else None
+                if vec is None:
+                    continue
+                vectors.append(vec)
                 payloads.append(point.payload or {})
                 point_ids.append(str(point.id))
         
@@ -1987,7 +1996,7 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                         customer_segment=payloads[0].get("customer_segment") if payloads else None
                     )
                 ] if vectors else [],
-                collection_name=qdrant.collection_name,
+                collection_name=collection_name,
                 total_points=len(vectors),
                 dimension=qdrant.embedding_dim,
                 algorithm=algorithm
@@ -1996,22 +2005,33 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
         vectors_np = np.array(vectors)
         
         # Dimensionality reduction
-        if algorithm.lower() == "pca" or len(vectors) < 3:
-            # Use PCA for small datasets (t-SNE needs perplexity < n_samples)
-            from sklearn.decomposition import PCA
-            reducer = PCA(n_components=min(2, len(vectors)))
-            coords_2d = reducer.fit_transform(vectors_np)
-            if coords_2d.shape[1] == 1:
-                import numpy as np
-                coords_2d = np.column_stack([coords_2d, np.zeros(len(coords_2d))])
-        else:
-            # Default: t-SNE
-            from sklearn.manifold import TSNE
-            # Perplexity must be < n_samples
-            perplexity = min(30, max(2, len(vectors) // 3))
-            perplexity = min(perplexity, len(vectors) - 1)
-            reducer = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=500)
-            coords_2d = reducer.fit_transform(vectors_np)
+        used_algorithm = algorithm.lower()
+        try:
+            if used_algorithm == "pca" or len(vectors) < 3:
+                # Use PCA for small datasets (t-SNE needs perplexity < n_samples)
+                from sklearn.decomposition import PCA
+                reducer = PCA(n_components=min(2, len(vectors)))
+                coords_2d = reducer.fit_transform(vectors_np)
+                if coords_2d.shape[1] == 1:
+                    import numpy as np
+                    coords_2d = np.column_stack([coords_2d, np.zeros(len(coords_2d))])
+            else:
+                # Default: t-SNE
+                from sklearn.manifold import TSNE
+                # Perplexity must be < n_samples
+                perplexity = min(30, max(2, len(vectors) // 3))
+                perplexity = min(perplexity, len(vectors) - 1)
+                reducer = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=500)
+                coords_2d = reducer.fit_transform(vectors_np)
+        except ModuleNotFoundError:
+            # Graceful fallback when sklearn is unavailable
+            logger.warning("sklearn not installed; falling back to first-2-dim projection for Hive Mind visualize")
+            import numpy as np
+            if vectors_np.shape[1] >= 2:
+                coords_2d = vectors_np[:, :2]
+            else:
+                coords_2d = np.column_stack([vectors_np[:, 0], np.zeros(len(vectors_np))])
+            used_algorithm = "fallback"
         
         # Normalize to [-1, 1] range for visualization
         coords_min = coords_2d.min(axis=0)
@@ -2038,14 +2058,17 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                 customer_segment=payload.get("customer_segment")
             ))
         
-        logger.info(f"🧠 Hive Mind visualization: {len(result_points)} points using {algorithm.upper()}")
+        logger.info(
+            f"🧠 Hive Mind visualization: {len(result_points)} points using {used_algorithm.upper()} "
+            f"(tenant={tenant_id}, collection={collection_name})"
+        )
         
         return HiveMindVisualizationResponse(
             points=result_points,
-            collection_name=qdrant.collection_name,
+            collection_name=collection_name,
             total_points=len(result_points),
             dimension=qdrant.embedding_dim,
-            algorithm=algorithm
+            algorithm=used_algorithm
         )
     
     except HTTPException:
@@ -2089,7 +2112,7 @@ class HiveMindInsightsResponse(BaseModel):
 
 
 @app.get("/api/v1/hive-mind/insights", response_model=HiveMindInsightsResponse)
-async def get_hive_mind_insights(limit: int = 10):
+async def get_hive_mind_insights(limit: int = 10, tenant_id: str = "tara"):
     """
     Get insights from the Hive Mind collective intelligence.
     
@@ -2108,11 +2131,24 @@ async def get_hive_mind_insights(limit: int = 10):
             raise HTTPException(status_code=503, detail="Hive Mind is disabled")
         
         from qdrant_client import QdrantClient
-        sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key)
+        from qdrant_client.http import models as _models
+        sync_client, _, collection_name = qdrant._get_clients_for_tenant(tenant_id)  # pylint: disable=protected-access
+        if sync_client is None:
+            # Fallback to default collection if tenant is not configured
+            sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key)
+            collection_name = qdrant.collection_name
         
         # Fetch all points for analysis (cap at 500)
         scroll_result = sync_client.scroll(
-            collection_name=qdrant.collection_name,
+            collection_name=collection_name,
+            scroll_filter=_models.Filter(
+                must=[
+                    _models.FieldCondition(
+                        key="tenant_id",
+                        match=_models.MatchValue(value=tenant_id)
+                    )
+                ]
+            ),
             limit=500,
             with_payload=True,
             with_vectors=False  # Don't need vectors for insights
@@ -2127,7 +2163,7 @@ async def get_hive_mind_insights(limit: int = 10):
                 total_knowledge=0,
                 unique_domains=0,
                 customer_segments={},
-                collection_name=qdrant.collection_name
+                collection_name=collection_name
             )
         
         # Extract recent knowledge (by ID, higher = newer for our dataset)
@@ -2175,7 +2211,7 @@ async def get_hive_mind_insights(limit: int = 10):
             for domain, count in sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[:8]
         ]
         
-        logger.info(f"🧠 Hive Mind insights: {total} nodes, {len(domain_counts)} domains")
+        logger.info(f"🧠 Hive Mind insights: {total} nodes, {len(domain_counts)} domains (tenant={tenant_id}, collection={collection_name})")
         
         return HiveMindInsightsResponse(
             recent_knowledge=recent_knowledge,
@@ -2183,7 +2219,7 @@ async def get_hive_mind_insights(limit: int = 10):
             total_knowledge=total,
             unique_domains=len(domain_counts),
             customer_segments=segment_counts,
-            collection_name=qdrant.collection_name
+            collection_name=collection_name
         )
     
     except HTTPException:
