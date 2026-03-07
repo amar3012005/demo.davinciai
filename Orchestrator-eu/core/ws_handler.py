@@ -4631,7 +4631,12 @@ class OrchestratorWSHandler:
                     else:
                         resp_text = await resp.text()
                         logger.warning(f"[{session.session_id}] ⚠️ Backend rejected report: {resp.status} - {resp_text}")
-                        if resp.status == 405:
+                        if resp.status == 404:
+                            logger.warning(
+                                f"[{session.session_id}] ⚠️ 404 Not Found from backend. "
+                                "This typically means the Agent ID or Tenant ID does not exist in the Enterprise Database."
+                            )
+                        elif resp.status == 405:
                             logger.warning(
                                 f"[{session.session_id}] ⚠️ 405 suggests wrong endpoint or HTTP method. "
                                 "Expected POST endpoint is typically /api/webhooks/session."

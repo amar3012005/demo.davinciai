@@ -36,6 +36,9 @@ services:
       ORGANIZATION_LOCATION: ${ORGANIZATION_LOCATION:-Global}
       TENANT_ID: ${TENANT_ID:-tara}
 
+      # Embeddings microservice (must match the Docker service name in this compose)
+      EMBEDDINGS_SERVICE_URL: http://embeddings-eu-local:4006/embed
+
       QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
