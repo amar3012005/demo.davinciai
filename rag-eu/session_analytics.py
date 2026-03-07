@@ -104,7 +104,7 @@ class SessionAnalytics:
         davinci_metrics = self._calculate_davinci_metrics(reasoning_output.get('turns', []), raw_logs)
         
         # 4. Classify Business Signals
-        business_signals = self._classify_business_signals(reasoning_output.get('session_summary', {}), davinci_metrics)
+        business_signals = self._classify_business_signals(reasoning_output.get('session_summary', {}), davinci_metrics, reasoning_output.get('turns', []))
         
         # 5. Generate Brief Context (if not provided)
         if not brief_context:
@@ -200,7 +200,7 @@ You are the DavinciAI Sentiment Engine. Your goal is to analyze the provided [Tr
       "thought_trace": "Detailed thought process about sentiment and intent",
       "sentiment_score": float (-1.0 to 1.0),
       "emotional_labels": ["label1", "label2"],
-      "intent_type": "Complaint | Inquiry | Purchase | Tech_Support"
+      "intent_type": "Complaint | Inquiry | Purchase | Tech_Support | Interest | Demo_Request"
     }
   ],
   "session_summary": {
@@ -317,18 +317,40 @@ Identify any such valuable insights regardless of industry. Return ONLY valid JS
             "correction_count": corrections
         }
 
-    def _classify_business_signals(self, summary: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
+    def _classify_business_signals(self, summary: Dict[str, Any], metrics: Dict[str, Any], analyzed_turns: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Phase 4: Predictive Classification
         Convert math into business value.
+        
+        is_hot_lead is TRUE when:
+          - User shows interest in the service/product (intent: Interest, Demo_Request, Purchase)
+          - User engages positively (sentiment > 0.3 and no churn risk)
+          - User asks questions about pricing, availability, or next steps
         """
         overall_sentiment = summary.get('overall_sentiment', 0)
         resolution = summary.get('resolution_status', 'Unknown')
         
-        is_churn_risk = (overall_sentiment < -0.5 and resolution != "Resolved") or (metrics['frustration_velocity'] == "CRITICAL_DEGRADATION")
+        is_churn_risk = (
+            (overall_sentiment < -0.5 and resolution != "Resolved")
+            or (metrics['frustration_velocity'] == "CRITICAL_DEGRADATION")
+        )
         
-        # Simple lead detection (this could be improved by context)
-        is_hot_lead = False # Placeholder for logic related to intent or keywords
+        # Hot lead detection: check intent types from LLM analysis
+        hot_intents = {"Purchase", "Interest", "Demo_Request", "Inquiry"}
+        detected_hot_intent = False
+        if analyzed_turns:
+            for turn in analyzed_turns:
+                intent = turn.get("intent_type", "")
+                if intent in hot_intents:
+                    detected_hot_intent = True
+                    break
+        
+        # A user is a hot lead if they showed interest/curiosity AND sentiment is not negative
+        is_hot_lead = detected_hot_intent and overall_sentiment > -0.2 and not is_churn_risk
+        
+        # Even without explicit intent, positive engagement signals interest
+        if not is_hot_lead and overall_sentiment > 0.3 and not is_churn_risk:
+            is_hot_lead = True
         
         return {
             "is_churn_risk": is_churn_risk,
