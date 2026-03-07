@@ -1066,11 +1066,14 @@
                 this.updateStatus('connecting', 'Connecting...');
                 this.addLog('Connecting to TARA...', 'info');
 
+                // Defensive URL normalization: strip trailing /ws or /stream if user provided full path
+                let baseUrl = WS_URL.replace(/\/ws$/, '').replace(/\/stream$/, '');
+
                 // Add phone number to URL if present
                 const phone = this.phoneNumberInput.value.trim();
-                let url = WS_URL;
+                let url = `${baseUrl}/ws`;
                 if (phone) {
-                    url += `?user_id=${encodeURIComponent(phone)}`;
+                    url += (url.includes('?') ? '&' : '?') + `user_id=${encodeURIComponent(phone)}`;
                     this.addLog(`Identity: ${phone}`, 'info');
                 }
 
@@ -1101,6 +1104,7 @@
                         config: {
                             mode: 'voice',
                             tenant_id: DEFAULT_TENANT_ID,
+                            agent_id: DEFAULT_TENANT_ID.toLowerCase(), // Ensure slug is sent
                             agent_name: DEFAULT_AGENT_NAME,
                             user_id: phone || 'anonymous_user',
                             stt_mode: this.mockMode ? 'text' : 'audio',
