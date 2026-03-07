@@ -1026,6 +1026,36 @@ async def serve_client(request: Request):
         )
 
 
+@app.get("/client_bundb")
+async def serve_client_bundb(request: Request):
+    """Serve the B&B specific client HTML page"""
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    client_path = os.path.join(static_dir, "client_bundb.html")
+    
+    if os.path.exists(client_path):
+        return FileResponse(client_path)
+    else:
+        return JSONResponse(
+            {"error": "client_bundb.html not found"},
+            status_code=404
+        )
+
+
+@app.get("/client_davinci")
+async def serve_client_davinci(request: Request):
+    """Serve the Davinci specific client HTML page"""
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    client_path = os.path.join(static_dir, "client_davinci.html")
+    
+    if os.path.exists(client_path):
+        return FileResponse(client_path)
+    else:
+        return JSONResponse(
+            {"error": "client_davinci.html not found"},
+            status_code=404
+        )
+
+
 @app.get("/api/logs/stream")
 async def stream_pod_logs(pod: str = Query("orchestrator", description="Pod name: orchestrator or rag")):
     """Stream Kubernetes pod logs using Server-Sent Events"""
