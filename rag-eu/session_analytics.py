@@ -46,8 +46,9 @@ class SessionAnalytics:
         cleaned = re.sub(r"<think>.*?</think>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL)
         # Remove standalone think tags
         cleaned = re.sub(r"</?think>", " ", cleaned, flags=re.IGNORECASE)
-        # Trim common reasoning prefaces that leak into final text
-        cleaned = re.sub(r"^\s*(okay[, ]+let me.*?:)\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        # Trim common reasoning prefaces that leak into final text (broadened)
+        cleaned = re.sub(r"^\s*(okay[, ]+(let's|let me|i will|let us).*?:?)\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r"^\s*(based on the (transcript|session).*?:?)\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
         # Collapse whitespace
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned
@@ -67,7 +68,15 @@ class SessionAnalytics:
                 latency = round(curr_ts - prev_timestamp, 2)
             
             role = log.get('role', 'unknown').capitalize()
-            content = log.get('content', '') or log.get('text', '')
+            # Extract content from various possible field names
+            content = log.get('content') or log.get('text') or log.get('message') or ""
+            
+            # Handle dict-style content (common in rich agent responses)
+            if isinstance(content, dict):
+                content = content.get('answer') or content.get('text') or content.get('content') or str(content)
+            
+            # Basic cleanup of extra whitespace or reasoning artifact leaks within the content itself
+            content = self._strip_reasoning_artifacts(str(content))
             
             formatted_transcript += f"[Turn {index+1}] [{role}] (Latency: {latency}s): {content}\n"
             prev_timestamp = curr_ts
@@ -179,7 +188,7 @@ You are the DavinciAI Sentiment Engine. Your goal is to analyze the provided [Tr
    - Did the user ignore the Agent's suggestion? (Signal: Disengagement)
    - Did the user thank the Agent specifically for *solving* the problem? (Signal: Resolution)
 3. **Aspect Separation:** Distinguish between the User's mood vs. the Agent's performance.
-4. **Knowledge Distillation (New):** Identify specific customer questions, objections, or problems that were successfully resolved or addressed by the Agent. Extract them as standalone knowledge units (Issue/Solution/Response pairs) for the team's Hive Mind. Use this for ANY domain (technical, sales, consulting, branding).
+4. **Knowledge Distillation (New):** Identify specific customer questions, objections, preferences, or core requirements that were successfully captured, resolved, or addressed by the Agent. Extract them as standalone knowledge units (Issue/Requirement/Preference vs Solution/Response pairs) for the team's Hive Mind. Use this for ANY domain including creative drafting, branding, and workflows.
 
 ## OUTPUT SCHEMA (JSON)
 {
@@ -208,7 +217,16 @@ You are the DavinciAI Sentiment Engine. Your goal is to analyze the provided [Tr
     }
   ]
 }
-Return ONLY valid JSON.
+## KNOWLEDGE DISTILLATION EXAMPLES
+Example 1 (Technical): 
+Issue: "How do I deploy with Docker?" 
+Solution: "Use 'docker-compose up -d' after building."
+
+Example 2 (Creative/Branding):
+Issue: "What tone should we use for LinkedIn posts about AI?"
+Solution: "A balance of technical efficiency (e.g. 30% speedup) and human impact stories (reclaiming creative time)."
+
+Identify any such valuable insights regardless of industry. Return ONLY valid JSON.
 """
         user_prompt = f"Analyze the following transcript for session {session_id}:\n\n{transcript}"
         

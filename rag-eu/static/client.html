@@ -770,6 +770,7 @@
             line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
@@ -1174,6 +1175,19 @@
                 <aside class="controls-panel">
                     <div class="panel-section">
                         <h4 class="section-title">Session</h4>
+                        <div style="margin-bottom: 16px;">
+                            <label
+                                style="color: var(--color-dark-gray); font-size: 0.75rem; display: block; margin-bottom: 8px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em;">Active
+                                Tenant</label>
+                            <select id="activeTenant" class="viz-select"
+                                style="background: rgba(255,255,255,0.05); border-color: #333; color: white; width: 100%; padding: 10px; border-radius: 8px; font-family: inherit;">
+                                <option value="davinci">Davinci AI</option>
+                                <option value="bundb">BundB</option>
+                                <option value="demo">Demo Environment</option>
+                                <option value="techz">Techz</option>
+                                <option value="tara">Default (Tara)</option>
+                            </select>
+                        </div>
                         <button class="session-button start" id="startSession">
                             <span class="material-icons-round">play_arrow</span>
                             Start Session
@@ -1745,8 +1759,9 @@
 
                 try {
                     const baseUrl = window.API_BASE || '';
+                    const tenantId = document.getElementById('activeTenant').value;
                     const response = await fetch(
-                        `${baseUrl}/api/v1/hive-mind/visualize?algorithm=${algorithm}&limit=${limit}`
+                        `${baseUrl}/api/v1/hive-mind/visualize?algorithm=${algorithm}&limit=${limit}&tenant_id=${tenantId}`
                     );
 
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2118,7 +2133,8 @@
 
             try {
                 const baseUrl = window.API_BASE || '';
-                const response = await fetch(`${baseUrl}/api/v1/hive-mind/insights?limit=5`);
+                const tenantId = document.getElementById('activeTenant').value;
+                const response = await fetch(`${baseUrl}/api/v1/hive-mind/insights?limit=5&tenant_id=${tenantId}`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 const data = await response.json();
@@ -2291,7 +2307,10 @@
                     const payload = {
                         query: text,
                         history_context: this.history,
-                        context: { session_id: this.sessionId }
+                        context: {
+                            session_id: this.sessionId,
+                            tenant_id: document.getElementById('activeTenant').value
+                        }
                     };
 
                     const response = await fetch(QUERY_ENDPOINT, {
@@ -2463,6 +2482,34 @@
 
         window.ragClient = new RAGClient();
 
+        // ─── Dynamic Tenant Transitions ───────────────────────────────────
+        document.getElementById('activeTenant').addEventListener('change', (e) => {
+            const newTenant = e.target.value;
+            console.log(`🔄 [TARA] Tenant transition triggered: -> ${newTenant}`);
+
+            // 1. Reset chat session to ensure clean prompt history per tenant
+            if (window.ragClient && window.ragClient.sessionActive) {
+                console.log('🧹 [TARA] Clearing active session for new tenant context');
+                window.ragClient.endSession();
+            }
+
+            // 2. Synchronize upload tenant input if it's on the page
+            const docTenant = document.getElementById('docTenant');
+            if (docTenant) docTenant.value = newTenant;
+
+            // 3. Refresh visualizations and insights based on active tab
+            const activeTab = document.querySelector('.header-tab.active')?.dataset.tab;
+            if (activeTab === 'visualizer' && window.hiveMindViz) {
+                window.hiveMindViz.loadData(true);
+                if (typeof loadHiveMindInsights === 'function') {
+                    loadHiveMindInsights(true);
+                }
+            }
+            if (activeTab === 'skills' && typeof loadSkillsList === 'function') {
+                loadSkillsList();
+            }
+        });
+
         // ═══════════════════════════════════════════════════════════════════════
         // Upload Logic
         // ═══════════════════════════════════════════════════════════════════════
@@ -2568,6 +2615,7 @@
                             text: text,
                             type: selectedType,
                             topic: topic,
+                            tenant_id: document.getElementById('activeTenant').value
                         };
                         if (selectedType === 'agent_rule') {
                             payload.severity = severity;
@@ -2608,7 +2656,8 @@
                 const countEl = document.getElementById('skillsCount');
 
                 try {
-                    const res = await fetch(`${baseUrl}/api/v1/skills`);
+                    const tenantId = document.getElementById('activeTenant').value;
+                    const res = await fetch(`${baseUrl}/api/v1/skills?tenant_id=${tenantId}`);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
 
@@ -2666,7 +2715,8 @@
             async function deleteSkill(id) {
                 if (!confirm('Delete this item from HiveMind?')) return;
                 try {
-                    const res = await fetch(`${baseUrl}/api/v1/skills/${id}`, { method: 'DELETE' });
+                    const tenantId = document.getElementById('activeTenant').value;
+                    const res = await fetch(`${baseUrl}/api/v1/skills/${id}?tenant_id=${tenantId}`, { method: 'DELETE' });
                     if (res.ok) {
                         loadSkillsList();
                     } else {
@@ -2682,6 +2732,9 @@
             if (refreshBtn) {
                 refreshBtn.addEventListener('click', loadSkillsList);
             }
+
+            // Expose for global access (e.g. from tenant switcher)
+            window.loadSkillsList = loadSkillsList;
 
             // Auto-load when tab is opened
             document.querySelectorAll('.header-tab').forEach(tab => {

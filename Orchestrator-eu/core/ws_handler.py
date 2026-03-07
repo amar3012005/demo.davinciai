@@ -4595,9 +4595,22 @@ class OrchestratorWSHandler:
                                     # Attach rich analysis to the final report
                                     report["analysis"] = analysis_report
                                     
-                                    # Forward key signals to backend metrics
+                                    # Forward key signals and distilled content to top level (Backend requirement)
+                                    if "brief_context" in analysis_report:
+                                        report["brief_context"] = analysis_report["brief_context"]
                                     if "business_signals" in analysis_report:
                                         report.update(analysis_report["business_signals"])
+                                    if "hivemind_updates" in analysis_report:
+                                        report["hivemind_updates"] = analysis_report["hivemind_updates"]
+                                    if "metrics" in analysis_report:
+                                        # Merge detailed RAG metrics into session metrics
+                                        report.setdefault("rag_metrics", {}).update(analysis_report["metrics"])
+                                    
+                                    # Hardening: Remove per-turn details to keep report concise for backend
+                                    if "analysis" in report and isinstance(report["analysis"], dict):
+                                        report["analysis"].pop("turns", None)
+                                        report["analysis"].pop("history", None)
+                                        report["analysis"].pop("hivemind_retrievals", None)
                                 else:
                                     logger.warning(f"[{session.session_id}] ⚠️ Analytics Pipeline failed: {resp.status}")
                     except asyncio.TimeoutError:

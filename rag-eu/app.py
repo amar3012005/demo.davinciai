@@ -53,13 +53,27 @@ def _resolve_effective_tenant_id(
 ) -> str:
     """
     Normalize tenant identity so retrieval and hivemind writes use the same namespace.
-    If tenant_id looks like a UUID/system id, fall back to agent_name slug (e.g. "BUNDB Agent" -> "bundb").
+    Uses the provided tenant_id (slug name like 'bundb') directly if available.
     """
     raw_tenant = (tenant_id or default).strip().lower()
-    effective_tenant = raw_tenant or default
-    clean_agent = (agent_name or "").strip().lower().replace(" agent", "").strip()
+    
+    # Backward compatibility mapping for UUIDs if they still appear
+    uuid_map = {
+        "9d81967f-83d3-4cfc-a1bc-22f8b14ecaa1": "bundb",
+        "0dd18031-d35b-4ec9-81d6-cc082420b492": "davinci",
+        "5fc3fa72-d15d-48dc-812c-5c845b5172eb": "demo",
+        "5f172b23-a407-454e-8981-3c19c2db8fdc": "techz"
+    }
+    
+    if raw_tenant in uuid_map:
+        return uuid_map[raw_tenant]
 
-    if len(raw_tenant) > 20 and clean_agent and clean_agent != "unknown":
+    # Use the slug name directly (e.g. 'bundb')
+    effective_tenant = raw_tenant or default
+    
+    # Fallback to agent name if tenant is generic
+    clean_agent = (agent_name or "").strip().lower().replace(" agent", "").strip()
+    if (len(raw_tenant) > 20 or raw_tenant == "tenant") and clean_agent and clean_agent != "unknown":
         effective_tenant = clean_agent
 
     effective_tenant = effective_tenant.split("/")[0]
@@ -1658,8 +1672,15 @@ async def analyze_session(request: AnalyzeSessionRequest):
         effective_session_type = ((request.metadata or {}).get("session_type") or "unknown")
         logger.info("============================================================")
         logger.info("============================================================")
+        
+        # Resolve target collection for diagnostics
+        target_collection = "unknown"
+        if app.state.rag_engine and app.state.rag_engine.qdrant:
+             target_collection = app.state.rag_engine.qdrant._resolve_collection_name(effective_tenant_id)
+             
         logger.info(
             f"SESSION START (ANALYZE) | TENANT_ID={effective_tenant_id} | "
+            f"TARGET_COLLECTION={target_collection} | "
             f"SESSION_ID={request.session_id} | AGENT={((request.metadata or {}).get('agent_name') or 'unknown')}"
         )
         logger.info("============================================================")
@@ -1748,7 +1769,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
         }
         report["session_metadata"] = {
             "session_id": request.session_id,
-            "tenant_id": effective_tenant_id,
+            "tenant_id": effective_tenant_id,  # Use the slug name consistently
             "session_type": effective_session_type,
             "user_id": request.user_id or "anonymous",
             "agent_name": (request.metadata or {}).get("agent_name"),
@@ -1765,7 +1786,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
                     payload = {
                         "session_id": request.session_id,
                         "user_id": request.user_id,
-                        "tenant_id": effective_tenant_id,
+                        "tenant_id": effective_tenant_id, # Use the slug name consistently
                         "timestamp": report["timestamp"],
                         "brief_context": report.get("brief_context", ""),
                         "metrics": report["metrics"],

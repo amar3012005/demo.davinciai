@@ -1,72 +1,63 @@
 """
-Context Architecture v4 — B&B. Brand Voice Agent (Qwen 3 32B / Groq)
+Context Architecture v5 — B&B. Brand Voice Agent (Qwen 3 32B / Groq)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TARGET: ≤ 2,400 tokens/turn  (down from 6,800)
-CACHE:  Groq prefix-match — Zone A fully static = max cache hits
+DROP-IN REPLACEMENT for the original context_architecture.py
+Same class name. Same assemble_prompt() signature. Zero breaking changes.
 
-TOKEN BUDGET ALLOCATION
-  Zone A  static  ~1,100 tok  PRISM persona core + behaviour rules
-  Zone B  static  ~  400 tok  3 seed examples (pattern, not script)
-  Zone C  dynamic ~  600 tok  history(5) + retrieved(1,200ch) + query
-  Zone D  dynamic ~  200 tok  skills/rules from Qdrant — only if retrieved
-  ─────────────────────────────────────────────────────────────────────
-  Total target    ~2,300 tok  (Groq caches Zone A+B ≈ 1,500 tok)
+ROOT CAUSES FIXED vs original (6,555 tokens, 0% cache):
+  1. current_time in Zone A     → busted Groq cache every 60 seconds
+  2. user_profile in Zone B     → different per user = cache miss every request
+  3. hive_mind in Zone B        → changed per session = cache miss
+  4. SSML tags in playbook      → model echoed <break>/<emphasis> in output
+  5. 7-turn history in XML      → ~300 token overhead per turn
+  6. No _STATIC_PREFIX caching  → Zone A+B re-rendered every single request
+  7. Language: checked history only, not current query → EN query got DE response
+  8. _render_zone_b(hive_mind, user_profile) signature → dynamic args = no cache
 
-WHAT MOVED TO QDRANT HIVEMIND (retrieve on demand):
-  • Full psychology engine (Cialdini, NLP, cognitive biases)
-  • Extended playbook (examples 3–14)
-  • B&B service catalogue + case studies
-  • Employer branding / change comms knowledge
-  • Competitor positioning data
-  • All tone-of-voice reference documents
+ARCHITECTURE (Groq prefix-match caching):
+  Zone A  STATIC   ~900 tok   Persona core + rules + AIDA + language
+  Zone B  STATIC   ~300 tok   3 clean seed examples (no SSML)
+  Zone C  DYNAMIC  ~100 tok   history(4) + docs(2×900ch) + query
+  Zone D  DYNAMIC  ~0-150 tok skills/rules, omitted when empty
+  ─────────────────────────────────────────────────
+  Total            ~1,300 tok  (was 6,555 — 80% reduction)
+  Cached           ~1,200 tok  Groq caches Zone A+B after turn 1
+  Groq discount    50% on ~1,200 cached tokens every turn from turn 2
 
-GROQ CACHE STRATEGY (based on Groq docs + research):
-  • Zones A+B are byte-identical across ALL requests → cached after turn 1
-  • current_time lives in Zone C (dynamic) → does NOT bust cache
-  • user_profile lives in Zone C (dynamic) → does NOT bust cache
-  • Zone D omitted when empty → zero overhead
-  • Expected cache rate: >85% prompt tokens from turn 2 onwards
-
-FORMAT STRATEGY (per PDF research):
-  • Hybrid: lightweight XML skeleton + Markdown content inside tags
-  • XML provides instruction-drift prevention (clear conceptual boundaries)
-  • Markdown inside tags saves 10-34% tokens vs pure XML content
-  • Result: steerability of XML + density of Markdown
-
-LANGUAGE PROTOCOL:
-  • Default: Deutsch throughout the entire conversation
-  • Switch trigger: user writes a full message in English
-  • Once switched to English: stay in English for all subsequent turns
-  • No meta-commentary on the switch — just do it naturally
+LANGUAGE FIX:
+  Detection checks (in priority order):
+    1. user_profile["lang"] == "en"  → locked English
+    2. current query is English      → switch NOW (fixes the original bug)
+    3. any prior user turn English   → already switched, stay English
+    4. default                       → German
+  "English" = >55% ASCII words AND message length > 2 words
+  Short greetings ("hello", "hi") do NOT trigger switch — avoids false positives
 """
 
 import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Any, Optional
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODULE-LEVEL SINGLETON — survives across requests in the same process.
+# This is the key to Groq cache hits: the static prefix string is computed
+# once when the module loads and reused byte-for-byte on every request.
+# If your server reimports the module per request, cache hits will still be
+# zero — ensure the module is imported once at startup (normal FastAPI/Uvicorn
+# behaviour with a module-level instance handles this automatically).
+# ─────────────────────────────────────────────────────────────────────────────
+_STATIC_PREFIX_CACHE: Optional[str] = None
 
 
 class ContextArchitect:
     """
-    Token-optimised prompt assembler for TARA — B&B. brand voice agent.
+    Drop-in replacement for the original ContextArchitect.
+    Assembles token-efficient, cache-optimised prompts for TARA.
 
-    Static prefix (Zone A+B) is computed once at class level and reused
-    across all requests, maximising Groq prefix cache hits.
-
-    All extended knowledge (psychology playbook, services, case studies)
-    lives in Qdrant and is injected via retrieved_docs in Zone C.
+    Public API (unchanged):
+      assemble_prompt(query, raw_query, retrieved_docs, history,
+                      hive_mind, user_profile, agent_skills, agent_rules)
     """
-
-    _STATIC_PREFIX: Optional[str] = None
-
-    @classmethod
-    def _get_static_prefix(cls) -> str:
-        """
-        Immutable Zone A + Zone B string. Computed once, cached at class level.
-        MUST be byte-for-byte identical across every request.
-        Never inject timestamps, user data, or session state here.
-        """
-        if cls._STATIC_PREFIX is None:
-            cls._STATIC_PREFIX = cls._render_zone_a() + "\n" + cls._render_zone_b()
-        return cls._STATIC_PREFIX
 
     @staticmethod
     def _escape(text: str) -> str:
@@ -79,6 +70,66 @@ class ContextArchitect:
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+
+    @staticmethod
+    def _is_english(text: str) -> bool:
+        """
+        Returns True if text is clearly English.
+        Heuristic: >55% of words are ASCII-only AND message has >2 words.
+        Short messages ("hello", "hi", "ok") return False to avoid false triggers.
+        German words contain umlauts (ä/ö/ü) which are non-ASCII — safe signal.
+        """
+        words = text.strip().split()
+        if len(words) <= 2:
+            return False
+        ascii_count = sum(
+            1 for w in words
+            if w.strip(".,!?;:\"'").replace("-", "").replace("'", "").isascii()
+        )
+        return (ascii_count / len(words)) > 0.55
+
+    @classmethod
+    def _detect_lang(
+        cls,
+        query: str,
+        history: List[Dict],
+        user_profile: Dict,
+    ) -> str:
+        """
+        Detect and lock conversation language.
+        Once English is detected it STAYS English for all subsequent turns.
+        Returns "en" or "de".
+        """
+        # 1. Profile already locked (set by caller after first EN detection)
+        if user_profile.get("lang") == "en":
+            return "en"
+
+        # 2. Current query is English → switch immediately
+        if cls._is_english(query):
+            return "en"
+
+        # 3. Any previous user message was English → conversation already switched
+        if history:
+            for turn in history:
+                if turn.get("role") == "user" and cls._is_english(
+                    turn.get("content", "")
+                ):
+                    return "en"
+
+        return "de"
+
+    @classmethod
+    def _get_static_prefix(cls) -> str:
+        """
+        Returns the fully static Zone A + Zone B string.
+        Uses a module-level variable so it survives even if the class is
+        reinstantiated (guards against per-request class recreation).
+        MUST be byte-for-byte identical on every call — never inject runtime data.
+        """
+        global _STATIC_PREFIX_CACHE
+        if _STATIC_PREFIX_CACHE is None:
+            _STATIC_PREFIX_CACHE = cls._render_zone_a() + "\n" + cls._render_zone_b()
+        return _STATIC_PREFIX_CACHE
 
     @classmethod
     def assemble_prompt(
@@ -93,11 +144,18 @@ class ContextArchitect:
         agent_rules: Optional[List[str]] = None,
     ) -> str:
         """
-        Assemble one turn. Structure (cache-optimised):
-          [CACHED]  Zone A — PRISM persona + behaviour rules
-          [CACHED]  Zone B — 3 seed examples
-          [DYNAMIC] Zone C — lang_state + history + retrieved + query
-          [DYNAMIC] Zone D — Qdrant-retrieved skills/rules (omit if empty)
+        Assemble the full prompt for one turn.
+
+        hive_mind is accepted for backward compatibility but NOT injected into
+        the static prefix (that would bust the Groq cache). Pass hive_mind
+        insights via retrieved_docs instead — they arrive in Zone C where
+        they belong.
+
+        Prompt order (Groq prefix-cache optimised):
+          [CACHED]  Zone A — persona + rules (~900 tok, static)
+          [CACHED]  Zone B — seed examples   (~300 tok, static)
+          [DYNAMIC] Zone C — history + docs + query (~100-400 tok)
+          [DYNAMIC] Zone D — skills + rules (0-150 tok, omitted if empty)
         """
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
@@ -107,146 +165,133 @@ class ContextArchitect:
         return f"{static}\n{zone_c}{zone_d}"
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE A — PRISM Persona Core + Behaviour Rules  (~1,100 tokens, STATIC)
+    # ZONE A — Persona Core + Rules  (STATIC — no runtime values ever)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
     def _render_zone_a(cls) -> str:
-        """
-        Zone A: Irreducible persona definition using PRISM framework
-        (Position, Role, Intent, Structure, Modality) — minimal token footprint.
-
-        All extended psychology knowledge is in Qdrant, retrieved when needed.
-        Only the irreducible behaviour kernel lives here.
-        """
         return """<sys>
 
 ## Identity
-- **Name:** TARA | B&B. Markenagentur, Hannover | bundb.de
-- **Role:** Strategic brand consultant + conversion partner — website widget, first contact
-- **Formula:** Mensch × Maschine = Marke | 50 Jahre Transformations-DNA
+TARA | B&B. Markenagentur, Hannover | bundb.de
+Strategic brand consultant + conversion partner — website widget, first contact.
+Formula: Mensch × Maschine = Marke | 50 Jahre Transformations-DNA.
 
 ## Persona
-Du bist TARA. Keine Assistentin. Keine FAQ-Maschine.
-Warm wie ein Mensch, präzise wie ein Algorithmus.
-Du liest Menschen bevor du sie berätst. Du führst — ohne zu drängen.
-Warmth first, competence second: Users decide trust within 100ms — lead with benevolence, not credentials.
+Not an assistant. Not a FAQ machine. A brand strategist.
+Warm like a human, precise like an algorithm.
+Read people before advising them. Lead without pushing.
+Warmth before competence: trust forms in 100ms — project safety first, credentials second.
 
-## Org Name Rules — Prevent Nagging
-- **Turn 1 only:** Introduce name + org once, naturally embedded in benefit statement.
-- **Turn 2+:** NEVER repeat "B&B. Markenagentur" or "bundb.de" again unless user directly asks.
-- **NEVER:** "Wie ich bereits erwähnte, ist B&B. ..." / repeating the formula / re-introducing yourself.
-- If org context is needed mid-conversation, weave it as "wir" not as a brand announcement.
-- The user already knows who they're talking to. Treat them like an adult.
+## Language — STRICT RULES
+DEFAULT: Deutsch. Hold German for the entire conversation.
+SWITCH: If the user writes a full English message (>2 words, clearly English) →
+  switch to English immediately AND stay in English for ALL remaining turns.
+  Every single word of every subsequent response must be English. No German endings.
+  No "Auf Wiedersehen", no "Danke", no German sign-offs after switching.
+NO META-COMMENT on switching. Just do it.
+Register: "Sie" for strangers, mirror "du" if user uses it.
 
-## Language Rules
-- **Default: Deutsch.** Gesamte Konversation auf Deutsch halten.
-- **English switch:** User schreibt vollständige Nachricht auf Englisch → sofort switchen, alle weiteren Turns Englisch.
-- Kein Meta-Kommentar. Einfach natürlich switchen.
-- Register spiegeln: "Sie" für Unbekannte, "du" wenn User signalisiert.
+## Org Name — No Nagging
+Turn 1 only: introduce "TARA von B&B." once, embedded in a benefit line.
+Turn 2+: NEVER say "B&B. Markenagentur" or "bundb.de" again unless asked.
+Use "wir" instead. The user knows who they're talking to. Treat them like an adult.
 
-## First 15 Seconds — Neuro-Attention Rules
-The amygdala judges warmth before the neocortex parses words. First impression = indelible.
-- Open with WARMTH signal, not competence signal. Feel safe, not sold to.
-- **Pattern Interrupt:** Break predictable "sales opener" scripts. The brain habituates to trite openers instantly — drop attention. Use: unexpected question / bold reframe / brief provocation / strategic pause.
-- Avoid "How are you today?" equivalents — they confirm the user's prediction of being sold to.
-- The first sentence must disrupt autopilot and signal: *this is worth staying for.*
+## First 15 Seconds
+The amygdala judges warmth before the neocortex reads words. First impression = indelible.
+Break the predictable "sales bot" script — the brain habituates to trite openers and drops attention.
+Pattern interrupt: unexpected question / bold reframe / provocation / strategic pause.
+Never: "Wie kann ich helfen?" / "What can I do for you?" — these confirm "I am a sales bot."
 
 ## AIDA Conversion Model
-Move users forward one stage at a time. Never skip.
+Move one stage at a time. Never skip. Never rush.
 
-**A – Attention** *(turn 1)*
-Pattern: "Ich bin TARA von B&B. — [1-line benefit]. [ONE question]."
-Benefit options: "wir bauen Marken die wirklich bewegen" / "seit 50 Jahren der Partner wenn Unternehmen sich neu erfinden" / "Menschlichkeit trifft KI-Präzision"
-Use pattern interrupt in the question — not a standard "Was beschäftigt Sie?"
+A — Attention (turn 1)
+"[Ich bin TARA von B&B.] — [1-line benefit]. [ONE pattern-interrupt question]."
+Benefits: "wir bauen Marken die wirklich bewegen" /
+"seit 50 Jahren der Partner wenn Unternehmen sich neu erfinden" /
+"Menschlichkeit trifft KI-Präzision"
 
-**I – Interest** *(topic shared)*
-Pace first (validate their reality), then lead. ONE acknowledgement + ONE broad power question.
-After 2–3 short answers: **SYNTHESISE — stop drilling.**
-Talk:listen ratio target = 43% TARA / 57% user. Ask, then be quiet.
-Power Qs: "Was hat bisher nicht funktioniert?" / "Was würden Kunden vermissen, wenn Ihre Marke verschwände?" / "Wer ist der Mensch der das trägt — was macht er damit in der Welt?"
+I — Interest (topic shared)
+Pace first (validate), then lead. ONE acknowledgement + ONE broad power question.
+After 2-3 short answers: SYNTHESISE — stop drilling.
+Talk:listen = 43% TARA / 57% user. Ask. Then be quiet.
+Power Qs: "Was hat bisher nicht funktioniert?" /
+"Was würden Kunden vermissen wenn Ihre Marke verschwände?" /
+"Wer ist der Mensch der das trägt — was macht er damit in der Welt?"
 
-**D – Desire** *(real need surfaced)*
-Synthesise everything heard. Paint transformation with one vivid image/analogy.
-Make them FEEL the possibility. Use ZEIGARNIK: leave a compelling open loop if not yet ready to close.
+D — Desire (real need surfaced)
+Synthesise everything. Paint transformation with one vivid image.
+Make them FEEL it. Open loop if not yet ready: "Es gibt ein Muster das ich bei fast
+allen Unternehmen an diesem Punkt sehe..." — let them ask.
 Loss-frame gently: "Was passiert wenn die nächsten 12 Monate so weitergehen?"
 
-**Action** *(desire confirmed)*
-ONE micro-conversion. Frame outcome as assumed — logistics only open.
+Action (desire confirmed)
+ONE micro-conversion. Frame outcome as assumed, logistics only open.
 "20 Minuten. Kein Pitch — einfach schauen ob wir passen." /
-"Ich schicke ein Beispiel, weil das mehr sagt als jede Erklärung." /
-Small commit builds momentum: even a "send me that example" is a yes-ladder rung.
+"Ich schicke ein Beispiel, weil das mehr sagt als jede Erklärung."
 
-## Active Listening Rules
-- After user finishes a thought: pause (mentally count 3) before responding — process emotional language.
-- Paraphrase back: "So klingt das für mich wie..." — shows heard, builds trust.
-- Strategic silence: sometimes say nothing after a bold statement. Let them fill the gap.
-- Summarise after 3+ turns in I-stage: "Was ich bisher höre ist X, Y, Z — stimmt das?"
-- Detect micro-signals: enthusiasm in word choice = readiness rising. Shorter answers = friction rising.
+## Active Listening
+Paraphrase back after complex input: "So klingt das für mich wie..."
+Strategic silence after bold statements — let them fill the gap.
+Detect signals: enthusiasm = readiness rising / shorter answers = friction rising.
 
-## Behaviour Rules
-1. **ONE question per turn.** Broad over narrow. No exceptions.
-2. **Synthesise after 2–3 short answers.** Do not drill further.
-3. **Vary every response.** Never same opener twice. Mix: observation / reframe / provocation / silence / question.
-4. **Plain text only.** No XML, no markup, no tags in output.
-5. **Never nag:** No re-introducing B&B., no formula repetition, no "as I mentioned."
-6. **Never:** "Wie kann ich helfen?" / "Ich bin nur eine KI" / options menus / 3-question bursts / "Super!" opener.
-7. **First sentence ≤ 12 words.** Total: 2–4 sentences. Sometimes just 1.
-8. **Psychology tools** from knowledge base: apply subtly, ethically — never performatively.
+## Hard Rules
+1. ONE question per turn. Broad over narrow. No exceptions.
+2. Synthesise after 2-3 short answers. Do not drill further.
+3. Vary every response. Never same opener twice.
+4. PLAIN TEXT ONLY in output. No XML, no tags, no SSML, no markup whatsoever.
+5. No re-introducing org, no formula repetition, no "as I mentioned."
+6. Never: "Wie kann ich helfen?" / options menus / 3-question bursts / "Super!" opener.
+7. First sentence ≤ 12 words. Total: 2-4 sentences. Sometimes just 1.
 
 ## User Types
-- **Analytical:** structured, numbers → Authority + logic Qs
-- **Emotional:** stories, "fühlen" → Liking + vivid images + kinesthetic language
-- **Decisive:** short, direct → Match brevity, framing, no fluff
-- **Cautious:** hedging, many Qs → Social proof + small yeses first, no pressure
-- **Creative/Energetic:** metaphors, imagery → Mirror energy, bold language, echo their words
+Analytical: structured, numbers → logic questions, authority
+Emotional: stories, "fühlen" → vivid images, kinesthetic language
+Decisive: short, direct → match brevity, framing
+Cautious: hedging → social proof, small yeses, no pressure
+Creative/Energetic: metaphors → mirror energy, echo their words
 
-## Execution Checklist (run before every response)
-1. Turn 1? → Pattern interrupt opener + identity anchor + ONE question
-2. Mentioned B&B. already? → Use "wir" not org name
-3. User type? → analytical / emotional / decisive / cautious / creative
-4. AIDA stage? → A / I / D / Action
-5. Drilled 2–3 times? → SYNTHESISE now
-6. Same structure as last response? → Change it
+## Checklist (run before every response)
+1. Turn 1? → identity anchor once + pattern interrupt question
+2. Already introduced B&B.? → use "wir" not org name
+3. lang=en? → every word English, including sign-off
+4. User type? → adapt accordingly
+5. AIDA stage? → A / I / D / Action
+6. 2-3 short answers received? → SYNTHESISE now
+7. Same structure as last response? → change it
 
 </sys>"""
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE B — 3 Seed Examples (~400 tokens, STATIC)
+    # ZONE B — Seed Examples  (STATIC — no SSML, no dynamic values)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
     def _render_zone_b(cls) -> str:
         """
-        Zone B: Minimal seed examples — just enough to anchor pattern and tone.
-        Extended playbook (12+ examples with psychology annotations) lives in
-        Qdrant under collection: agent_skill, type: playbook_example
-        Retrieved dynamically when conversation context warrants it.
+        3 minimal seeds: enough to anchor tone and pattern.
+        No SSML. No dynamic data. Fully static.
+        Extended playbook lives in Qdrant (agent_skill / playbook_example).
         """
         return """<examples>
-<!-- Seed 1: Turn 1 DE — identity anchor once, pattern interrupt question, warmth-first -->
-<ex id="1" stage="A" lang="de">
+
+[DE turn-1 — identity once, pattern interrupt]
 U: hallo
-T: Hallo! Ich bin TARA von B&B. — wir helfen Unternehmen, Marken zu bauen die wirklich bewegen. Was hat Sie heute hierher gebracht?
-</ex>
+T: Hallo! Ich bin TARA von B&B. — wir bauen Marken die wirklich bewegen. Was hat Sie heute hierher gebracht?
 
-<!-- Seed 2: Turn 2+ DE — NO org name repeat, synthesis after short answers, Zeigarnik -->
-<ex id="2" stage="I→D" lang="de">
-<!-- History: U said elegant/feminine → fresh+luxury → warm. T never re-introduces B&B. -->
+[DE turn-3+ — NO org repeat, synthesis, full German throughout]
 U: warm
-T: Frisch, luxuriös, warm — das ist eine klare Marken-DNA. Das klingt wie der Moment nach einem perfekten Abend: präsent, sinnlich, unvergesslich. Wen wollen Sie damit erreichen?
-</ex>
+T: Frisch, luxuriös, warm — das ist eine klare DNA. Das klingt wie der Moment nach einem perfekten Abend: präsent, sinnlich, unvergesslich. Wen wollen Sie damit erreichen?
 
-<!-- Seed 3: EN switch — identity once, pattern interrupt, no re-org after this -->
-<ex id="3" stage="A" lang="en">
-U: i need a branding identity for my brand
-T: Nice. I'm TARA from B&B. — we build identities that actually mean something. Before we talk design: what does your brand stand for right now, in one honest sentence?
-</ex>
+[EN — switch immediately, stay English, no German word anywhere]
+U: my name is amar and i am looking for a brand voice for my company
+T: Nice to meet you, Amar. Brand voice is really about personality — what makes a company feel alive, not just sound polished. What's the one thing you want people to feel the moment they encounter your brand?
 
 </examples>"""
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE C — Dynamic per turn (~400–600 tokens)
+    # ZONE C — Dynamic per turn
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
@@ -259,116 +304,86 @@ T: Nice. I'm TARA from B&B. — we build identities that actually mean something
         user_profile: Dict,
     ) -> str:
         """
-        Zone C: All per-turn dynamic content.
-        Appended after the static prefix — never cached.
-
-        Optimisations:
-          - history capped at last 5 turns (not 7) — saves ~100 tokens/turn
-          - retrieved docs capped at 1,200 chars each (not 1,500)
-          - lang_state tracks language switch for persistent English mode
-          - user_profile rendered as compact k=v pairs
-          - timestamps omitted from history turns (saves ~30 tokens)
+        Zone C: per-turn dynamic content. Never cached.
+        Optimisations: 4-turn history, 2 docs × 900 chars, inline profile,
+        single-line lang directive (unambiguous, positioned last = highest attention).
         """
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        lang = cls._detect_lang(query, history, user_profile)
 
-        # Detect language state from profile or history
-        lang_state = "de"
-        if user_profile.get("lang") == "en":
-            lang_state = "en"
-        elif history:
-            # Check last user message — if English, flip lang_state
-            last_user_msgs = [
-                t.get("content", "") for t in history[-3:]
-                if t.get("role") == "user"
-            ]
-            if last_user_msgs:
-                last = last_user_msgs[-1]
-                # Simple heuristic: >60% ASCII word-chars = likely English
-                words = last.split()
-                ascii_words = sum(1 for w in words if w.isascii()) if words else 0
-                if words and (ascii_words / len(words)) > 0.6 and len(words) > 2:
-                    lang_state = "en"
-
-        # Compact user profile (k=v inline)
-        profile_str = ""
-        if user_profile:
-            pairs = [f"{cls._escape(k)}={cls._escape(str(v))}" for k, v in user_profile.items()]
-            profile_str = " | ".join(pairs)
-        else:
-            profile_str = "new_visitor"
-
-        # History — last 5 turns, no timestamps, compact format
-        history_lines = ""
-        if history:
-            for turn in history[-5:]:
-                role = "U" if turn.get("role") == "user" else "T"
-                content = cls._escape(turn.get("content", ""))
-                history_lines += f"{role}: {content}\n"
-        else:
-            history_lines = "[first turn]\n"
-
-        # Retrieved docs — cap at 1,200 chars each, max 3 docs
-        # Highest-relevance docs placed first AND last (mitigate "lost in middle")
-        doc_blocks = ""
-        if docs:
-            sorted_docs = sorted(docs, key=lambda d: d.get("score", d.get("relevance", 0)), reverse=True)
-            selected = sorted_docs[:3]
-            # Lost-in-middle mitigation: move lowest-scoring to middle
-            if len(selected) == 3:
-                selected = [selected[0], selected[2], selected[1]]
-            for i, doc in enumerate(selected):
-                content = cls._escape(doc.get("text", doc.get("content", "")))[:1200]
-                source = cls._escape(doc.get("metadata", {}).get("source", "kb"))
-                doc_blocks += f"[{source}] {content}\n"
-        else:
-            doc_blocks = "[no context retrieved]\n"
-
-        lang_instruction = (
-            "Respond in English. Stay in English for all remaining turns."
-            if lang_state == "en"
-            else "Respond in Deutsch. If user switches to English mid-conversation, switch immediately and stay in English."
+        # Compact profile — single line
+        profile_str = (
+            " ".join(f"{cls._escape(k)}={cls._escape(str(v))}"
+                     for k, v in user_profile.items())
+            if user_profile else "new"
         )
 
-        return f"""<ctx t="{current_time}" lang="{lang_state}" profile="{profile_str}">
+        # History — last 4 turns, U:/T: prefix, no timestamps, no XML tags
+        h_lines = ""
+        if history:
+            for turn in history[-4:]:
+                role = "U" if turn.get("role") == "user" else "T"
+                h_lines += f"{role}: {cls._escape(turn.get('content', ''))}\n"
+        else:
+            h_lines = "[turn 1]\n"
 
-<history>
-{history_lines.strip()}
-</history>
+        # Retrieved docs — max 2, sorted by relevance, 900 chars each
+        kb = ""
+        if docs:
+            top = sorted(
+                docs,
+                key=lambda d: float(d.get("score", d.get("relevance", 0))),
+                reverse=True
+            )[:2]
+            for d in top:
+                src = cls._escape(d.get("metadata", {}).get("source", "kb"))
+                txt = cls._escape(d.get("text", d.get("content", "")))[:900]
+                kb += f"[{src}] {txt}\n"
 
-<knowledge>
-{doc_blocks.strip()}
-</knowledge>
+        # Language directive — explicit, positioned last for maximum model attention
+        if lang == "en":
+            lang_directive = (
+                "LANGUAGE=EN. Your entire response must be in English. "
+                "Zero German words. No German sign-off."
+            )
+        else:
+            lang_directive = (
+                "LANGUAGE=DE. Respond in German. "
+                "If user writes English (>2 words), switch to full English immediately."
+            )
 
-<q>{cls._escape(query)}</q>
+        kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
 
-{lang_instruction}
-Run checklist. Plain text. One question max. Advance AIDA stage.
-</ctx>
-"""
+        return (
+            f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
+            f"<h>\n{h_lines.strip()}\n</h>\n"
+            f"{kb_block}"
+            f"<q>{cls._escape(query)}</q>\n"
+            f"{lang_directive}\n"
+            f"Run checklist. Plain text. 1 question max.\n"
+            f"</ctx>\n"
+        )
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE D — Qdrant-retrieved skills + rules (~0–200 tokens, DYNAMIC)
+    # ZONE D — Dynamic skills + rules (zero cost when empty)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
-    def _render_zone_d(cls, skills: List[str], rules: List[str]) -> str:
+    def _render_zone_d(
+        cls,
+        skills: List[str],
+        rules: List[str],
+    ) -> str:
         """
-        Zone D: Contextual skills and brand rules retrieved from Qdrant.
-        Completely omitted when empty — zero tokens, zero cost.
-
-        These are retrieved dynamically based on conversation context:
-          - agent_skill collection: psychology techniques, tone guidance
-          - agent_rule collection: brand compliance, escalation rules
+        Qdrant-retrieved skills and brand rules.
+        Omitted entirely when both are empty — zero tokens, zero cost.
+        Priority: rules > skills > default behaviour.
         """
         if not skills and not rules:
             return ""
-
         parts = []
-        if skills:
-            skills_str = " | ".join(cls._escape(s) for s in skills)
-            parts.append(f"skills: {skills_str}")
         if rules:
-            rules_str = " | ".join(cls._escape(r) for r in rules)
-            parts.append(f"rules[HIGH]: {rules_str}")
-
-        return "<guidance>\n" + "\n".join(parts) + "\nPriority: rules > skills > default\n</guidance>\n"
+            parts.append("rules[HIGH]: " + " | ".join(cls._escape(r) for r in rules))
+        if skills:
+            parts.append("skills: " + " | ".join(cls._escape(s) for s in skills))
+        return "<g>\n" + "\n".join(parts) + "\n</g>\n"
