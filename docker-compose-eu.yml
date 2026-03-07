@@ -152,6 +152,31 @@ services:
       - .env.eu
 
   # ═══════════════════════════════════════════════════════════
+  # Embeddings Service (Internal port 4006)
+  # ═══════════════════════════════════════════════════════════
+  embeddings-eu:
+    build:
+      context: ./bindings-eu/embeddings-eu
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 4006
+    environment:
+      EMBEDDINGS_MODEL: "all-MiniLM-L6-v2"
+      PORT: "4006"
+      HF_HOME: "/root/.cache/huggingface"
+    volumes:
+      - hf_cache_eu:/root/.cache/huggingface
+    restart: unless-stopped
+    networks:
+      eu-stack: null
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=embeddings-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=embeddings
+
+  # ═══════════════════════════════════════════════════════════
   # TTS Service (Internal port 4003) — Cartesia
   # ═══════════════════════════════════════════════════════════
   tts-eu:
@@ -279,6 +304,8 @@ volumes:
     name: redis_eu_data
   rag_eu_index:
     name: rag_eu_index
+  hf_cache_eu:
+    name: hf_cache_eu
 
 networks:
   coolify:
