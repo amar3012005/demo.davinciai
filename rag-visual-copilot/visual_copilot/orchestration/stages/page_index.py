@@ -178,18 +178,31 @@ _STOP_WORDS = frozenset({
 # Module-level IDF cache
 _idf_weights: Dict[str, float] = {}
 _idf_built = False
+_last_index_hash: str = ""
 
 
 def _build_idf(index: Dict[str, Any]) -> None:
-    """Build inverse document frequency weights for all terms across all nodes."""
-    global _idf_weights, _idf_built
-    if _idf_built:
-        return
-
+    """Build inverse document frequency weights for all nodes across all nodes."""
+    global _idf_weights, _idf_built, _last_index_hash
+    
+    # ← ADD: Check if index changed since last build
+    try:
+        index_hash = hashlib.md5(json.dumps(index, sort_keys=True).encode()).hexdigest()
+    except (TypeError, ValueError) as e:
+        logger.warning(f"PageIndex IDF hash failed: {e}")
+        index_hash = ""
+    
+    if _idf_built and _last_index_hash == index_hash and index_hash:
+        return  # Cache still valid
+    
+    if _idf_built and not index_hash:
+        return  # Can't hash empty/invalid index
+    
     all_nodes = _flatten_nodes(index.get("root", {}))
     n_docs = len(all_nodes)
     if n_docs == 0:
         _idf_built = True
+        _last_index_hash = index_hash
         return
 
     # Count how many nodes each term appears in
@@ -211,7 +224,9 @@ def _build_idf(index: Dict[str, Any]) -> None:
         # IDF = log(N / df), clamped to [0.1, 5.0]
         _idf_weights[term] = max(0.1, min(5.0, math.log(n_docs / df)))
 
+    _idf_weights = _idf_weights  # Ensure assignment
     _idf_built = True
+    _last_index_hash = index_hash  # ← Store hash for change detection
     logger.info(f"PageIndex IDF built: {len(_idf_weights)} terms, {n_docs} nodes")
 
 
@@ -279,10 +294,10 @@ def _goal_relevance_score(goal: str, node: Dict[str, Any]) -> float:
 def find_target_node(
     goal: str,
     index: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+) -> Tuple[Optional[Dict[str, Any]], float]:
     """
     Find the best target node for a given goal using IDF-weighted scoring.
-    Returns the most relevant leaf node.
+    Returns the most relevant leaf node and its score.
     """
     if not index:
         index = load_index()
@@ -297,8 +312,8 @@ def find_target_node(
     scored.sort(key=lambda x: x[1], reverse=True)
 
     if scored and scored[0][1] > 0:
-        return scored[0][0]
-    return None
+        return scored[0][0], scored[0][1]
+    return None, 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -507,28 +522,29 @@ def traverse_index(
     current_node = locate_current_node(current_url, index)
 
     # Step B: Find target node
-    target_node = find_target_node(goal, index)
+    target_node, target_score = find_target_node(goal, index)
 
     # Step C: Calculate transition path
     if current_node and target_node:
+        base_confidence = min(0.95, max(0.40, target_score / 15.0))
         if current_node.get("node_id") == target_node.get("node_id"):
             # Already at the target node
             strategy = [f"LAST_MILE: {goal}"]
             reasoning = (
                 f"Already at target node '{current_node.get('title', '?')}'. "
-                f"Goal can be achieved directly on this page."
+                f"Goal can be achieved directly on this page. (Score: {target_score:.2f})"
             )
-            confidence = 0.95
+            confidence = min(0.98, base_confidence + 0.1)
             transition = []
         else:
             transition = calculate_transition_path(current_node, target_node, index)
             strategy = generate_strategy_from_path(transition, goal)
             reasoning = (
                 f"Current: '{current_node.get('title', '?')}' (node={current_node.get('node_id', '?')}). "
-                f"Target: '{target_node.get('title', '?')}' (node={target_node.get('node_id', '?')}). "
+                f"Target: '{target_node.get('title', '?')}' (node={target_node.get('node_id', '?')}, Score: {target_score:.2f}). "
                 f"Path: {' → '.join(n.get('title', '?') for n in transition)}."
             )
-            confidence = 0.90
+            confidence = base_confidence
     elif target_node:
         # Can't locate current position but know the target
         transition = [target_node]
@@ -637,8 +653,9 @@ Provide:
 Respond in JSON only:
 {{"target_node_id": "...", "transition_clicks": [...], "reasoning": "..."}}"""
 
+        model_name = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
         payload = {
-            "model": "openai/gpt-oss-20b",
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": "You are a precise navigation pathfinder. Respond with JSON only."},
                 {"role": "user", "content": prompt},

@@ -187,9 +187,10 @@ class PipelineResume:
     
     # Key prefix
     SESSION_KEY_PREFIX = "tara:session"
-    
-    # TTL: 1 hour for pending pipelines (shorter than session TTL)
-    PIPELINE_TTL = 60 * 60  # 3600 seconds
+
+    # TTL: 24 hours for pending pipelines (matches recovery state TTL)
+    # Changed from 60 * 60 (1 hour) to prevent long missions from losing pending pipelines
+    PIPELINE_TTL = 24 * 60 * 60  # 86400 seconds
     
     def __init__(self, redis_client):
         """

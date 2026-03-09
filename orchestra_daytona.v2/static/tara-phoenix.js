@@ -119,6 +119,14 @@
         },
 
         /**
+         * Clear navigation flag (called on SPA navigation).
+         */
+        clearNavigationFlag() {
+            sessionStorage.removeItem('tara_is_navigating');
+            console.log('✅ Navigation flag cleared');
+        },
+
+        /**
          * Register beforeunload handler for mission + session persistence.
          * @param {Object} widget - The TaraWidget instance (for isActive, _currentMissionGoal)
          */
@@ -135,6 +143,22 @@
                     console.log('🛡️ Phoenix Protocol: Universal autosave triggered on unload');
                 }
             });
+            
+            // ← ADD: SPA navigation detection (React Router, Vue Router, etc.)
+            // SPA navigations don't trigger beforeunload, so we must clear the flag manually
+            const originalPushState = history.pushState;
+            history.pushState = function(...args) {
+                Phoenix.clearNavigationFlag();
+                console.log('📡 SPA navigation detected (pushState), cleared navigation flag');
+                return originalPushState.apply(this, args);
+            };
+            
+            const originalReplaceState = history.replaceState;
+            history.replaceState = function(...args) {
+                Phoenix.clearNavigationFlag();
+                console.log('📡 SPA navigation detected (replaceState), cleared navigation flag');
+                return originalReplaceState.apply(this, args);
+            };
         },
 
         /**

@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 _pending: Dict[Tuple[str, str], "asyncio.Future[Optional[str]]"] = {}
 
 # Timeout for screenshot response from browser (seconds)
-SCREENSHOT_TIMEOUT = 10.0
+# Increased from 10.0 to 25.0 to accommodate Groq Vision API latency (10-15s for large images)
+SCREENSHOT_TIMEOUT = 25.0
 
 
 # ── WebSocket session registry ────────────────────────────────────────────────
@@ -221,13 +222,13 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
         id_match = re.search(r"\b(t-[a-z0-9]+)\b", raw_response, re.IGNORECASE)
         best_target_id = id_match.group(1) if id_match else ""
 
-    # Recommend a tool based on what vision found
+    # Recommend a probe based on what vision found. Prefer safe observation over forced action.
     recommended_tool = ""
     if isinstance(json_payload, dict):
         recommended_tool = str(json_payload.get("recommended_tool") or "").strip()
     if not recommended_tool:
         tool_match = re.search(
-            r"(?:primary tool|recommended tool)\s*:\s*(click_element|type_text|wait_for_ui|scroll_page|read_page_content|complete_mission)",
+            r"(?:primary tool|recommended tool|safest probe)\s*:\s*(click_element|type_text|wait_for_ui|scroll_page|read_page_content|complete_mission)",
             response_lower,
         )
         if tool_match:
@@ -242,17 +243,21 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
         elif any(kw in response_lower for kw in ["scroll", "below", "more content"]):
             recommended_tool = "scroll_page"
         else:
-            recommended_tool = "complete_mission"  # default: try to complete with what we have
+            recommended_tool = "read_page_content"
 
     evidence_summary = ""
     blocking_reason = ""
     best_target_label = ""
+    page_mode = ""
+    uncertainty_summary = ""
     candidate_targets = []
     actions = []
     if isinstance(json_payload, dict):
         evidence_summary = str(json_payload.get("evidence_summary") or "").strip()[:260]
         blocking_reason = str(json_payload.get("blocking_reason") or "").strip()[:260]
         best_target_label = str(json_payload.get("best_target_label") or "").strip()[:120]
+        page_mode = str(json_payload.get("page_mode") or "").strip()[:80]
+        uncertainty_summary = str(json_payload.get("uncertainty_summary") or "").strip()[:180]
         raw_targets = json_payload.get("candidate_targets") or []
         if isinstance(raw_targets, list):
             for t in raw_targets[:4]:
@@ -264,6 +269,19 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
                         "label": str(t.get("label") or "").strip()[:120],
                         "priority": int(t.get("priority", 99) or 99),
                         "why": str(t.get("why") or "").strip()[:180],
+                    }
+                )
+        raw_controls = json_payload.get("candidate_controls") or []
+        if isinstance(raw_controls, list) and not candidate_targets:
+            for t in raw_controls[:4]:
+                if not isinstance(t, dict):
+                    continue
+                candidate_targets.append(
+                    {
+                        "target_id": str(t.get("target_id") or "").strip(),
+                        "label": str(t.get("label") or "").strip()[:120],
+                        "priority": int(t.get("priority", 99) or 99),
+                        "why": str(t.get("why") or t.get("reason") or "").strip()[:180],
                     }
                 )
         raw_actions = json_payload.get("recommended_actions") or []
@@ -296,26 +314,34 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
         m = re.search(r"missing evidence\s*:\s*(.+)", raw_response, re.IGNORECASE)
         if m:
             blocking_reason = m.group(1).strip()[:260]
+    if not page_mode:
+        m = re.search(r"page mode\s*:\s*(.+)", raw_response, re.IGNORECASE)
+        if m:
+            page_mode = m.group(1).strip()[:80]
+    if not uncertainty_summary:
+        m = re.search(r"uncertainty\s*:\s*(.+)", raw_response, re.IGNORECASE)
+        if m:
+            uncertainty_summary = m.group(1).strip()[:180]
     if not best_target_label:
-        m = re.search(r"best target\s*:\s*(.+?)(?:\s*\(id=t-[a-z0-9]+\)|$)", raw_response, re.IGNORECASE)
+        m = re.search(r"best (?:target|visible control)\s*:\s*(.+?)(?:\s*\((?:id=)?[a-zA-Z0-9_\-]+\)|$)", raw_response, re.IGNORECASE)
         if m:
             best_target_label = m.group(1).strip()[:120]
     if not best_target_id:
-        m = re.search(r"best target\s*:\s*.+?\(id=(t-[a-z0-9]+)\)", raw_response, re.IGNORECASE)
+        m = re.search(r"best (?:target|visible control)\s*:\s*.+?\((?:id=)?([a-zA-Z0-9_\-]+)\)", raw_response, re.IGNORECASE)
         if m:
             best_target_id = m.group(1)
 
     if not candidate_targets:
         for line in raw_response.splitlines():
             m = re.search(
-                r"^\s*\d+\)\s*(.+?)\s*\(id=(t-[a-z0-9]+)\)\s*-\s*(.+)$",
+                r"^\s*\d+\)\s*(.+?)(?:\s*\((?:id=)?([a-zA-Z0-9_\-]+)\))?\s*-\s*(?:confidence=(?:high|medium|low)\s*-\s*)?(.+)$",
                 line.strip(),
                 re.IGNORECASE,
             )
             if m:
                 candidate_targets.append(
                     {
-                        "target_id": m.group(2).strip(),
+                        "target_id": str(m.group(2) or "").strip(),
                         "label": m.group(1).strip()[:120],
                         "priority": len(candidate_targets) + 1,
                         "why": m.group(3).strip()[:180],
@@ -323,6 +349,63 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
                 )
                 if len(candidate_targets) >= 4:
                     break
+
+    if not actions:
+        # Derive safe advisory actions from candidate controls when the vision model only observed.
+        if answer_visible:
+            actions.append(
+                {
+                    "tool": "complete_mission",
+                    "target_id": "",
+                    "target_label": "",
+                    "text": "",
+                    "press_enter": False,
+                    "seconds": 2,
+                    "force_click": False,
+                    "why": "Answer appears visible in the screenshot.",
+                }
+            )
+        elif candidate_targets:
+            first = candidate_targets[0]
+            if first.get("target_id"):
+                actions.append(
+                    {
+                        "tool": "click_element",
+                        "target_id": str(first.get("target_id") or "").strip(),
+                        "target_label": str(first.get("label") or "").strip()[:120],
+                        "text": "",
+                        "press_enter": False,
+                        "seconds": 2,
+                        "force_click": True,
+                        "why": str(first.get("why") or "Probe the strongest visible control.").strip()[:220],
+                    }
+                )
+            else:
+                actions.append(
+                    {
+                        "tool": "read_page_content",
+                        "target_id": "",
+                        "target_label": "",
+                        "text": "",
+                        "press_enter": False,
+                        "seconds": 2,
+                        "force_click": False,
+                        "why": "Vision found possible controls but no grounded DOM id; re-read visible content first.",
+                    }
+                )
+        elif recommended_tool in {"read_page_content", "wait_for_ui", "scroll_page"}:
+            actions.append(
+                {
+                    "tool": recommended_tool,
+                    "target_id": "",
+                    "target_label": "",
+                    "text": "",
+                    "press_enter": False,
+                    "seconds": 2,
+                    "force_click": False,
+                    "why": "Safest probe derived from visual observation.",
+                }
+            )
 
     if not actions:
         for line in raw_response.splitlines():
@@ -373,5 +456,7 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
         "recommended_actions": actions,
         "evidence_summary": evidence_summary,
         "blocking_reason": blocking_reason,
+        "page_mode": page_mode,
+        "uncertainty_summary": uncertainty_summary,
         "raw_summary": raw_response[:500],
     }

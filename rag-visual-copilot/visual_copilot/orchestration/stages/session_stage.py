@@ -73,11 +73,16 @@ async def apply_frontend_amnesia_guard(
                 existing_mission = None
                 backend_step = 0
             else:
+                # 🛡️ HISTORY_RESTORE: Backend history is authoritative
+                # When frontend sends step=0 but backend has history, use backend's action_history
                 logger.warning(
                     f"🛡️ FRONTEND AMNESIA GUARD: Frontend sent step=0 but Redis has {backend_step} "
                     f"actions on mission {existing_mission.mission_id}. Trusting backend state."
                 )
                 step_number = backend_step
+                logger.info(
+                    f"🛡️ HISTORY_RESTORE: Using backend authority: {len(existing_mission.action_history)} entries"
+                )
     elif existing_mission and existing_mission.status == "completed":
         existing_phase = getattr(existing_mission, "phase", "strategy")
         existing_domain = ""

@@ -36,56 +36,62 @@
                     }
                     else if (type === 'click') {
                         const el = Executor.findElement(targetId, text);
-                        if (el) {
-                            if (forceClick) {
-                                console.log("🔥 Force Click triggered: Applying 'Triple-Threat' dropdown sequence");
-                                el.scrollIntoView({ block: 'center', inline: 'center' });
-                                el.focus();
-
-                                const opts = { bubbles: true, cancelable: true, view: window, buttons: 1 };
-                                el.dispatchEvent(new MouseEvent('mousedown', opts));
-                                el.dispatchEvent(new MouseEvent('mouseup', opts));
-                                el.dispatchEvent(new MouseEvent('click', opts));
-                            } else {
-                                await widget.ghostCursor.moveTo(el);
-                                await widget.ghostCursor.click();
-
-                                // Robust click strategy
-                                const opts = { bubbles: true, cancelable: true, view: window };
-                                el.dispatchEvent(new MouseEvent('mousedown', opts));
-                                el.dispatchEvent(new MouseEvent('mouseup', opts));
-                                el.dispatchEvent(new MouseEvent('click', opts));
-
-                                if (typeof el.click === 'function') el.click();
-                                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus();
-                            }
-
-                            // Phoenix Protocol: Protect against click navigation
-                            Phoenix.plantSessionSeeds(widget._currentMissionGoal, widget.pendingMissionGoal);
-                            Phoenix.injectCrossDomainSession(el);
-
-                            const currentSessionId = sessionStorage.getItem('tara_session_id') || localStorage.getItem('tara_session_id');
-                            sessionStorage.setItem('tara_is_navigating', 'true');
-
-                            widget.isNavigating = true;
-                            await new Promise(resolve => {
-                                setTimeout(() => {
-                                    widget.isNavigating = false;
-                                    resolve();
-                                }, 2000);
-                            });
-
-                            // 🛡️ SPA Safety Net: If the page didn't hard reload after 2 seconds,
-                            // the flag is still set — clear it so the WS handler can send execution_complete
-                            if (sessionStorage.getItem('tara_is_navigating') === 'true') {
-                                console.log("📡 No hard navigation detected after click. Clearing flag for WS handler...");
-                                sessionStorage.removeItem('tara_is_navigating');
-                            }
-                            return { executed: true };
-                        } else {
-                            console.warn(`⚠️ Click target not found: ${targetId} fallback='${text || ''}'`);
-                            return { executed: false, reason: "target_not_found" };
+                        if (!el) {
+                            console.error(`❌ Click target INVALID: ${targetId}`);
+                            return { executed: false, reason: "invalid_target_id" };
                         }
+                        
+                        if (forceClick) {
+                            console.log("🔥 Force Click triggered: Applying 'Triple-Threat' dropdown sequence");
+                            el.scrollIntoView({ block: 'center', inline: 'center' });
+                            el.focus();
+
+                            const opts = { bubbles: true, cancelable: true, view: window, buttons: 1 };
+                            el.dispatchEvent(new MouseEvent('mousedown', opts));
+                            el.dispatchEvent(new MouseEvent('mouseup', opts));
+                            el.dispatchEvent(new MouseEvent('click', opts));
+                        } else {
+                            await widget.ghostCursor.moveTo(el);
+                            await widget.ghostCursor.click();
+
+                            // Robust click strategy
+                            const opts = { bubbles: true, cancelable: true, view: window };
+                            el.dispatchEvent(new MouseEvent('mousedown', opts));
+                            el.dispatchEvent(new MouseEvent('mouseup', opts));
+                            el.dispatchEvent(new MouseEvent('click', opts));
+
+                            if (typeof el.click === 'function') el.click();
+                            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus();
+                        }
+
+                        // Phoenix Protocol: Protect against click navigation
+                        Phoenix.plantSessionSeeds(widget._currentMissionGoal, widget.pendingMissionGoal);
+                        Phoenix.injectCrossDomainSession(el);
+
+                        const currentSessionId = sessionStorage.getItem('tara_session_id') || localStorage.getItem('tara_session_id');
+                        sessionStorage.setItem('tara_is_navigating', 'true');
+
+                        widget.isNavigating = true;
+                        await new Promise(resolve => {
+                            setTimeout(() => {
+                                widget.isNavigating = false;
+                                resolve();
+                            }, 2000);
+                        });
+
+                        // 🛡️ SPA Safety Net: If the page didn't hard reload after 2 seconds,
+                        // the flag is still set — clear it so the WS handler can send execution_complete
+                        if (sessionStorage.getItem('tara_is_navigating') === 'true') {
+                            console.log("📡 No hard navigation detected after click. Clearing flag for WS handler...");
+                            sessionStorage.removeItem('tara_is_navigating');
+                        }
+
+                        // 🏗️ DOM Settlement: Wait for DOM to stabilize after click (pipeline race condition fix)
+                        if (typeof window.TARA?.Scanner?.waitForDOMSettle === 'function') {
+                            await window.TARA.Scanner.waitForDOMSettle(2000, 500);
+                        }
+
+                        return { executed: true };
                     }
                     else if (type === 'type_text') {
                         const el = Executor.findElement(targetId);
@@ -159,6 +165,12 @@
                                     }
                                 }, 1500);
                             }
+
+                            // 🏗️ DOM Settlement: Wait for DOM to stabilize after type (pipeline race condition fix)
+                            if (typeof window.TARA?.Scanner?.waitForDOMSettle === 'function') {
+                                await window.TARA.Scanner.waitForDOMSettle(1000, 300);
+                            }
+
                             return { executed: true };
                         } else {
                             console.warn(`⚠️ Type target not found: ${targetId}`);

@@ -201,6 +201,9 @@ async def ultimate_plan_next_step_impl(
             effective_step=effective_step,
         )
 
+        verified_advance_active = False # Initialized early to prevent UnboundLocalError during bundled nav
+        prefetched_nodes_for_gate = None  # Initialize at function scope to prevent UnboundLocalError
+
         external_pre_decision = pre_decision if isinstance(pre_decision, dict) else None
         pre_decision = external_pre_decision
         skip_hive_prefetch = False
@@ -435,7 +438,7 @@ async def ultimate_plan_next_step_impl(
             if isinstance(pre_decision, dict):
                 pre_decision_reasoning = pre_decision.get("reasoning", "") or pre_decision.get("reason", "")
                 if pre_decision_reasoning:
-                    schema.constraints["pre_decision_context"] = pre_decision_reasoning[:500]
+                    schema.constraints["pre_decision_context"] = pre_decision_reasoning[:2000]  # Increased from 500 to preserve full navigation reasoning
 
             # ═══════════════════════════════════════════════════════════
             # ⚡ PAGEINDEX BUNDLED NAVIGATION: If PageIndex provides multiple
@@ -540,6 +543,48 @@ async def ultimate_plan_next_step_impl(
                     mission.main_goal = pre_decision_last_mile_goal or goal
                     await mission_brain._save_mission(mission)
 
+                    # Persist bundled nav progress as if earlier clicks were already dispatched
+                    # and stage the final navigation click for verified-advance reconciliation.
+                    bundled_clicks = [a for a in bundled_actions if a.get("type") == "click" and a.get("target_id")]
+                    if bundled_clicks:
+                        prefinal_clicks = bundled_clicks[:-1]
+                        final_click = bundled_clicks[-1]
+
+                        for click in prefinal_clicks:
+                            await mission_brain.record_action(
+                                mission.mission_id,
+                                "click",
+                                click["target_id"],
+                                True,
+                            )
+
+                        if prefinal_clicks:
+                            mission.current_subgoal_index = min(
+                                len(prefinal_clicks),
+                                max(len(mission.subgoals or []) - 1, 0),
+                            )
+                            await mission_brain._save_mission(mission)
+
+                        if verified_advance_active:
+                            await _record_and_maybe_advance(
+                                mission_brain=mission_brain,
+                                mission=mission,
+                                action_type="click",
+                                target_id=final_click["target_id"],
+                                nodes=nodes,
+                                current_url=current_url,
+                                dom_signature=_build_dom_signature(nodes),
+                                verified_advance_active=True,
+                                is_zero_shot=is_zero_shot,
+                            )
+                            mission = await mission_brain._load_mission(mission.mission_id) or mission
+                        else:
+                            mission.current_subgoal_index = min(
+                                len(bundled_clicks),
+                                max(len(mission.subgoals or []) - 1, 0),
+                            )
+                            await mission_brain._save_mission(mission)
+
                     logger.info(
                         f"🎯 PAGEINDEX_BUNDLED_NAV: Returning {len(bundled_actions)}-step pipeline"
                     )
@@ -608,7 +653,7 @@ async def ultimate_plan_next_step_impl(
                 if isinstance(pre_decision, dict):
                     pre_decision_reasoning = pre_decision.get("reasoning", "") or pre_decision.get("reason", "")
                 if pre_decision_reasoning:
-                    schema.constraints["pre_decision_context"] = pre_decision_reasoning[:500]
+                    schema.constraints["pre_decision_context"] = pre_decision_reasoning[:2000]  # Increased from 500 to preserve full navigation reasoning
 
                 from visual_copilot.mission.last_mile import run_compound_last_mile
                 try:
@@ -636,17 +681,52 @@ async def ultimate_plan_next_step_impl(
                         )
                         # Derive action_type from first non-wait action for routing
                         action_type = "action"
+                        terminal_answer = None
                         for step in action:
                             if isinstance(step, dict) and step.get("type") not in ("", "wait"):
-                                action_type = step.get("type", "action")
-                                break
+                                if not terminal_answer:
+                                    action_type = step.get("type", "action")
+                                if step.get("type") == "answer":
+                                    terminal_answer = step
+                                    break
                         
-                        # Return bundled pipeline to frontend
+                        # Terminal handling for pipelines
+                        if status == "complete" or (terminal_answer and status == "complete"):
+                            speech = (terminal_answer or {}).get("speech") or (terminal_answer or {}).get("text") or f"Here's what I found."
+                            mission.phase = "done"
+                            mission.status = "completed"
+                            await mission_brain._save_mission(mission)
+                            return {
+                                "success": True, "blocked": False,
+                                "action": action,  # Full list - frontend sequences it
+                                "speech": speech, "complete": True,
+                                "mission_id": mission.mission_id,
+                                "subgoal_index": mission.current_subgoal_index,
+                                "pipeline": "instant_last_mile_bundled_terminal",
+                                "confidence": 1.0,
+                            }
+                        
+                        if status == "impossible":
+                            speech = (terminal_answer or {}).get("speech") or f"I couldn't complete '{pre_decision_last_mile_goal}'."
+                            mission.phase = "failed"
+                            mission.status = "failed"
+                            await mission_brain._save_mission(mission)
+                            return {
+                                "success": False, "blocked": True,
+                                "action": action,
+                                "speech": speech, "complete": True,
+                                "reason": speech,
+                                "mission_id": mission.mission_id,
+                                "pipeline": "instant_last_mile_bundled_impossible",
+                                "failure_type": "impossible",
+                            }
+
+                        # Normal action pipeline
                         return {
                             "success": True,
                             "blocked": False,
                             "action": action,  # Full list - frontend sequences it
-                            "speech": f"Executing {len(action)}-step last-mile sequence...",
+                            "speech": f"Executing {len(action)}-step sequence...",
                             "mission_id": mission.mission_id,
                             "subgoal_index": mission.current_subgoal_index,
                             "pipeline": "instant_last_mile_bundled",

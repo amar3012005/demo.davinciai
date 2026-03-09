@@ -288,14 +288,15 @@
             // Send resume_session request to backend
             if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
                 console.log('📡 Backend Resume: Requesting mission state from backend...', sessionId);
-                
+
                 widget.ws.send(JSON.stringify({
                     type: 'resume_session',
                     session_id: sessionId,
                     current_url: window.location.href,
                     page_title: document.title,
                     goal_hint: widget.pendingMissionGoal || widget._currentMissionGoal || '',
-                    client_context: frontendContext
+                    client_context: frontendContext,
+                    request_full_history: true  // Request authoritative history from backend
                 }));
             }
         },
@@ -663,7 +664,7 @@
                     } else {
                         actionableSteps += 1;
                         const execResult = await widget.executor.executeCommand(type, target_id, text, force_click);
-                        if (execResult && execResult.executed) {
+                        if (execResult === undefined || (execResult && execResult.executed)) {
                             executedActionable += 1;
                         } else {
                             actionErrors.push({
@@ -684,7 +685,7 @@
 
                     // Micro-delay between sequential actions (not after last one)
                     if (i < actionList.length - 1 && type !== 'wait') {
-                        await new Promise(r => setTimeout(r, 150));
+                        await new Promise(r => setTimeout(r, 800));
                     }
                 }
 

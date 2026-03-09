@@ -118,13 +118,14 @@ class ActionLedger:
         await ledger.append_action(session_id, action_record)
         actions = await ledger.get_recent_actions(session_id, limit=5)
     """
-    
+
     # Maximum actions to keep in the ledger (capped list)
-    MAX_ACTIONS = 10
-    
+    # Increased from 10 to 20 to detect longer loop cycles in missions with 15+ steps
+    MAX_ACTIONS = 20
+
     # Key prefix
     SESSION_KEY_PREFIX = "tara:session"
-    
+
     # TTL: 24 hours for active sessions
     SESSION_TTL = 24 * 60 * 60  # 86400 seconds
     
