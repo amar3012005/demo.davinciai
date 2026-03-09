@@ -6,17 +6,17 @@
  * Depends on: tara-config.js (window.TARA.Config)
  */
 (function () {
-  'use strict';
+    'use strict';
 
-  window.TARA = window.TARA || {};
+    window.TARA = window.TARA || {};
 
-  /**
-   * Returns the full CSS string for the TARA widget.
-   * @param {Object} config - TARA config with orbSize, colors, etc.
-   * @returns {string} CSS text
-   */
-  function getStyles(config) {
-    return `
+    /**
+     * Returns the full CSS string for the TARA widget.
+     * @param {Object} config - TARA config with orbSize, colors, etc.
+     * @returns {string} CSS text
+     */
+    function getStyles(config) {
+        return `
         :host { all: initial; }
         #tara-container { isolation: isolate; }
 
@@ -520,7 +520,6 @@
             display: none;
             flex-direction: column;
             gap: 0;
-            margin-top: 10px;
             width: 240px;
             background: rgba(12, 12, 22, 0.88);
             backdrop-filter: blur(40px) saturate(1.6);
@@ -734,8 +733,8 @@
             box-shadow: 0 4px 20px rgba(242, 90, 41, 0.15);
         }
       `;
-  }
+    }
 
-  window.TARA.Styles = { getStyles };
-  console.log('✅ [TARA] Styles module loaded');
+    window.TARA.Styles = { getStyles };
+    console.log('✅ [TARA] Styles module loaded');
 })();

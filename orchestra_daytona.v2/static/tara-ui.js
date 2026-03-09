@@ -33,7 +33,8 @@
         widget.container = document.createElement('div');
         widget.container.id = 'tara-container';
         widget.container.style.cssText = `
-            position: fixed; top: 124px; right: 24px; pointer-events: auto;
+            position: fixed; bottom: 24px; right: 24px; pointer-events: auto;
+            display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 12px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         `;
 

@@ -33,6 +33,7 @@ from core.state_manager import StateManager, State
 from core.service_client import STTClient, TTSClient
 from core.pipeline import ProcessingPipeline
 from core.history_manager import HistoryManager
+from core.recovery_handler import integrate_recovery_handlers
 from dialogue.manager import MultiLangDialogueManager, DialogueType
 from utils.lang_detect import detect_language
 from fsm.appointment_fsm import SimpleAppointmentFSM
@@ -83,6 +84,7 @@ class OrchestratorSession:
     
     # Mission Agent State (Visual Co-Pilot Only)
     current_goal: Optional[str] = None
+    mission_id: Optional[str] = None
     is_mission_active: bool = False
     goal_step_count: int = 0
     max_mission_steps: int = 10
@@ -225,7 +227,7 @@ class OrchestratorWSHandler:
     - Multi-language support
     """
     
-    def __init__(self, 
+    def __init__(self,
                  config: OrchestratorConfig,
                  dialogue_manager: MultiLangDialogueManager,
                  pipeline: ProcessingPipeline,
@@ -235,7 +237,10 @@ class OrchestratorWSHandler:
         self.pipeline = pipeline
         self.redis_client = redis_client
         self.sessions: Dict[str, OrchestratorSession] = {}
-        
+
+        # Integrate recovery handlers
+        integrate_recovery_handlers(self)
+
         logger.info(f"✅ OrchestratorWSHandler initialized (Stream Out: {self.config.languages.stream_out})")
 
     async def shutdown(self):
@@ -793,6 +798,10 @@ class OrchestratorWSHandler:
             # ── PHOENIX PROTOCOL: Cross-Domain Session Restoration ──
             # Frontend just woke up on a new domain and is asking for its memories
             await self._handle_request_history(session, msg)
+        elif msg_type == "resume_session":
+            # ── BACKEND RECOVERY: Resume mission from backend state ──
+            # Frontend reloads and requests mission state from backend
+            await self._handle_resume_session(session, msg)
         elif msg_type == "analyse_page":
             asyncio.create_task(self._handle_analyse_page(session, msg))
         else:
@@ -2356,15 +2365,30 @@ class OrchestratorWSHandler:
         if msg.get("title"):
             session._page_title = msg.get("title")
 
+        # Handle session type for service routing (e.g., visual-copilot)
+        session_type = msg.get("session_type")
+        if session_type:
+            session.metadata["session_type"] = str(session_type)
+            if session_type == "visual_copilot":
+                import os
+                session.rag_url = os.environ.get('RAG_VISUAL_COPILOT_URL', 'http://rag-visualcopilot:8003')
+                logger.info(f"[{session.session_id}] 🎯 Route identified as VISUAL COPILOT session type, setting rag_url to {session.rag_url}")
+        else:
+            logger.debug(f"[{session.session_id}] session_type not in message, keys: {list(msg.keys())}")
+
         if mode in ["voice", "visual-copilot", "analyse_only"]:
             prev_mode = session.mode
             session.mode = mode
             logger.info(f"[{session.session_id}] 🛠️ Session mode changed from {prev_mode} to: {mode}")
 
-            # Send requests from visual copilot to rag-visualcopilot
-            if mode == "visual-copilot":
+            # SAFETY NET: Also set rag_url when mode is visual-copilot,
+            # even if session_type wasn't explicitly sent.
+            if mode == "visual-copilot" and not session_type:
                 import os
-                session.rag_url = os.environ.get('RAG_VISUAL_COPILOT_URL', 'http://rag-visualcopilot:8003')
+                vc_url = os.environ.get('RAG_VISUAL_COPILOT_URL')
+                if vc_url:
+                    session.rag_url = vc_url
+                    logger.info(f"[{session.session_id}] 🎯 Visual Co-Pilot mode detected, setting rag_url to {session.rag_url}")
 
             # analyse_only: lightweight mode — just TTS + WebSocket, no intro, no mission
             if mode == "analyse_only":
@@ -2403,7 +2427,10 @@ class OrchestratorWSHandler:
                 session.current_goal = pending_goal
                 session.is_mission_active = True
                 
-                if msg.get("resume_step_count") is not None:
+                if (
+                    not self.config.feature_flags.ignore_frontend_resume_counters
+                    and msg.get("resume_step_count") is not None
+                ):
                     try:
                         session.goal_step_count = int(msg.get("resume_step_count"))
                     except ValueError:
@@ -2591,6 +2618,14 @@ class OrchestratorWSHandler:
 
         # Reset timeout timer on DOM update (keep session alive during navigation)
         session.last_activity = time.time()
+        if self.config.feature_flags.backend_recovery_enabled:
+            await self._update_recovery_dom_state(
+                session,
+                current_url=session.current_url,
+                dom_signature=getattr(session, "last_dom_hash", "") or "",
+                page_title=getattr(session, "_page_title", "") or "",
+                dom_elements=elements if isinstance(elements, list) else None,
+            )
 
     async def _handle_request_history(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """
@@ -2877,20 +2912,12 @@ class OrchestratorWSHandler:
             await self._broadcast_state(session, State.THINKING)
 
             # ── Delegate narration to RAG visual_copilot ──────────────────
-            rag_url = getattr(self.config, 'rag_service_url', None)
-            
-            if not rag_url and hasattr(self.config, 'services'):
-                services = self.config.services
-                if hasattr(services, 'get'):
-                    rag_conf = services.get('rag', {})
-                    rag_url = rag_conf.get('url') if isinstance(rag_conf, dict) else getattr(rag_conf, 'url', None)
-                else:
-                    rag_conf = getattr(services, 'rag', None)
-                    rag_url = getattr(rag_conf, 'url', None)
-
+            # Use session.rag_url if set (from visual-copilot mode)
+            # otherwise fallback to env
+            rag_url = session.rag_url
             if not rag_url:
                 import os
-                rag_url = os.environ.get('RAG_SERVICE_URL', 'http://rag:8003')
+                rag_url = os.environ.get('RAG_VISUAL_COPILOT_URL') or os.environ.get('RAG_SERVICE_URL', 'http://rag:8003')
 
             payload = {
                 "session_id": session.session_id,
@@ -2988,6 +3015,21 @@ class OrchestratorWSHandler:
             session.current_url = outcome["current_url"]
             if old_url != session.current_url:
                 logger.info(f"[{session.session_id}] 🔗 URL changed: {old_url} → {session.current_url}")
+
+        if self.config.feature_flags.backend_recovery_enabled:
+            acknowledgements = msg.get("action_acknowledgements") or []
+            await self._handle_action_acknowledgements(
+                session,
+                acknowledgements,
+                current_url=session.current_url,
+            )
+            await self._update_recovery_dom_state(
+                session,
+                current_url=session.current_url,
+                dom_signature=outcome.get("dom_hash", ""),
+                page_title=getattr(session, "_page_title", "") or "",
+                dom_elements=elements if isinstance(elements, list) else None,
+            )
 
         # MISSION MODE: Re-trigger planner
         if session.mode == "visual-copilot" and session.is_mission_active:
@@ -4644,6 +4686,7 @@ class OrchestratorWSHandler:
 
     async def _start_mission(self, session: OrchestratorSession, goal: str):
         """Initialize a multi-step visual mission."""
+        session.mission_id = session.mission_id or f"mission_{uuid.uuid4().hex[:12]}"
         session.current_goal = goal
         session.is_mission_active = True
         session.goal_step_count = 0
@@ -4658,8 +4701,16 @@ class OrchestratorWSHandler:
         await self._send_json(session.websocket, {
             "type": "mission_started",
             "goal": goal,
+            "mission_id": session.mission_id,
             "timestamp": time.time()
         }, session)
+        if self.config.feature_flags.backend_recovery_enabled:
+            await self._update_recovery_on_mission_started(
+                session,
+                mission_id=session.mission_id,
+                goal=goal,
+                initial_url=session.current_url or "",
+            )
         
         # Fetch GPS Hints from Qdrant ONCE at mission start
         try:
@@ -4811,6 +4862,7 @@ class OrchestratorWSHandler:
 
     async def _end_mission(self, session: OrchestratorSession, summary: str):
         """Complete or abort a mission. Waits for TTS to finish before transitioning."""
+        mission_id = session.mission_id
         session.current_goal = None
         session.is_mission_active = False
         session.goal_step_count = 0
@@ -4827,6 +4879,14 @@ class OrchestratorWSHandler:
                 await session.tts_task
             except asyncio.CancelledError:
                 pass
+        await self._send_json(session.websocket, {
+            "type": "mission_complete",
+            "mission_id": mission_id,
+            "summary": summary,
+            "timestamp": time.time(),
+        }, session)
+        if self.config.feature_flags.backend_recovery_enabled and mission_id:
+            await self._update_recovery_on_mission_complete(session, mission_id, success=True)
         
         await session.state_manager.transition(State.LISTENING, trigger="mission_complete")
         await self._broadcast_state(session, State.LISTENING)
@@ -4993,6 +5053,16 @@ class OrchestratorWSHandler:
             # 🛡️ Count wait as a first-class step to prevent stagnation loops
             session.goal_step_count += 1
             session.action_history.append(f"wait: page_load")
+            if self.config.feature_flags.backend_recovery_enabled:
+                pipeline_id = f"pipe_{uuid.uuid4().hex[:12]}"
+                await self._update_recovery_on_action_planned(
+                    session,
+                    pipeline_id=pipeline_id,
+                    action_type="wait",
+                    target_id="page_load",
+                    label="Wait for page load",
+                    url_before=session.current_url,
+                )
             if len(session.action_history) > 5:
                 session.action_history = session.action_history[-5:]
 
@@ -5022,6 +5092,7 @@ class OrchestratorWSHandler:
             # Execute the action
             session.goal_step_count += 1
             session.is_executing_action = True
+            pipeline_id = f"pipe_{uuid.uuid4().hex[:12]}"
             
             # Map target_id for consistency
             actual_target = action_payload.get('target_id') or action_payload.get('id') or action_payload.get('url', 'unknown')
@@ -5069,6 +5140,25 @@ class OrchestratorWSHandler:
             session.last_action = current_action_sig
             logger.info(f"[{session.session_id}] 🎬 Step {session.goal_step_count}: {action_type} on {actual_target}")
 
+            if self.config.feature_flags.backend_recovery_enabled:
+                pipeline_actions = raw_action_payload if isinstance(raw_action_payload, list) else [action_payload]
+                for planned_action in pipeline_actions:
+                    await self._update_recovery_on_action_planned(
+                        session,
+                        pipeline_id=pipeline_id,
+                        action_type=planned_action.get("type", action_type),
+                        target_id=planned_action.get("target_id") or planned_action.get("id") or planned_action.get("url", "unknown"),
+                        label=planned_action.get("label") or planned_action.get("target_label") or planned_action.get("speech") or "",
+                        url_before=session.current_url,
+                    )
+                await self._save_pending_pipeline(
+                    session,
+                    pipeline_id=pipeline_id,
+                    actions=pipeline_actions,
+                    last_acknowledged_index=-1,
+                    expected_navigation={"current_url": session.current_url, "action_type": action_type},
+                )
+
             
             # NARRATE BEFORE ACTING (Co-Pilot Mode)
             # Start TTS simultaneously with action for true co-browsing feel
@@ -5115,6 +5205,7 @@ class OrchestratorWSHandler:
                     "type": "navigate",
                     "url": f"https://{target_domain}",
                     "phoenix": True,  # Signals the frontend to run the state handoff
+                    "pipeline_id": pipeline_id,
                     "session_id": session.session_id,
                     "mission_goal": str(getattr(session, '_current_goal', target_entity))
                 }, session)
@@ -5122,7 +5213,8 @@ class OrchestratorWSHandler:
             elif action_type == "navigate":
                 await self._send_json(session.websocket, {
                     "type": "navigate",
-                    "url": action_payload.get("url", "/")
+                    "url": action_payload.get("url", "/"),
+                    "pipeline_id": pipeline_id,
                 }, session)
 
             else:
@@ -5130,7 +5222,9 @@ class OrchestratorWSHandler:
                 # while preserving legacy compatibility via representative `payload`.
                 command_msg = {
                     "type": "command",
-                    "payload": action_payload
+                    "payload": action_payload,
+                    "pipeline_id": pipeline_id,
+                    "mission_id": session.mission_id,
                 }
                 if isinstance(raw_action_payload, list):
                     command_msg["action"] = raw_action_payload

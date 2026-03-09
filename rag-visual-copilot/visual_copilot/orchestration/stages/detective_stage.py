@@ -424,6 +424,7 @@ async def run_detective_stage(
                 current_url=current_url,
                 dom_signature=current_dom_signature,
                 verified_advance_active=verified_advance_active,
+                strategy_authoritative=strategy_authoritative,
             )
             if tier3_result:
                 tier3_result["router_mode"] = subgoal_mode

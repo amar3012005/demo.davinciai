@@ -395,12 +395,26 @@ async def handle_last_mile_stage(
                     f"COMPOUND_LAST_MILE_NULL_ACTION status={compound_status} "
                     f"fixing null action envelope"
                 )
-                compound_action = {
-                    "type": "clarify",
-                    "speech": f"I encountered an issue while working on '{mission.main_goal}'. Let me try a different approach.",
-                }
-                action_type = "clarify"
-                compound_status = "last_mile_no_evidence"
+                # Provide meaningful fallback based on status
+                if compound_status in ("stuck_no_progress", "last_mile_stuck"):
+                    compound_action = {
+                        "type": "answer",
+                        "speech": f"I found some information about '{mission.main_goal}' but may not be complete. Here's what I found: [See page content for details]",
+                        "text": f"Information about {mission.main_goal}",
+                    }
+                elif compound_status in ("impossible", "max_iterations"):
+                    compound_action = {
+                        "type": "clarify",
+                        "speech": f"I spent {compound_iters} steps searching for '{mission.main_goal}' but couldn't find a complete answer. Would you like me to try a different approach?",
+                    }
+                else:
+                    compound_action = {
+                        "type": "clarify",
+                        "speech": f"I encountered an issue while working on '{mission.main_goal}'. Let me try a different approach.",
+                    }
+                action_type = compound_action.get("type", "clarify")
+                if compound_status not in ("complete",):
+                    compound_status = "last_mile_no_evidence"
 
             logger.info(
                 f"COMPOUND_LAST_MILE_RESULT status={compound_status} "
@@ -523,12 +537,17 @@ async def handle_last_mile_stage(
                 # We use the last non-wait step to populate mission runtime so the
                 # dedup gate works correctly on the next turn.
                 if isinstance(compound_action, list):
-                    # Extract representative step for runtime tracking
+                    # Extract representative step for runtime tracking and success logging
                     rep_step = {}
-                    for step in reversed(compound_action):
-                        if isinstance(step, dict) and step.get("type", "") not in ("", "wait"):
+                    for step in compound_action:
+                        if isinstance(step, dict) and step.get("type", "") not in ("", "wait", "scroll"):
                             rep_step = step
                             break
+                    if not rep_step:
+                        for step in reversed(compound_action):
+                            if isinstance(step, dict) and step.get("type", "") not in ("", "wait"):
+                                rep_step = step
+                                break
                     rep_type = rep_step.get("type", "action")
                     rep_target = rep_step.get("target_id", "")
                     rep_speech = rep_step.get("speech", "")
@@ -542,6 +561,7 @@ async def handle_last_mile_stage(
                         await mission_brain._save_mission(mission)
 
                     mission.last_mile_runtime = {
+                        **runtime,
                         "last_action_type": rep_type,
                         "last_action_fp": _action_fingerprint(rep_step) if rep_step else "",
                         "last_action_dom_signature": current_dom_sig,
@@ -581,6 +601,7 @@ async def handle_last_mile_stage(
                     else:
                         await mission_brain._save_mission(mission)
                     mission.last_mile_runtime = {
+                        **runtime,
                         "last_action_type": action_type,
                         "last_action_fp": _action_fingerprint(compound_action),
                         "last_action_dom_signature": current_dom_sig,
@@ -612,6 +633,7 @@ async def handle_last_mile_stage(
                         await mission_brain._save_mission(mission)
                     wait_ms = 2000 if bool(compound_action.get("press_enter", False)) else 700
                     mission.last_mile_runtime = {
+                        **runtime,
                         "last_action_type": action_type,
                         "last_action_fp": _action_fingerprint(
                             {
@@ -657,6 +679,7 @@ async def handle_last_mile_stage(
                             "no_legacy_fallback": True,
                         }
                     mission.last_mile_runtime = {
+                        **runtime,
                         "last_action_type": action_type,
                         "last_action_fp": _action_fingerprint(compound_action),
                         "last_action_dom_signature": current_dom_sig,
@@ -682,6 +705,7 @@ async def handle_last_mile_stage(
                     if requested_wait_ms <= 0:
                         requested_wait_ms = LAST_MILE_WAIT_GRACE_MS
                     mission.last_mile_runtime = {
+                        **runtime,
                         "last_action_type": action_type,
                         "last_action_fp": _action_fingerprint(compound_action),
                         "last_action_dom_signature": current_dom_sig,

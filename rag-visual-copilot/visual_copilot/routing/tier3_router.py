@@ -60,6 +60,7 @@ async def run_tier3_fallback(
     current_url: str = "",
     dom_signature: str = "",
     verified_advance_active: bool = False,
+    strategy_authoritative: bool = False,
 ) -> Optional[Dict[str, Any]]:
     logger.warning(
         f"   ⚠️ Tier 1+2 FAILED/BYPASSED ({forced_reason or 'low_confidence'}). "
@@ -186,7 +187,23 @@ INSTRUCTIONS:
                 if resolved_id and resolved_id != args.get("target_id", ""):
                     logger.info(f"   🧭 Tier 3 click target remap: {args.get('target_id')} -> {resolved_id}")
                     args["target_id"] = resolved_id
-                ok, reason = _validate_action_target("click", args.get("target_id", ""), nodes, excluded_ids=excluded_ids)
+                
+                # RELAX: For strategy subgoals, allow re-clicking if it's the explicit target
+                # This prevents "target_already_excluded" from blocking legitimate strategy execution
+                validation_excluded_ids = excluded_ids
+                if strategy_authoritative and expected_labels:
+                    # Check if target matches expected label - if so, allow re-click
+                    target_node = next((n for n in nodes if getattr(n, "id", "") == args.get("target_id", "")), None)
+                    if target_node:
+                        target_text = (target_node.text or "").lower()
+                        if any(exp_label.lower() in target_text for exp_label in expected_labels):
+                            validation_excluded_ids = set()  # Allow re-click for strategy match
+                            logger.info(
+                                f"   🔄 Tier 3 exclusion relax: strategy subgoal allows re-click "
+                                f"target={args.get('target_id')} label='{target_text[:30]}'"
+                            )
+                
+                ok, reason = _validate_action_target("click", args.get("target_id", ""), nodes, excluded_ids=validation_excluded_ids)
                 if not ok:
                     logger.warning(f"   🚫 Tier 3 rejected ungrounded click target: {reason} (resolve={resolve_reason})")
                     return None

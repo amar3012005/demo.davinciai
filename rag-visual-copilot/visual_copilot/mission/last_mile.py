@@ -56,7 +56,8 @@ class LastMileState:
     stall_count: int = 0
     vision_used: bool = False
     exit_reason: str = ""
-    queued_actions: List[Dict[str, Any]] = field(default_factory=list)
+    action_pipeline: List[Dict[str, Any]] = field(default_factory=list)
+    semantic_summaries: List[str] = field(default_factory=list)
 
     def record_action(self, action_label: str) -> None:
         self.last_3_actions.append(action_label)
@@ -135,8 +136,34 @@ class LastMileState:
             "stall_count": self.stall_count,
             "vision_used": self.vision_used,
             "exit_reason": self.exit_reason,
+            "semantic_summaries": self.semantic_summaries,
         }
 
+def _get_page_index_node(current_url: str) -> Optional[Dict[str, Any]]:
+    import json, re, os
+    try:
+        sm_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "site_map.json"
+        )
+        if not os.path.exists(sm_path):
+            return None
+        with open(sm_path, "r") as f:
+            site_map = json.load(f)
+        def _walk(node):
+            if "path_regex" in node and node["path_regex"]:
+                try:
+                    if re.search(node["path_regex"], current_url):
+                        return node
+                except Exception:
+                    pass
+            for child in node.get("children", []):
+                res = _walk(child)
+                if res: return res
+            return None
+        return _walk(site_map.get("root", {}))
+    except Exception:
+        return None
 
 @dataclass
 class LastMilePlan:
@@ -164,6 +191,20 @@ def _should_enter_last_mile(mission: Any, query: str, schema: Any, is_zero_shot:
 
     if idx >= len(subgoals):
         return True, "strategy_exhausted"
+    
+    # CRITICAL: If this is the LAST subgoal and it's an extraction/question (not "Click X"),
+    # trigger compound last-mile immediately for intelligent answer extraction.
+    if idx == len(subgoals) - 1:
+        current_subgoal = subgoals[idx].strip()
+        # Check if it's NOT a navigation subgoal (doesn't start with "Click ")
+        if not current_subgoal.lower().startswith("click "):
+            # This is an extraction/question subgoal — trigger compound last-mile
+            logger.info(
+                f"LAST_MILE_TRIGGER: Final subgoal is extraction (not nav) — "
+                f"subgoal='{current_subgoal[:60]}'"
+            )
+            return True, "final_subgoal_extraction"
+    
     q = (query or "").lower().strip()
     if "extract and present" in q:
         return True, "explicit_extract_subgoal"
@@ -627,17 +668,24 @@ Reply in strict JSON:
 COMPOUND_MAX_INTERNAL_ITERATIONS = 10
 COMPOUND_STAGNANCY_THRESHOLD = 3  # consecutive unchanged DOM hashes before forcing stop
 
-COMPOUND_SYSTEM_PROMPT = """You are TARA's Last-Mile Execution Agent. The navigation phase is COMPLETE — you are now ON the target page.
+COMPOUND_SYSTEM_PROMPT = """You are TARA's Last-Mile Execution Agent. You understand that humans speak in free, natural language. 
+Your mission is to translate human intent (slang, questions, implied needs) into precise browser actions and insightful answers.
 
-Your job: Complete the user's goal through precise DOM interactions using the tools provided.
+## Human-Centric Understanding:
+- Humans say "how much money did I spend" → They mean total cost/usage.
+- Humans say "show me the thing" → They want you to find and extract the specific entity.
+- Focus on THE SOUL of the request.
+- **Deductive Extraction**: If the user asks "which is best?" or "what should I use?" and the page doesn't say it explicitly, EVALUATE the visible data. If you see context windows, pricing, or model names, reason through them to provide a "Best Effort" answer. 
+- Example: "Based on the specs here, Model X is the strongest because it has the largest context window, even though the page doesn't explicitly rank them."
 
 ## MANDATORY Read → Verify → Act Loop:
 Every iteration you MUST follow this exact sequence:
-1. **READ**: Analyze "Current Readable Page Content" thoroughly. Does it already contain the answer?
-2. **VERIFY**: State explicitly whether the goal can be answered from visible content RIGHT NOW.
-   - If YES → call complete_mission immediately with the extracted answer. DO NOT click anything.
-   - If NO → proceed to step 3 with a specific reason why current content is insufficient.
-3. **ACT**: Execute exactly ONE targeted action. State what new evidence you expect this action to produce.
+1. **READ**: Analyze everything. Does the human's desire (or the raw data to satisfy it) exist in the "Readable Content"?
+2. **VERIFY**: Can you answer the human right now? 
+   - **Reasoning over Evidence**: If the data is there but the "answer" isn't pre-written, you are REQUIRED to reason and synthesize the answer.
+   - If YES (Direct or Inferred) → call complete_mission.
+   - If NO → state clearly why. "I see a list of models, but no pricing data yet to determine 'cheapest'."
+3. **ACT**: Execute ONE targeted action. State what new evidence you expect to see.
 
 ## Tool Priority (STRICT ORDER — higher priority tools MUST be considered first):
 1. **complete_mission** — ALWAYS prefer this when readable content contains evidence that answers the goal. Include the specific text evidence.
@@ -681,9 +729,10 @@ Every iteration you MUST follow this exact sequence:
 - If URL/title/readable content already indicates the target section is open (e.g., Usage, Dashboard, Billing page already visible), do NOT click the same nav/sidebar link again.
 - Re-clicking active section navigation is considered non-progress and should be avoided.
 
-## Strict Entity Guard:
+## Strict Entity Guard (LogicCritic Rule):
 - Before calling complete_mission, you MUST verify that the data matches the specific model or target entity requested!
-- If the user asked for "Whisper" but the screen shows "GPT-OSS-120B", "Llama-3", or "Playground", you are NOT done. Do NOT extract data from a different entity's section.
+- **ENTITY ANCHOR REQUIRED**: You are FORBIDDEN from calling complete_mission unless the target entity name (e.g. "Whisper", "Llama-3", "Usage Dashboard") appears explicitly in your answer or evidence.
+- If the screen shows "General Docs" but you need "API Keys", you are NOT done. Do NOT extract data from a different entity's section.
 - You must use `scroll_page` or click tabs to find the specific entity the user requested.
 
 ## STRICT RULE: MENU PERSISTENCE:
@@ -923,6 +972,34 @@ def _build_mission_state_context(
         # Show last 3; first is usually the starting page
         lines.append(f"**Recently visited URLs:** {' → '.join(visited[-3:])}")
 
+    # ── Map-Aware Context Injection ──────────────────────────────────────────
+    try:
+        from visual_copilot.mission.index_traverser import _find_current_node, _normalize_path
+        import os, json
+        from urllib.parse import urlparse
+        site_map_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "site_map.json")
+        if os.path.exists(site_map_path):
+            with open(site_map_path, "r", encoding="utf-8") as f:
+                site_map_data = json.load(f)
+            root = site_map_data.get("root")
+            if root:
+                parsed = urlparse(current_url if "://" in current_url else f"http://{current_url}")
+                path = _normalize_path(parsed.path)
+                current_node = _find_current_node(root, path)
+                if current_node:
+                    lines.append(f"**Logical Map Node:** {current_node.get('title', 'Unknown')} ({current_node.get('node_id', '')})")
+                    expected = current_node.get("expected_controls", [])
+                    if expected:
+                        lines.append(f"**Expected Controls:** {', '.join(expected)}")
+                    terminal = current_node.get("terminal_capabilities", [])
+                    if terminal:
+                        lines.append(f"**Terminal Capabilities:** {', '.join(terminal)}")
+                    lines.append("**Logical Verification Rule:** Before calling complete_mission, verify you have landed on the correct logical node defined in the map.")
+                    # Backtracking rule
+                    lines.append("**Backtracking Rule:** If you are at a leaf node but cannot find the answer, you must backtrack to the parent node to try a different branch instead of halting.")
+    except Exception as e:
+        pass
+
     lines.append("## ─────────────────────────────────")
     return "\n".join(lines)
 
@@ -999,6 +1076,9 @@ async def run_compound_last_mile(
 
     # ── Initialize State Machine ──
     state = LastMileState()
+    target_node = _get_page_index_node(current_url)
+    target_node_ctx = f"You are currently at: {target_node.get('title', 'Unknown')} ({target_node.get('url', 'Unknown')})" if target_node else "Current node unknown."
+
     initial_evidence_hits, initial_best_excerpt, has_entity_evidence = _score_evidence_relevance(main_goal, nodes)
     state.evidence_hits = initial_evidence_hits
     state.progress_score = float(initial_evidence_hits)
@@ -1007,7 +1087,7 @@ async def run_compound_last_mile(
     logger.info(
         f"LAST_MILE_PHASE phase={state.phase.value} "
         f"initial_evidence_hits={initial_evidence_hits} "
-        f"goal='{main_goal[:80]}'"
+        f"goal='{main_goal[:80]}' target_node={target_node.get('title') if target_node else 'None'}"
     )
 
     # ── Read-First Check: If evidence is already strong, push toward completion ──
@@ -1038,7 +1118,8 @@ async def run_compound_last_mile(
                 f"**Main Goal:** {main_goal}\n"
                 f"**Target Entity:** {target_entity}\n"
                 f"**Action Type:** {action_type_str}\n"
-                f"**Goal URL (if known):** {goal_url or 'unknown'}\n\n"
+                f"**Goal URL (if known):** {goal_url or 'unknown'}\n"
+                f"**Page Index:** {target_node_ctx}\n\n"
                 f"{excluded_str}\n"
                 f"**Current Interactable DOM:**\n{compressed_dom}\n\n"
                 f"**Current Readable Page Content:**\n{readable_content}\n"
@@ -1290,32 +1371,48 @@ async def run_compound_last_mile(
             logger.info(f"⚙️ COMPOUND TOOL iter={iteration} name={tool_name} args={tool_args}")
 
             # ── Post-Vision Bootstrap Execution Gate ──
-            # After forced vision bootstrap, first turn must execute an action path before completion.
+            # After forced vision bootstrap, first turn should check if vision suggested actions.
+            # If vision provided an Action Plan, EXECUTE IT instead of immediately completing.
             if (
                 force_action_after_vision_bootstrap
                 and iteration == 1
                 and tool_name == "complete_mission"
             ):
-                logger.warning(
-                    "LAST_MILE_VISION_BOOTSTRAP_GATE blocked complete_mission at iter=1; "
-                    "must execute suggested action path first"
-                )
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": (
-                        "BLOCKED: Vision bootstrap was just performed. Do NOT complete immediately. "
-                        "Execute a concrete action sequence first (click/type/scroll), then call wait_for_ui, "
-                        "and only after verifying updated evidence consider complete_mission."
-                    ),
-                })
-                state.record_action("complete_blocked:vision_bootstrap")
-                continue
+                # Check if vision provided actionable suggestions that were ignored
+                vision_brief_text = ""
+                for msg in reversed(messages[:-1]):  # Exclude current tool result
+                    if msg.get("role") == "user" and "Vision Strategic Brief" in str(msg.get("content", "")):
+                        vision_brief_text = str(msg.get("content", ""))
+                        break
+                
+                has_vision_actions = "Vision Action Plan" in vision_brief_text or "Next steps:" in vision_brief_text
+                
+                # Only block completion if vision provided specific clickable actions that were ignored
+                if has_vision_actions and state.evidence_hits < EVIDENCE_RELEVANCE_THRESHOLD:
+                    logger.warning(
+                        "LAST_MILE_VISION_BOOTSTRAP_GATE blocked complete_mission at iter=1; "
+                        "vision provided action plan that was ignored"
+                    )
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": (
+                            "BLOCKED: Vision bootstrap provided specific action suggestions that you ignored. "
+                            "Review the Vision Strategic Brief and execute the suggested actions FIRST, "
+                            "then call complete_mission with comprehensive evidence from the updated page."
+                        ),
+                    })
+                    state.record_action("complete_blocked:vision_actions_ignored")
+                    continue
+                else:
+                    # Vision didn't provide actions OR evidence is already strong - allow completion
+                    logger.info("LAST_MILE_VISION_BOOTSTRAP_GATE allowing completion (no vision actions or strong evidence)")
 
             # ── Read-First Enforcement: Reject clicks when evidence is strong ──
+            # This gate should ONLY block clicks, NOT completions
             if (
                 LAST_MILE_READ_FIRST_ENFORCED
-                and tool_name == "click_element"
+                and tool_name == "click_element"  # Only block CLICKS, not completions
                 and iteration == 1
                 and initial_evidence_hits >= EVIDENCE_RELEVANCE_THRESHOLD
             ):
@@ -1433,6 +1530,7 @@ async def run_compound_last_mile(
                     "_goal_url": goal_url,
                     "_already_clicked_ids": sorted(excluded_ids),
                     "_mission_ctx": mission_ctx,  # full state context for vision prompt
+                    "_target_entity": target_entity, # pass target_entity for verification
                 },
                 nodes=nodes,
                 screenshot_b64=screenshot_b64 or None,
@@ -1459,9 +1557,9 @@ async def run_compound_last_mile(
 
                 # --- BUNDLE QUEUED ACTIONS ---
                 bundled_action = frontend_action
-                if state.queued_actions:
-                    bundled_action = state.queued_actions + [frontend_action]
-                    state.queued_actions = []
+                if state.action_pipeline:
+                    bundled_action = state.action_pipeline + [frontend_action]
+                    state.action_pipeline = []
 
                 if action_type == "answer":
                     status = frontend_action.get("status", "success")
@@ -1510,12 +1608,12 @@ async def run_compound_last_mile(
             
             # If it's a physical action returning False, queue it!
             if not is_terminal and frontend_action and tool_name in {"click_element", "type_text", "scroll_page"}:
-                state.queued_actions.append(frontend_action)
+                state.action_pipeline.append(frontend_action)
                 state.record_action(f"{tool_name}:queued")
                 
                 # Auto-inject wait if search
                 if tool_name == "type_text" and tool_args.get("press_enter", False):
-                    state.queued_actions.append({"type": "wait", "seconds": 2})
+                    state.action_pipeline.append({"type": "wait", "seconds": 2})
             else:
                 state.record_action(f"{tool_name}:non_terminal")
 
@@ -1556,31 +1654,63 @@ async def run_compound_last_mile(
             })
 
         # ── Stagnancy Guard ──
+        # Don't trigger stagnancy if we already have strong evidence - the answer is HERE
         new_dom_hash = _dom_signature_hash(nodes)
         if new_dom_hash == last_dom_hash:
-            stagnancy_counter += 1
+            # Only increment stagnancy if evidence is weak
+            if state.evidence_hits < EVIDENCE_RELEVANCE_THRESHOLD:
+                stagnancy_counter += 1
+            else:
+                stagnancy_counter = 0  # Reset - we have evidence, just need to extract it
         else:
             stagnancy_counter = 0
             last_dom_hash = new_dom_hash
 
         if stagnancy_counter >= COMPOUND_STAGNANCY_THRESHOLD:
-            state.exit_reason = "stagnancy"
-            logger.warning(
-                f"🛡️ COMPOUND STAGNANCY iter={iteration} "
-                f"unchanged_turns={stagnancy_counter} → forcing exit"
-            )
-            return {
-                "action": {
-                    "type": "clarify",
-                    "speech": f"I've been trying to progress on '{main_goal}' but the page isn't changing. Could you help guide me?",
-                },
-                "thought": f"Stagnancy detected after {stagnancy_counter} unchanged turns.",
-                "iterations": iteration,
-                "status": "impossible",
-                "diagnostics": {"last_mile_state": state.to_diagnostic()},
-            }
+            # Before giving up, check if we have strong evidence that wasn't extracted
+            if state.evidence_hits >= EVIDENCE_RELEVANCE_THRESHOLD:
+                logger.warning(
+                    f"🛡️ COMPOUND STAGNANCY OVERRIDE: Have strong evidence (hits={state.evidence_hits}) "
+                    "but LLM failed to extract — forcing evidence rescue"
+                )
+                # Force one more iteration with explicit extraction instruction
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "**SYSTEM OVERRIDE**: You have been stuck but the page CONTAINS the answer "
+                        f"(evidence_hits={state.evidence_hits}).\n\n"
+                        "Your task is SIMPLE:\n"
+                        "1. Look at the 'Current Readable Page Content' section above.\n"
+                        "2. Find sentences that directly answer: {main_goal}\n"
+                        "3. Call complete_mission with those exact sentences as your response.\n\n"
+                        "DO NOT click anything. DO NOT scroll. JUST EXTRACT THE ANSWER."
+                    ),
+                })
+                stagnancy_counter = 0  # Reset counter for extraction attempt
+                continue
+            else:
+                state.exit_reason = "stagnancy"
+                logger.warning(
+                    f"🛡️ COMPOUND STAGNANCY iter={iteration} "
+                    f"unchanged_turns={stagnancy_counter} → forcing exit"
+                )
+                return {
+                    "action": {
+                        "type": "clarify",
+                        "speech": f"I've been trying to progress on '{main_goal}' but the page isn't changing. Could you help guide me?",
+                    },
+                    "thought": f"Stagnancy detected after {stagnancy_counter} unchanged turns.",
+                    "iterations": iteration,
+                    "status": "impossible",
+                    "diagnostics": {"last_mile_state": state.to_diagnostic()},
+                }
 
-        # ── Context Pruning ──
+        # ── Context Pruning & Semantic Memory ──
+        if tool_calls:
+            actions_summary = ", ".join([tc.function.name for tc in tool_calls])
+            state.semantic_summaries.append(f"Turn {iteration}: Planned {actions_summary}. Best excerpt: {initial_best_excerpt[:50]}")
+            # Instead of completely pruning DOM, we retain a semantic summary trace
+            messages.append({"role": "system", "content": f"Semantic Summary: {state.semantic_summaries[-1]}"})
         messages = _prune_old_dom_context(messages)
 
     # Max iterations reached

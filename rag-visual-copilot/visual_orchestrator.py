@@ -9,7 +9,13 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 from urllib.parse import urlparse
 
 from llm_providers.groq_provider import GroqProvider
-from detective import investigate, DetectiveReport
+# detective module is missing; using semantic_detective logic or stubbing for legacy support
+try:
+    from visual_copilot.detection.semantic_detective_service import investigate, DetectiveReport
+except ImportError:
+    # Minimal stub to prevent startup crash in legacy code
+    def investigate(*args, **kwargs): return None
+    class DetectiveReport: pass
 
 # Qdrant imports for HiveMind checks
 try:

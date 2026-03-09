@@ -16,7 +16,6 @@ import faiss
 from .llm_providers import create_provider, create_fallback_provider
 from .config import RAGConfig
 from .prompts import prompt_manager
-from .optimized_embeddings import OptimizedEmbeddings
 from .xml_prompts import XMLPromptManager
 from .qdrant_addon import QdrantAddon
 from .distillprompt_hivemind_savecase import CaseDistiller
@@ -42,27 +41,30 @@ class RAGEngine:
         
         # Initialize Embeddings if Local Retrieval OR Hive Mind is enabled
         if self.config.enable_local_retrieval or self.config.enable_hive_mind:
-            # Initialize Optimized ONNX Embeddings (Target: <500ms cold start)
             try:
-                # Use model from config (can be local path or HuggingFace ID)
-                model_path = self.config.embedding_model_name
-                
-                # Special check: if using default path but config says otherwise, respect config
-                if not model_path:
-                    model_path = "/app/model_onnx"
-                    
-                if os.path.exists(model_path):
-                    logger.info(f"📂 Loading model from path: {model_path}")
+                # ── REMOTE EMBEDDINGS (New Optimization) ──
+                # If EMBEDDINGS_SERVICE_URL is set, use the microservice to save memory/RAM
+                remote_url = os.getenv("EMBEDDINGS_SERVICE_URL")
+                if remote_url:
+                    from .remote_embeddings import RemoteEmbeddings
+                    self.embeddings = RemoteEmbeddings(endpoint_url=remote_url)
+                    logger.info(f"✅ RemoteEmbeddings initialized: {remote_url}")
                 else:
-                    logger.info(f"🌐 Loading model from Hub/Cache: {model_path}")
-                
-                self.embeddings = OptimizedEmbeddings(
-                    model_path=model_path, 
-                    device="cpu"
-                )
-                logger.info(f"✅ Optimized Embeddings initialized: {model_path}")
+                    # Fallback to local ONNX model
+                    from .optimized_embeddings import OptimizedEmbeddings
+                    model_path = self.config.embedding_model_name or "/app/model_onnx"
+                    if os.path.exists(model_path):
+                        logger.info(f"📂 Loading model from path: {model_path}")
+                    else:
+                        logger.info(f"🌐 Loading model from Hub/Cache: {model_path}")
+                    
+                    self.embeddings = OptimizedEmbeddings(
+                        model_path=model_path, 
+                        device="cpu"
+                    )
+                    logger.info(f"✅ Optimized Embeddings initialized: {model_path}")
             except Exception as e:
-                logger.error(f"❌ Failed to init OptimizedEmbeddings: {e}")
+                logger.error(f"❌ Failed to initialize embeddings: {e}")
                 raise e
         else:
             logger.info("ℹ️ Retrieval is DISABLED (Local & HiveMind off) - skipping embedding model initialization")

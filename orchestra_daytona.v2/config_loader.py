@@ -147,6 +147,24 @@ class PerformanceConfig:
 
 
 @dataclass
+class FeatureFlagsConfig:
+    """
+    Feature flags for gradual rollout of new capabilities.
+    
+    All flags can be overridden via environment variables.
+    """
+    # Backend Recovery System
+    backend_recovery_enabled: bool = True
+    pageindex_enabled: bool = True
+    resumable_pipelines_enabled: bool = True
+    entity_completion_gate_enabled: bool = True
+    ignore_frontend_resume_counters: bool = True
+    
+    # Legacy compatibility
+    legacy_phoenix_resume_enabled: bool = True  # Allow fallback to frontend-based resume
+
+
+@dataclass
 class OrchestratorConfig:
     """Complete configuration for the Orchestrator"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -157,6 +175,7 @@ class OrchestratorConfig:
     dialogue: Dict[str, Dict[str, List[Dict[str, Any]]]] = field(default_factory=dict)
     session: SessionConfig = field(default_factory=SessionConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    feature_flags: FeatureFlagsConfig = field(default_factory=FeatureFlagsConfig)
 
 
 class ConfigLoader:
@@ -366,7 +385,19 @@ class ConfigLoader:
                 max_concurrent_sessions=int(os.getenv("MAX_CONCURRENT_SESSIONS", perf_data.get("max_concurrent_sessions", 100))),
                 enable_fillers=os.getenv("ENABLE_FILLERS", str(perf_data.get("enable_fillers", "true"))).lower() == "true"
             )
-        
+
+        # Feature flags (with env var overrides)
+        if "feature_flags" in data:
+            flags_data = data["feature_flags"]
+            config.feature_flags = FeatureFlagsConfig(
+                backend_recovery_enabled=os.getenv("TARA_BACKEND_RECOVERY_ENABLED", str(flags_data.get("backend_recovery_enabled", "true"))).lower() == "true",
+                pageindex_enabled=os.getenv("TARA_PAGEINDEX_ENABLED", str(flags_data.get("pageindex_enabled", "true"))).lower() == "true",
+                resumable_pipelines_enabled=os.getenv("TARA_RESUMABLE_PIPELINES_ENABLED", str(flags_data.get("resumable_pipelines_enabled", "true"))).lower() == "true",
+                entity_completion_gate_enabled=os.getenv("TARA_ENTITY_COMPLETION_GATE_ENABLED", str(flags_data.get("entity_completion_gate_enabled", "true"))).lower() == "true",
+                ignore_frontend_resume_counters=os.getenv("TARA_IGNORE_FRONTEND_RESUME_COUNTERS", str(flags_data.get("ignore_frontend_resume_counters", "true"))).lower() == "true",
+                legacy_phoenix_resume_enabled=os.getenv("TARA_LEGACY_PHOENIX_RESUME_ENABLED", str(flags_data.get("legacy_phoenix_resume_enabled", "true"))).lower() == "true"
+            )
+
         return config
     
     def _validate_config(self, config: OrchestratorConfig):

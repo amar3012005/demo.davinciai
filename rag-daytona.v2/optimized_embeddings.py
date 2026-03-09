@@ -1,9 +1,17 @@
 import os
 import logging
-import torch
 import numpy as np
 from typing import List, Union
-from transformers import AutoTokenizer
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
+try:
+    from transformers import AutoTokenizer
+except ImportError:
+    AutoTokenizer = None
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +101,13 @@ class OptimizedEmbeddings:
 
     def _mean_pooling(self, model_output, attention_mask):
         """Mean pooling on torch tensors (legacy ORTModelForFeatureExtraction path)."""
+        if torch is None:
+            raise ImportError("torch is required for _mean_pooling")
         token_embeddings = model_output[0]
         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
-    def encode(self, sentences: Union[str, List[str]], convert_to_numpy: bool = True, normalize_embeddings: bool = True) -> Union[np.ndarray, torch.Tensor]:
+    def encode(self, sentences: Union[str, List[str]], convert_to_numpy: bool = True, normalize_embeddings: bool = True) -> Union[np.ndarray, 'torch.Tensor']:
         """Replacement for SentenceTransformer.encode"""
         if isinstance(sentences, str):
             sentences = [sentences]

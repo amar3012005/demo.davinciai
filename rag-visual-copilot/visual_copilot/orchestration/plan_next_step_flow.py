@@ -293,29 +293,44 @@ async def ultimate_plan_next_step_impl(
                 else:
                     qh_start = time.perf_counter()
                     try:
-                        quick_hive_probe = await hive_interface.quick_probe(
-                            domain=_domain_for_probe,
-                            goal=goal,
-                            session_id=session_id,
-                        )
+                        from visual_copilot.mission.index_traverser import get_path_to_goal
+                        import json
+                        import os
+                        
+                        site_map_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "site_map.json")
+                        try:
+                            with open(site_map_path, "r", encoding="utf-8") as f:
+                                site_map_data = json.load(f)
+                        except FileNotFoundError:
+                            site_map_data = {}
+                            
+                        idx_result = get_path_to_goal(current_url, goal, site_map_data)
+                        strategy_order = idx_result.get("recommended_strategy_order", [f"LAST_MILE: {goal}"])
+                        
+                        pre_decision = {
+                            "execution_mode": "mission" if len(strategy_order) > 1 else "last_mile",
+                            "route": "current_domain_hive" if len(strategy_order) > 1 else "current_domain_last_mile",
+                            "confidence": 0.90,
+                            "start_with_strategy": True,
+                            "recommended_strategy_order": strategy_order,
+                            "reason": "PageIndex LLM Tree Traversal",
+                            "evidence": {
+                                "visible_goal_signals": 1 if idx_result.get("target_node") else 0,
+                                "obvious_controls": len(strategy_order) - 1,
+                                "hive_support_score": 0.90,
+                            },
+                        }
                     except Exception as qp_err:
-                        logger.warning(f"Quick Hive probe failed: {qp_err}")
-                        quick_hive_probe = None
+                        logger.warning(f"IndexTraverser quick probe failed: {qp_err}")
+                        pre_decision = None
                     pre_decision_quick_hive_ms = int((time.perf_counter() - qh_start) * 1000)
                     logger.info(
                         f"PRE_DECISION_GATE_TIMING_PREP session={session_id} "
                         f"livegraph_ms={pre_decision_livegraph_ms} "
-                        f"quick_hive_ms={pre_decision_quick_hive_ms} "
+                        f"index_traverser_ms={pre_decision_quick_hive_ms} "
                         f"nodes={len(prefetched_nodes_for_gate)}"
                     )
-                    pre_decision_response, pre_decision = await run_pre_decision_gate(
-                        goal=goal,
-                        current_url=current_url,
-                        nodes=prefetched_nodes_for_gate or [],
-                        hive_probe=quick_hive_probe or {},
-                        session_id=session_id,
-                        logger=cross_domain_stage_logger,
-                    )
+                    pre_decision_response = None
                 if pre_decision_response:
                     return pre_decision_response
                 if (
@@ -386,9 +401,26 @@ async def ultimate_plan_next_step_impl(
                 f"⚡ PRE-DECISION STRATEGY: {len(nav_subgoals)} nav subgoals, "
                 f"last_mile={'yes' if pre_decision_last_mile_goal else 'no'}"
             )
+            if isinstance(pre_decision, dict):
+                reasoning_log = pre_decision.get("reasoning") or pre_decision.get("reason")
+                if reasoning_log:
+                    logger.info(f"🧠 PRE-DECISION REASONING: {reasoning_log}")
 
         if pre_decision_strategy_sequence or pre_decision_last_mile_goal:
             logger.info("⚡ FAST-TRACK: Bypassing Mind Reader with Pre-Decision optimized strategy.")
+            
+            # Log the full PageIndex strategy sequence for visibility
+            if pre_decision_strategy_sequence:
+                logger.info(f"📋 PAGEINDEX STRATEGY SEQUENCE ({len(pre_decision_strategy_sequence)} steps):")
+                for idx, step in enumerate(pre_decision_strategy_sequence, 1):
+                    # Clean up double "LAST_MILE:" prefix if present
+                    clean_step = step
+                    if clean_step.upper().startswith("LAST_MILE: LAST_MILE:"):
+                        clean_step = "LAST_MILE: " + clean_step.split("LAST_MILE:", 2)[-1].strip()
+                        pre_decision_strategy_sequence[idx-1] = clean_step  # Fix in-place
+                    step_type = "🎯 LAST_MILE" if clean_step.upper().startswith("LAST_MILE:") else "🔀 NAV"
+                    logger.info(f"   {idx}. {step_type}: {clean_step}")
+            
             domain_val = _domain_for_probe if '_domain_for_probe' in locals() else ""
             # If only LAST_MILE (no nav subgoals), use EXTRACTION action; otherwise NAVIGATION
             action_intent = ActionIntent.EXTRACTION if not nav_subgoals else ActionIntent.NAVIGATION
@@ -404,6 +436,137 @@ async def ultimate_plan_next_step_impl(
                 pre_decision_reasoning = pre_decision.get("reasoning", "") or pre_decision.get("reason", "")
                 if pre_decision_reasoning:
                     schema.constraints["pre_decision_context"] = pre_decision_reasoning[:500]
+
+            # ═══════════════════════════════════════════════════════════
+            # ⚡ PAGEINDEX BUNDLED NAVIGATION: If PageIndex provides multiple
+            #    nav subgoals, execute them as a BUNDLED PIPELINE for speed.
+            #    This avoids round-trips between each click.
+            #    CONSTRAINT: Only works if ALL targets are visible in current DOM.
+            # ═══════════════════════════════════════════════════════════
+            if (
+                nav_subgoals
+                and len(nav_subgoals) >= 1
+                and effective_step == 0
+                and isinstance(pre_decision, dict)
+                and pre_decision.get("page_index")  # Only for PageIndex-derived strategies
+            ):
+                # Get nodes
+                if 'nodes' not in locals() or not nodes:
+                    try:
+                        nodes = await nodes_task
+                    except Exception:
+                        nodes = await live_graph.get_visible_nodes(session_id)
+                if not nodes:
+                    logger.warning("PAGEINDEX_BUNDLED_NAV: No DOM nodes, returning wait")
+                    return {
+                        "success": True,
+                        "action": {"type": "wait", "speech": "Waiting for the page to finish loading..."},
+                        "speech": "Waiting for the page to finish loading...",
+                        "pipeline": "ultimate_tara",
+                        "no_legacy_fallback": True,
+                    }
+
+                # Build bundled action pipeline from nav_subgoals
+                # Each "Click X" becomes a click_element action with target found via keyword match
+                bundled_actions = []
+                excluded_ids: set[str] = set()
+                all_resolved = True
+
+                for nav_step in nav_subgoals:
+                    # Extract label from "Click [LABEL]" format
+                    label = nav_step
+                    if label.lower().startswith("click "):
+                        label = label[6:].strip()
+
+                    # Find matching clickable node by keyword/token overlap
+                    best_id = None
+                    best_score = 0
+                    label_terms = set(label.lower().split())
+                    
+                    for n in nodes:
+                        if not getattr(n, "interactive", False):
+                            continue
+                        nid = str(getattr(n, "id", ""))
+                        if nid in excluded_ids:
+                            continue
+                        txt = (getattr(n, "text", "") or "").strip().lower()
+                        if not txt:
+                            continue
+                        
+                        # Score by token overlap
+                        txt_terms = set(txt.split())
+                        overlap = len(label_terms & txt_terms)
+                        if overlap > best_score:
+                            best_score = overlap
+                            best_id = nid
+                    
+                    if best_id and best_score > 0:
+                        bundled_actions.append({
+                            "type": "click",
+                            "target_id": best_id,
+                            "text": label,
+                            "speech": f"Clicking {label}...",
+                        })
+                        excluded_ids.add(best_id)
+                        logger.info(f"  ✓ Mapped '{nav_step}' -> {best_id} (score={best_score})")
+                    else:
+                        logger.warning(f"  ✗ Could not resolve '{nav_step}' in current DOM")
+                        all_resolved = False
+
+                # Only use bundled navigation if ALL targets are visible
+                # Otherwise fall back to regular subgoal execution
+                if not all_resolved:
+                    logger.info("PAGEINDEX_BUNDLED_NAV: Not all targets visible, falling back to regular subgoal execution")
+                elif not bundled_actions:
+                    logger.warning("PAGEINDEX_BUNDLED_NAV: No actions resolved, falling back to normal flow")
+                else:
+                    # Add wait action at the end to allow page to settle
+                    bundled_actions.append({
+                        "type": "wait",
+                        "seconds": 2,
+                        "speech": "Waiting for page to update after navigation...",
+                    })
+
+                    # Create mission for tracking
+                    mission = await mission_brain.create_mission(
+                        session_id=session_id,
+                        schema=schema,
+                        strategy=None,
+                    )
+                    mission.subgoals = nav_subgoals + [pre_decision_last_mile_goal] if pre_decision_last_mile_goal else nav_subgoals
+                    mission.current_subgoal_index = 0
+                    mission.phase = "strategy"
+                    mission.status = "in_progress"
+                    mission.main_goal = pre_decision_last_mile_goal or goal
+                    await mission_brain._save_mission(mission)
+
+                    logger.info(
+                        f"🎯 PAGEINDEX_BUNDLED_NAV: Returning {len(bundled_actions)}-step pipeline"
+                    )
+                    # Log the full bundled pipeline for debugging
+                    logger.info(f"   📦 BUNDLED PIPELINE ({len(bundled_actions)} actions):")
+                    for idx, action in enumerate(bundled_actions, 1):
+                        action_type = action.get("type", "unknown")
+                        target = action.get("target_id", "N/A")
+                        text = action.get("text", "")
+                        if action_type == "click":
+                            logger.info(f"      {idx}. 🔘 CLICK {text} (id={target})")
+                        elif action_type == "wait":
+                            logger.info(f"      {idx}. ⏳ WAIT {action.get('seconds', 2)}s")
+                        else:
+                            logger.info(f"      {idx}. {action_type.upper()} (id={target})")
+                    
+                    return {
+                        "success": True,
+                        "blocked": False,
+                        "action": bundled_actions,  # Full list - frontend sequences it
+                        "speech": f"Executing {len(nav_subgoals)}-step navigation: {' -> '.join(nav_subgoals)}",
+                        "mission_id": mission.mission_id,
+                        "subgoal_index": mission.current_subgoal_index,
+                        "pipeline": "pageindex_bundled_nav",
+                        "confidence": "high",
+                        "no_legacy_fallback": True,
+                    }
 
             # ═══════════════════════════════════════════════════════════
             # ⚡ INSTANT LAST_MILE: If only LAST_MILE: (no nav subgoals),
@@ -464,6 +627,32 @@ async def ultimate_plan_next_step_impl(
                 if compound_result:
                     action = compound_result.get("action") or {}
                     status = compound_result.get("status", "action")
+                    
+                    # ── Handle bundled action pipelines ──
+                    # When compound returns a list of actions, pass through as-is
+                    if isinstance(action, list):
+                        logger.info(
+                            f"INSTANT_LAST_MILE: Bundled pipeline ({len(action)} actions) — passing through"
+                        )
+                        # Derive action_type from first non-wait action for routing
+                        action_type = "action"
+                        for step in action:
+                            if isinstance(step, dict) and step.get("type") not in ("", "wait"):
+                                action_type = step.get("type", "action")
+                                break
+                        
+                        # Return bundled pipeline to frontend
+                        return {
+                            "success": True,
+                            "blocked": False,
+                            "action": action,  # Full list - frontend sequences it
+                            "speech": f"Executing {len(action)}-step last-mile sequence...",
+                            "mission_id": mission.mission_id,
+                            "subgoal_index": mission.current_subgoal_index,
+                            "pipeline": "instant_last_mile_bundled",
+                            "confidence": "high",
+                        }
+                    
                     action_type = action.get("type", "")
 
                     # ── Null-safety: ensure action is always a valid envelope ──
@@ -636,6 +825,7 @@ async def ultimate_plan_next_step_impl(
                 cached=True,
                 query_time_ms=0
             )
+            hive_response.strategy_accepted = True  # CRITICAL: Ensures the mission stage locks the strategy
             domain_known_for_hive = quick_hive_probe.get("domain_indexed", True) if quick_hive_probe else True
             logger.info(f"   ✅ Fast-Tracked Strategy: True, Hints: {len(hive_response.visual_hints)}")
         else:

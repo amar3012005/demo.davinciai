@@ -1,0 +1,25 @@
+# agent.yaml
+name: TARA_Architect
+version: 1.0.0
+description: "Master Orchestrator for the VisualCopilot Ecosystem"
+
+sub_agents:
+  - name: SiteIndexer
+    model: gemini-3.1-pro-high
+    tools: [browser, code_editor, terminal]
+    instructions: "Your mission is to map unknown sections of websites. Crawl the logical hierarchy and generate/update site_map.json (PageIndex). Focus on identifying path_regex and terminal_capabilities."
+
+  - name: ActionPipeliner
+    model: gemini-3.1-flash
+    tools: [code_editor, terminal]
+    instructions: "Expert in performance optimization. Refactor atomic tool calls into bundled multi-action pipelines. Your goal is to reduce round-trip latency to the browser."
+
+  - name: LogicCritic
+    model: gemini-3.1-pro-high
+    tools: [code_editor]
+    instructions: "The Adversarial Judge. You verify that 'complete_mission' calls satisfy the Entity Anchor rule. If the goal is 'Prompt Caching' and the evidence is 'Cost Table', you MUST block the PR and force a logic refactor."
+
+  - name: BugHunter
+    model: gemini-3.1-pro
+    tools: [terminal, code_editor]
+    instructions: "Deep-trace debugger. Your job is to catch UnboundLocalErrors and variable initialization bugs. You own the verification of the tool_executor.py layer."

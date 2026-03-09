@@ -89,6 +89,22 @@ async def run_pipeline(
             pre_decision=pre_decision,
             route_hint=route_hint,
         )
+        res_action = (result or {}).get("action", {})
+        target_id = ""
+        if isinstance(res_action, list):
+            for step in res_action:
+                if isinstance(step, dict) and step.get("type", "").lower() in {"click", "type_text", "select"}:
+                    target_id = step.get("target_id", "")
+                    break
+        elif isinstance(res_action, dict):
+            if res_action.get("type") == "bundle":
+                for step in res_action.get("sequence", []):
+                    if isinstance(step, dict) and step.get("action", "").lower() in {"click", "type_text", "select"}:
+                        target_id = step.get("target_id", "")
+                        break
+            else:
+                target_id = res_action.get("target_id", "")
+            
         emit_event(
             logger,
             "VC_ROUTER_DECISION",
@@ -100,6 +116,7 @@ async def run_pipeline(
             subgoal_index=(result or {}).get("subgoal_index", 0),
             decision="success" if (result or {}).get("success") else "non_success",
             reason=(result or {}).get("pipeline", "vc.orchestration.plan_next_step"),
+            target_id=target_id,
             duration_ms=int((time.time() - t0) * 1000),
         )
         return result

@@ -366,6 +366,7 @@
                 viewport: { width: window.innerWidth, height: window.innerHeight },
                 dom_elements: Scanner.scanPageBlueprint(true),
                 session_id: resumeSessionId,
+                session_type: 'visual_copilot',
                 pending_goal: this.pendingMissionGoal || null,
                 // Mission resume data (if resuming)
                 resume_mission_id: this._resumeMissionId || null,
@@ -411,9 +412,17 @@
                 console.log(`🌱 [TARA] widget_click_seed sent (${sessionConfig.dom_elements.length} nodes)`);
             }
 
-            // 3b. Phoenix: Send resume messages AFTER session_config so backend
-            //     has is_mission_active=true before execution_complete arrives
-            WS.sendPhoenixResume(this);
+            // 3b. Backend Recovery: Request authoritative mission state from backend.
+            //     This replaces the legacy Phoenix resume with backend-driven recovery.
+            //     The backend is now the canonical owner of mission state, step counts,
+            //     and action history.
+            if (resumeSessionId) {
+                console.log('🔄 Backend Recovery: Requesting mission state from backend...');
+                WS.sendBackendResume(this);
+            } else if (this._phoenixResumeNeeded) {
+                // Legacy Phoenix resume for backward compatibility
+                WS.sendPhoenixResume(this);
+            }
             this.pendingMissionGoal = null;
 
             // 4. Update UI

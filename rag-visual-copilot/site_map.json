@@ -1,0 +1,1477 @@
+{
+  "site_metadata": {
+    "domain": "console.groq.com",
+    "version": "1.0.0",
+    "generated_at": "2026-03-07T21:24:45.645516+00:00",
+    "source_file": "groq.md",
+    "pillar_count": 8
+  },
+  "root": {
+    "node_id": "root",
+    "title": "Groq Platform",
+    "logical_path": "root",
+    "url": "https://console.groq.com/",
+    "path_regex": "^/$",
+    "summary_of_contents": "Entry point for Groq platform — links to Console, Docs, Playground, API Keys, and Dashboard.",
+    "expected_controls": [
+      "Playground",
+      "API Keys",
+      "Dashboard",
+      "Docs",
+      "Settings",
+      "Search"
+    ],
+    "required_controls": [],
+    "terminal_capabilities": [],
+    "children": [
+      {
+        "node_id": "console_home",
+        "title": "GroqCloud Console Home",
+        "logical_path": "root.console",
+        "url": "https://console.groq.com/home",
+        "path_regex": "^/(home)?$",
+        "summary_of_contents": "GroqCloud console landing page with navigation to Playground, API Keys, Dashboard, and Docs.",
+        "expected_controls": [
+          "Playground",
+          "API Keys",
+          "Dashboard",
+          "Docs",
+          "Settings",
+          "Login"
+        ],
+        "required_controls": [],
+        "terminal_capabilities": [],
+        "children": [
+          {
+            "node_id": "playground",
+            "title": "Playground",
+            "logical_path": "root.console.playground",
+            "url": "https://console.groq.com/playground",
+            "path_regex": "^/playground",
+            "summary_of_contents": "Interactive playground to test Groq API models directly in the browser with real-time inference.",
+            "expected_controls": [
+              "Model Selector",
+              "System Prompt",
+              "User Message Input",
+              "Send Button",
+              "Temperature Slider"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [
+              "run_model_inference",
+              "test_prompts",
+              "view_response"
+            ],
+            "children": []
+          },
+          {
+            "node_id": "api_keys",
+            "title": "API Keys",
+            "logical_path": "root.console.api_keys",
+            "url": "https://console.groq.com/keys",
+            "path_regex": "^/keys",
+            "summary_of_contents": "API key management page: create, view, delete, and manage API keys for GroqCloud access.",
+            "expected_controls": [
+              "Create API Key Button",
+              "Key List",
+              "Copy Key",
+              "Delete Key"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [
+              "manage_api_keys",
+              "create_key",
+              "view_keys",
+              "delete_key"
+            ],
+            "children": []
+          },
+          {
+            "node_id": "dashboard_main",
+            "title": "Dashboard Overview",
+            "logical_path": "root.console.dashboard",
+            "url": "https://console.groq.com/dashboard",
+            "path_regex": "^/dashboard",
+            "summary_of_contents": "High-level account metrics and navigation to specific usage, logs, and batch tabs.",
+            "expected_controls": [
+              "Metrics",
+              "Usage",
+              "Logs",
+              "Batch"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [],
+            "children": [
+              {
+                "node_id": "usage_section",
+                "title": "Usage and Spend",
+                "logical_path": "root.console.dashboard.usage",
+                "url": "https://console.groq.com/dashboard/usage",
+                "path_regex": "^/dashboard/usage",
+                "summary_of_contents": "Detailed model-by-model token consumption and cost data. View usage by date range, filter by model.",
+                "expected_controls": [
+                  "Date Picker",
+                  "Model Filter",
+                  "Activity Tab",
+                  "Cost Tab"
+                ],
+                "required_controls": [
+                  "Date Picker",
+                  "Model Filter"
+                ],
+                "terminal_capabilities": [
+                  "read_token_usage",
+                  "filter_by_model",
+                  "export_csv",
+                  "view_cost_breakdown"
+                ],
+                "children": []
+              },
+              {
+                "node_id": "logs_section",
+                "title": "Logs",
+                "logical_path": "root.console.dashboard.logs",
+                "url": "https://console.groq.com/dashboard/logs",
+                "path_regex": "^/dashboard/logs",
+                "summary_of_contents": "Request logs viewer showing API call history, status codes, and latency metrics.",
+                "expected_controls": [
+                  "Log List",
+                  "Filter",
+                  "Search",
+                  "Date Range"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [
+                  "read_request_logs",
+                  "filter_logs",
+                  "view_error_details"
+                ],
+                "children": []
+              },
+              {
+                "node_id": "batch_section",
+                "title": "Batch Jobs",
+                "logical_path": "root.console.dashboard.batch",
+                "url": "https://console.groq.com/dashboard/batch",
+                "path_regex": "^/dashboard/batch",
+                "summary_of_contents": "Batch job management: create, monitor, and manage batch inference jobs.",
+                "expected_controls": [
+                  "Job List",
+                  "Create Batch",
+                  "Status Filter"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [
+                  "view_batch_jobs",
+                  "create_batch",
+                  "monitor_status"
+                ],
+                "children": []
+              }
+            ]
+          },
+          {
+            "node_id": "docs_root",
+            "title": "Documentation",
+            "logical_path": "root.console.docs",
+            "url": "https://console.groq.com/docs/overview",
+            "path_regex": "^/docs(/overview)?$",
+            "summary_of_contents": "GroqCloud documentation hub with sidebar navigation to all documentation categories.",
+            "expected_controls": [
+              "Sidebar Navigation",
+              "Search",
+              "Docs Link",
+              "API Reference Link"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [],
+            "children": [
+              {
+                "node_id": "getting_started",
+                "title": "Getting Started",
+                "logical_path": "root.console.docs.getting_started",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Getting Started. Contains 8 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_overview",
+                    "title": "Overview",
+                    "logical_path": "root.console.docs.getting_started.docs_overview",
+                    "url": "https://console.groq.com/docs/overview",
+                    "path_regex": "^/docs/overview/?$",
+                    "summary_of_contents": "Overview of GroqCloud platform, introduction to Groq API and getting started documentation.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_quickstart",
+                    "title": "Quickstart",
+                    "logical_path": "root.console.docs.getting_started.docs_quickstart",
+                    "url": "https://console.groq.com/docs/quickstart",
+                    "path_regex": "^/docs/quickstart/?$",
+                    "summary_of_contents": "Step-by-step guide to set up the Groq API: create API key, configure environment, and make first chat completion request.",
+                    "expected_controls": [
+                      "Playground",
+                      "API Keys",
+                      "Dashboard",
+                      "Docs",
+                      "Settings",
+                      "Search",
+                      "Search Input",
+                      "Code Execution",
+                      "Playground Interface"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_quickstart",
+                      "view_setup_steps"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_models",
+                    "title": "Supported Models",
+                    "logical_path": "root.console.docs.getting_started.docs_models",
+                    "url": "https://console.groq.com/docs/models",
+                    "path_regex": "^/docs/models/?$",
+                    "summary_of_contents": "Complete list of available models on GroqCloud with pricing, speed, rate limits, and context window details.",
+                    "expected_controls": [
+                      "Playground",
+                      "API Keys",
+                      "Dashboard",
+                      "Docs",
+                      "Settings",
+                      "Search",
+                      "Search Input",
+                      "Code Execution",
+                      "Playground Interface"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_model_list",
+                      "compare_models",
+                      "view_pricing"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_openai_compat",
+                    "title": "OpenAI Compatibility",
+                    "logical_path": "root.console.docs.getting_started.docs_openai_compat",
+                    "url": "https://console.groq.com/docs/openai",
+                    "path_regex": "^/docs/openai/?$",
+                    "summary_of_contents": "Page about OpenAI Compatibility — contains documentation and controls for openai compatibility functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_responses_api",
+                    "title": "Responses API",
+                    "logical_path": "root.console.docs.getting_started.docs_responses_api",
+                    "url": "https://console.groq.com/docs/responses-api",
+                    "path_regex": "^/docs/responses\\-api/?$",
+                    "summary_of_contents": "Page about Responses API — contains documentation and controls for responses api functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_rate_limits",
+                    "title": "Rate Limits",
+                    "logical_path": "root.console.docs.getting_started.docs_rate_limits",
+                    "url": "https://console.groq.com/docs/rate-limits",
+                    "path_regex": "^/docs/rate\\-limits/?$",
+                    "summary_of_contents": "Rate limit details per model and plan tier, including tokens per minute and requests per minute quotas.",
+                    "expected_controls": [
+                      "Playground",
+                      "API Keys",
+                      "Dashboard",
+                      "Docs",
+                      "Settings",
+                      "Search",
+                      "Search Input",
+                      "Tab Switcher",
+                      "Code Execution",
+                      "Playground Interface"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_rate_limits",
+                      "compare_tiers"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_templates",
+                    "title": "Templates",
+                    "logical_path": "root.console.docs.getting_started.docs_templates",
+                    "url": "https://console.groq.com/docs/examples",
+                    "path_regex": "^/docs/examples/?$",
+                    "summary_of_contents": "Page about Templates — contains documentation and controls for templates functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_api_reference",
+                    "title": "API Reference",
+                    "logical_path": "root.console.docs.getting_started.docs_api_reference",
+                    "url": "https://console.groq.com/docs/api-reference",
+                    "path_regex": "^/docs/api\\-reference/?$",
+                    "summary_of_contents": "Full API reference for Groq endpoints: Chat completions, Responses, Audio transcription/translation/speech, Models, Batches, Files, Fine-tuning.",
+                    "expected_controls": [
+                      "Playground",
+                      "API Keys",
+                      "Dashboard",
+                      "Docs",
+                      "Settings",
+                      "Search",
+                      "Search Input",
+                      "Playground Interface"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_api_spec",
+                      "view_endpoints"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "core_features",
+                "title": "Core Features",
+                "logical_path": "root.console.docs.core_features",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Core Features. Contains 9 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_text_gen",
+                    "title": "Text Generation",
+                    "logical_path": "root.console.docs.core_features.docs_text_gen",
+                    "url": "https://console.groq.com/docs/text-chat",
+                    "path_regex": "^/docs/text\\-chat/?$",
+                    "summary_of_contents": "Documentation for text generation and chat completion API usage.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_stt",
+                    "title": "Speech to Text",
+                    "logical_path": "root.console.docs.core_features.docs_stt",
+                    "url": "https://console.groq.com/docs/speech-to-text",
+                    "path_regex": "^/docs/speech\\-to\\-text/?$",
+                    "summary_of_contents": "Whisper model documentation for audio transcription and translation.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_tts",
+                    "title": "Text to Speech",
+                    "logical_path": "root.console.docs.core_features.docs_tts",
+                    "url": "https://console.groq.com/docs/text-to-speech",
+                    "path_regex": "^/docs/text\\-to\\-speech/?$",
+                    "summary_of_contents": "Text-to-speech documentation and available TTS models.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_orpheus",
+                    "title": "Orpheus",
+                    "logical_path": "root.console.docs.core_features.docs_orpheus",
+                    "url": "https://console.groq.com/docs/text-to-speech/orpheus",
+                    "path_regex": "^/docs/text\\-to\\-speech/orpheus/?$",
+                    "summary_of_contents": "Orpheus: Text-to-speech documentation and available TTS models.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_vision",
+                    "title": "OCR and Image Recognition",
+                    "logical_path": "root.console.docs.core_features.docs_vision",
+                    "url": "https://console.groq.com/docs/vision",
+                    "path_regex": "^/docs/vision/?$",
+                    "summary_of_contents": "Documentation for image and vision capabilities using multimodal models for visual question answering, OCR, and image recognition.",
+                    "expected_controls": [
+                      "Playground",
+                      "Docs",
+                      "Playground Interface"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_vision_docs",
+                      "view_code_examples",
+                      "Vision API",
+                      "multimodal vision",
+                      "OCR"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_reasoning",
+                    "title": "Reasoning",
+                    "logical_path": "root.console.docs.core_features.docs_reasoning",
+                    "url": "https://console.groq.com/docs/reasoning",
+                    "path_regex": "^/docs/reasoning/?$",
+                    "summary_of_contents": "Documentation for reasoning capabilities with supported models.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_moderation",
+                    "title": "Content Moderation",
+                    "logical_path": "root.console.docs.core_features.docs_moderation",
+                    "url": "https://console.groq.com/docs/content-moderation",
+                    "path_regex": "^/docs/content\\-moderation/?$",
+                    "summary_of_contents": "Page about Content Moderation — contains documentation and controls for content moderation functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_structured",
+                    "title": "Structured Outputs",
+                    "logical_path": "root.console.docs.core_features.docs_structured",
+                    "url": "https://console.groq.com/docs/structured-outputs",
+                    "path_regex": "^/docs/structured\\-outputs/?$",
+                    "summary_of_contents": "Documentation for generating structured JSON outputs from LLM responses.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_prompt_caching",
+                    "title": "Prompt Caching",
+                    "logical_path": "root.console.docs.core_features.docs_prompt_caching",
+                    "url": "https://console.groq.com/docs/prompt-caching",
+                    "path_regex": "^/docs/prompt\\-caching/?$",
+                    "summary_of_contents": "Guide to prompt caching feature for reducing latency and costs on repeated prompts.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_prompt_caching_docs"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "tools_integrations",
+                "title": "Tools & Integrations",
+                "logical_path": "root.console.docs.tools_integrations",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Tools & Integrations. Contains 13 sub-pages. NOTE: Some tools link to external GitHub cookbooks for code examples.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_tool_use",
+                    "title": "Tool Use Overview",
+                    "logical_path": "root.console.docs.tools_integrations.docs_tool_use",
+                    "url": "https://console.groq.com/docs/tool-use/overview",
+                    "path_regex": "^/docs/tool\\-use/overview/?$",
+                    "summary_of_contents": "Overview of tool use capabilities including built-in tools and local tool calling.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_builtin_tools",
+                    "title": "Groq Built-In Tools",
+                    "logical_path": "root.console.docs.tools_integrations.docs_builtin_tools",
+                    "url": "https://console.groq.com/docs/tool-use/built-in-tools",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/?$",
+                    "summary_of_contents": "Page about Groq Built-In Tools — contains documentation and controls for groq built-in tools functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_web_search",
+                    "title": "Web Search",
+                    "logical_path": "root.console.docs.tools_integrations.docs_web_search",
+                    "url": "https://console.groq.com/docs/tool-use/built-in-tools/web-search",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/web\\-search/?$",
+                    "summary_of_contents": "Page about Web Search — contains documentation and controls for web search functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_visit_website",
+                    "title": "Visit Website",
+                    "logical_path": "root.console.docs.tools_integrations.docs_visit_website",
+                    "url": "https://console.groq.com/docs/tool-use/built-in-tools/visit-website",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/visit\\-website/?$",
+                    "summary_of_contents": "Page about Visit Website — contains documentation and controls for visit website functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_browser_auto",
+                    "title": "Browser Automation",
+                    "logical_path": "root.console.docs.tools_integrations.docs_browser_auto",
+                    "url": "https://console.groq.com/docs/tool-use/built-in-tools/browser-automation",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/browser\\-automation/?$",
+                    "summary_of_contents": "Page about Browser Automation — contains documentation and controls for browser automation functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_code_exec",
+                    "title": "Cookbooks",
+                    "logical_path": "root.console.docs.tools_integrations.docs_code_exec",
+                    "url": "https://github.com/groq/groq-docs/tree/main/cookbooks",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/code\\-execution/?$",
+                    "summary_of_contents": "Code examples and tutorials hosted on GitHub. Contains cookbooks for various use cases including Kilo Code integration examples.",
+                    "expected_controls": [
+                      "GitHub Repository Link",
+                      "Example List",
+                      "Search"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "view_code_examples",
+                      "kilo code"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_wolfram",
+                    "title": "Wolfram Alpha",
+                    "logical_path": "root.console.docs.tools_integrations.docs_wolfram",
+                    "url": "https://console.groq.com/docs/tool-use/built-in-tools/wolfram-alpha",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/wolfram\\-alpha/?$",
+                    "summary_of_contents": "Page about Wolfram Alpha — contains documentation and controls for wolfram alpha functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_browser_search",
+                    "title": "Browser Search (GPT OSS)",
+                    "logical_path": "root.console.docs.tools_integrations.docs_browser_search",
+                    "url": "https://console.groq.com/docs/tool-use/built-in-tools/browser-search",
+                    "path_regex": "^/docs/tool\\-use/built\\-in\\-tools/browser\\-search/?$",
+                    "summary_of_contents": "Page about Browser Search (GPT OSS) — contains documentation and controls for browser search (gpt oss) functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_remote_mcp",
+                    "title": "Remote Tools and MCP",
+                    "logical_path": "root.console.docs.tools_integrations.docs_remote_mcp",
+                    "url": "https://console.groq.com/docs/tool-use/remote-mcp",
+                    "path_regex": "^/docs/tool\\-use/remote\\-mcp/?$",
+                    "summary_of_contents": "Page about Remote Tools and MCP — contains documentation and controls for remote tools and mcp functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_connectors",
+                    "title": "Connectors",
+                    "logical_path": "root.console.docs.tools_integrations.docs_connectors",
+                    "url": "https://console.groq.com/docs/tool-use/remote-mcp/connectors",
+                    "path_regex": "^/docs/tool\\-use/remote\\-mcp/connectors/?$",
+                    "summary_of_contents": "Page about Connectors — contains documentation and controls for connectors functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_local_tool",
+                    "title": "Local Tool Calling",
+                    "logical_path": "root.console.docs.tools_integrations.docs_local_tool",
+                    "url": "https://console.groq.com/docs/tool-use/local-tool-calling",
+                    "path_regex": "^/docs/tool\\-use/local\\-tool\\-calling/?$",
+                    "summary_of_contents": "Page about Local Tool Calling — contains documentation and controls for local tool calling functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_integrations",
+                    "title": "Integrations Catalog",
+                    "logical_path": "root.console.docs.tools_integrations.docs_integrations",
+                    "url": "https://console.groq.com/docs/integrations",
+                    "path_regex": "^/docs/integrations/?$",
+                    "summary_of_contents": "Page about Integrations Catalog — contains documentation and controls for integrations catalog functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_coding",
+                    "title": "Coding with Groq",
+                    "logical_path": "root.console.docs.tools_integrations.docs_coding",
+                    "url": "https://console.groq.com/docs/coding-with-groq",
+                    "path_regex": "^/docs/coding\\-with\\-groq/?$",
+                    "summary_of_contents": "Page about Coding with Groq — contains documentation and controls for coding with groq functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "compound_agentic",
+                "title": "Compound (Agentic AI)",
+                "logical_path": "root.console.docs.compound_agentic",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Compound (Agentic AI). Contains 4 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_compound_overview",
+                    "title": "Overview",
+                    "logical_path": "root.console.docs.compound_agentic.docs_compound_overview",
+                    "url": "https://console.groq.com/docs/compound",
+                    "path_regex": "^/docs/compound/?$",
+                    "summary_of_contents": "Overview of Compound (Agentic AI) system with built-in tools, systems, and use cases.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_compound_tools",
+                    "title": "Built-In Tools",
+                    "logical_path": "root.console.docs.compound_agentic.docs_compound_tools",
+                    "url": "https://console.groq.com/docs/compound/built-in-tools",
+                    "path_regex": "^/docs/compound/built\\-in\\-tools/?$",
+                    "summary_of_contents": "Built-In Tools: Overview of Compound (Agentic AI) system with built-in tools, systems, and use cases.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_compound_systems",
+                    "title": "Systems",
+                    "logical_path": "root.console.docs.compound_agentic.docs_compound_systems",
+                    "url": "https://console.groq.com/docs/compound/systems",
+                    "path_regex": "^/docs/compound/systems/?$",
+                    "summary_of_contents": "Systems: Overview of Compound (Agentic AI) system with built-in tools, systems, and use cases.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_compound_usecases",
+                    "title": "Use Cases",
+                    "logical_path": "root.console.docs.compound_agentic.docs_compound_usecases",
+                    "url": "https://console.groq.com/docs/compound/use-cases",
+                    "path_regex": "^/docs/compound/use\\-cases/?$",
+                    "summary_of_contents": "Use Cases: Overview of Compound (Agentic AI) system with built-in tools, systems, and use cases.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "guides",
+                "title": "Guides",
+                "logical_path": "root.console.docs.guides",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Guides. Contains 4 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_prompting",
+                    "title": "Prompting Guide",
+                    "logical_path": "root.console.docs.guides.docs_prompting",
+                    "url": "https://console.groq.com/docs/prompting",
+                    "path_regex": "^/docs/prompting/?$",
+                    "summary_of_contents": "Prompting guide with basics, patterns, and model migration strategies.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_patterns",
+                    "title": "Patterns",
+                    "logical_path": "root.console.docs.guides.docs_patterns",
+                    "url": "https://console.groq.com/docs/prompting/patterns",
+                    "path_regex": "^/docs/prompting/patterns/?$",
+                    "summary_of_contents": "Patterns: Prompting guide with basics, patterns, and model migration strategies.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_migration",
+                    "title": "Model Migration",
+                    "logical_path": "root.console.docs.guides.docs_migration",
+                    "url": "https://console.groq.com/docs/prompting/model-migration",
+                    "path_regex": "^/docs/prompting/model\\-migration/?$",
+                    "summary_of_contents": "Model Migration: Prompting guide with basics, patterns, and model migration strategies.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_prefilling",
+                    "title": "Assistant Message Prefilling",
+                    "logical_path": "root.console.docs.guides.docs_prefilling",
+                    "url": "https://console.groq.com/docs/prefilling",
+                    "path_regex": "^/docs/prefilling/?$",
+                    "summary_of_contents": "Page about Assistant Message Prefilling — contains documentation and controls for assistant message prefilling functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "service_tiers",
+                "title": "Service Tiers",
+                "logical_path": "root.console.docs.service_tiers",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Service Tiers. Contains 4 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_tiers_overview",
+                    "title": "Service Tiers",
+                    "logical_path": "root.console.docs.service_tiers.docs_tiers_overview",
+                    "url": "https://console.groq.com/docs/service-tiers",
+                    "path_regex": "^/docs/service\\-tiers/?$",
+                    "summary_of_contents": "Page about Service Tiers — contains documentation and controls for service tiers functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_performance",
+                    "title": "Performance Tier",
+                    "logical_path": "root.console.docs.service_tiers.docs_performance",
+                    "url": "https://console.groq.com/docs/performance-tier",
+                    "path_regex": "^/docs/performance\\-tier/?$",
+                    "summary_of_contents": "Page about Performance Tier — contains documentation and controls for performance tier functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_flex",
+                    "title": "Flex Processing",
+                    "logical_path": "root.console.docs.service_tiers.docs_flex",
+                    "url": "https://console.groq.com/docs/flex-processing",
+                    "path_regex": "^/docs/flex\\-processing/?$",
+                    "summary_of_contents": "Page about Flex Processing — contains documentation and controls for flex processing functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_batch",
+                    "title": "Batch Processing",
+                    "logical_path": "root.console.docs.service_tiers.docs_batch",
+                    "url": "https://console.groq.com/docs/batch",
+                    "path_regex": "^/docs/batch/?$",
+                    "summary_of_contents": "Batch processing documentation for high-throughput inference jobs.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "advanced",
+                "title": "Advanced",
+                "logical_path": "root.console.docs.advanced",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Advanced. Contains 1 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_lora",
+                    "title": "LoRA Inference",
+                    "logical_path": "root.console.docs.advanced.docs_lora",
+                    "url": "https://console.groq.com/docs/lora",
+                    "path_regex": "^/docs/lora/?$",
+                    "summary_of_contents": "LoRA (Low-Rank Adaptation) inference documentation for custom model fine-tuning.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "production",
+                "title": "Production Readiness",
+                "logical_path": "root.console.docs.production",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Production Readiness. Contains 4 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_prod_checklist",
+                    "title": "Production Checklist",
+                    "logical_path": "root.console.docs.production.docs_prod_checklist",
+                    "url": "https://console.groq.com/docs/production-readiness/production-ready-checklist",
+                    "path_regex": "^/docs/production\\-readiness/production\\-ready\\-checklist/?$",
+                    "summary_of_contents": "Page about Production Checklist — contains documentation and controls for production checklist functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_optimize_latency",
+                    "title": "Optimizing Latency",
+                    "logical_path": "root.console.docs.production.docs_optimize_latency",
+                    "url": "https://console.groq.com/docs/production-readiness/optimizing-latency",
+                    "path_regex": "^/docs/production\\-readiness/optimizing\\-latency/?$",
+                    "summary_of_contents": "Page about Optimizing Latency — contains documentation and controls for optimizing latency functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_security",
+                    "title": "Security Onboarding",
+                    "logical_path": "root.console.docs.production.docs_security",
+                    "url": "https://console.groq.com/docs/production-readiness/security-onboarding",
+                    "path_regex": "^/docs/production\\-readiness/security\\-onboarding/?$",
+                    "summary_of_contents": "Page about Security Onboarding — contains documentation and controls for security onboarding functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_prometheus",
+                    "title": "Prometheus Metrics",
+                    "logical_path": "root.console.docs.production.docs_prometheus",
+                    "url": "https://console.groq.com/docs/prometheus-metrics",
+                    "path_regex": "^/docs/prometheus\\-metrics/?$",
+                    "summary_of_contents": "Page about Prometheus Metrics — contains documentation and controls for prometheus metrics functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "account",
+                "title": "Account and Console",
+                "logical_path": "root.console.docs.account",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Account and Console. Contains 5 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_spend_limits",
+                    "title": "Spend Limits",
+                    "logical_path": "root.console.docs.account.docs_spend_limits",
+                    "url": "https://console.groq.com/docs/spend-limits",
+                    "path_regex": "^/docs/spend\\-limits/?$",
+                    "summary_of_contents": "Page about Spend Limits — contains documentation and controls for spend limits functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation",
+                      "read_pricing",
+                      "view_costs"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_projects",
+                    "title": "Projects",
+                    "logical_path": "root.console.docs.account.docs_projects",
+                    "url": "https://console.groq.com/docs/projects",
+                    "path_regex": "^/docs/projects/?$",
+                    "summary_of_contents": "Page about Projects — contains documentation and controls for projects functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_model_perms",
+                    "title": "Model Permissions",
+                    "logical_path": "root.console.docs.account.docs_model_perms",
+                    "url": "https://console.groq.com/docs/model-permissions",
+                    "path_regex": "^/docs/model\\-permissions/?$",
+                    "summary_of_contents": "Page about Model Permissions — contains documentation and controls for model permissions functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_billing",
+                    "title": "Billing FAQs",
+                    "logical_path": "root.console.docs.account.docs_billing",
+                    "url": "https://console.groq.com/docs/billing-faqs",
+                    "path_regex": "^/docs/billing\\-faqs/?$",
+                    "summary_of_contents": "Page about Billing FAQs — contains documentation and controls for billing faqs functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_your_data",
+                    "title": "Your Data",
+                    "logical_path": "root.console.docs.account.docs_your_data",
+                    "url": "https://console.groq.com/docs/your-data",
+                    "path_regex": "^/docs/your\\-data/?$",
+                    "summary_of_contents": "Page about Your Data — contains documentation and controls for your data functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "developer_resources",
+                "title": "Developer Resources",
+                "logical_path": "root.console.docs.developer_resources",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Developer Resources. Contains 4 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_libraries",
+                    "title": "SDK Libraries",
+                    "logical_path": "root.console.docs.developer_resources.docs_libraries",
+                    "url": "https://console.groq.com/docs/libraries",
+                    "path_regex": "^/docs/libraries/?$",
+                    "summary_of_contents": "Page about SDK Libraries — contains documentation and controls for sdk libraries functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_badge",
+                    "title": "Groq Badge",
+                    "logical_path": "root.console.docs.developer_resources.docs_badge",
+                    "url": "https://console.groq.com/docs/badge",
+                    "path_regex": "^/docs/badge/?$",
+                    "summary_of_contents": "Page about Groq Badge — contains documentation and controls for groq badge functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_errors",
+                    "title": "Error Codes",
+                    "logical_path": "root.console.docs.developer_resources.docs_errors",
+                    "url": "https://console.groq.com/docs/errors",
+                    "path_regex": "^/docs/errors/?$",
+                    "summary_of_contents": "Error codes reference for Groq API responses.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  },
+                  {
+                    "node_id": "docs_changelog",
+                    "title": "Changelog",
+                    "logical_path": "root.console.docs.developer_resources.docs_changelog",
+                    "url": "https://console.groq.com/docs/changelog",
+                    "path_regex": "^/docs/changelog/?$",
+                    "summary_of_contents": "Page about Changelog — contains documentation and controls for changelog functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "node_id": "legal",
+                "title": "Legal",
+                "logical_path": "root.console.docs.legal",
+                "url": "",
+                "path_regex": "",
+                "summary_of_contents": "Documentation category: Legal. Contains 1 sub-pages.",
+                "expected_controls": [
+                  "Sidebar Navigation",
+                  "Search"
+                ],
+                "required_controls": [],
+                "terminal_capabilities": [],
+                "children": [
+                  {
+                    "node_id": "docs_legal",
+                    "title": "Policies & Notices",
+                    "logical_path": "root.console.docs.legal.docs_legal",
+                    "url": "https://console.groq.com/docs/legal",
+                    "path_regex": "^/docs/legal/?$",
+                    "summary_of_contents": "Page about Policies & Notices — contains documentation and controls for policies & notices functionality.",
+                    "expected_controls": [
+                      "Sidebar Navigation",
+                      "Content Area"
+                    ],
+                    "required_controls": [],
+                    "terminal_capabilities": [
+                      "read_documentation"
+                    ],
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "node_id": "settings",
+            "title": "Settings",
+            "logical_path": "root.console.settings",
+            "url": "https://console.groq.com/settings",
+            "path_regex": "^/settings",
+            "summary_of_contents": "Account settings, profile, organization, and billing configuration.",
+            "expected_controls": [
+              "Profile",
+              "Organization",
+              "Billing",
+              "Notifications"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [
+              "update_settings",
+              "manage_billing",
+              "view_profile"
+            ],
+            "children": []
+          }
+        ]
+      },
+      {
+        "node_id": "groq_website",
+        "title": "Groq Website",
+        "logical_path": "root.website",
+        "url": "https://groq.com/",
+        "path_regex": "^/$",
+        "summary_of_contents": "Groq marketing website with information about platform, solutions, pricing, LPU architecture, and developer resources.",
+        "expected_controls": [
+          "Platform Menu",
+          "Solutions Menu",
+          "Learn Menu",
+          "Pricing Link",
+          "About Menu",
+          "Developers Menu",
+          "Start Building Button"
+        ],
+        "required_controls": [],
+        "terminal_capabilities": [],
+        "children": [
+          {
+            "node_id": "groq_is_fast_low_cost_inference",
+            "title": "Groq is fast, low cost inference.",
+            "logical_path": "root.website.groq_is_fast_low_cost_inference",
+            "url": "https://groq.com/",
+            "path_regex": "^//?$",
+            "summary_of_contents": "Page about Groq is fast, low cost inference. — contains documentation and controls for groq is fast, low cost inference. functionality.",
+            "expected_controls": [
+              "Tab Switcher"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [],
+            "children": []
+          },
+          {
+            "node_id": "what_is_a_language_processing_unit",
+            "title": "What is a Language Processing Unit?",
+            "logical_path": "root.website.what_is_a_language_processing_unit",
+            "url": "https://groq.com/lpu/",
+            "path_regex": "^/lpu/?$",
+            "summary_of_contents": "Technical deep-dive into Groq's Language Processing Unit (LPU) architecture: design principles, deterministic compute, on-chip memory, and performance advantages over GPUs.",
+            "expected_controls": [
+              "Tab Switcher"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [
+              "read_lpu_architecture"
+            ],
+            "children": []
+          },
+          {
+            "node_id": "privacy_policy",
+            "title": "Privacy Policy",
+            "logical_path": "root.website.privacy_policy",
+            "url": "https://groq.com/privacy-policy/",
+            "path_regex": "^/privacy\\-policy/?$",
+            "summary_of_contents": "Groq privacy policy covering data collection, usage, cookies, and user rights across all Groq services.",
+            "expected_controls": [
+              "Search Input",
+              "Tab Switcher"
+            ],
+            "required_controls": [],
+            "terminal_capabilities": [
+              "read_privacy_policy"
+            ],
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

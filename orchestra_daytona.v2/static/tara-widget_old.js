@@ -412,7 +412,7 @@
       this.container.id = 'tara-container';
       this.container.style.cssText = `
         position: fixed;
-        top: 124px;
+        bottom: 24px;
         right: 24px;
         pointer-events: auto;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

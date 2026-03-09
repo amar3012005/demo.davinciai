@@ -43,7 +43,32 @@ async def run_router_lexical_stage(
         nodes=nodes,
         subgoal_mode=subgoal_mode,
         excluded_ids=excluded_ids,
-    ) if subgoal_mode in {"literal_click", "literal_type"} else None
+    )
+    
+    # BOOST: If strategy has explicit label and lexical found it, boost score for exact matches
+    # This prevents exact matches from being rejected due to low text-overlap scoring
+    if (
+        lexical_hit
+        and label_policy
+        and label_policy.get("matched_label")
+        and label_policy.get("match_mode") in {"exact", "synonym"}
+    ):
+        # Check if lexical_hit node matches the keyword-direct-hit node
+        keyword_node_id = label_policy.get("raw_node_id") or label_policy.get("resolved_target_id")
+        lexical_node_id = getattr(lexical_hit.get("node"), "id", "")
+        
+        if keyword_node_id and keyword_node_id == lexical_node_id:
+            # Same node - boost score to reflect exact label match
+            original_score = lexical_hit.get("score", 0.0)
+            if lexical_hit.get("label_exact"):
+                lexical_hit["score"] = max(0.85, original_score + 0.50)
+            elif lexical_hit.get("explicit_overlap", 0) >= 1:
+                lexical_hit["score"] = max(0.75, original_score + 0.40)
+            
+            logger.info(
+                f"ROUTER_SCORE_BOOST: keyword_direct exact match → "
+                f"score {original_score:.2f} → {lexical_hit['score']:.2f}"
+            ) if subgoal_mode in {"literal_click", "literal_type"} else None
 
     if lexical_hit and router_v2_shadow:
         logger.info(
@@ -217,6 +242,7 @@ async def run_router_lexical_stage(
                 current_url=current_url,
                 dom_signature=current_dom_signature,
                 verified_advance_active=verified_advance_active,
+                strategy_authoritative=strategy_authoritative,
             )
             if tier3_result:
                 tier3_result["router_mode"] = subgoal_mode

@@ -165,7 +165,11 @@ async def lifespan(app: FastAPI):
             llm_model = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
             if groq_api_key:
                 llm_provider = GroqProvider(api_key=groq_api_key, model_name=llm_model)
-                logger.info("✅ GroqProvider initialized")
+                if llm_provider.initialize():
+                    logger.info("✅ GroqProvider initialized and connected")
+                else:
+                    logger.warning("⚠️ GroqProvider created but failed to initialize")
+                    llm_provider = None
             else:
                 logger.warning("⚠️ GROQ_API_KEY not set — Mind Reader will use fallback")
         except Exception as e:

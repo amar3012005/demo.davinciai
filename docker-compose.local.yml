@@ -60,6 +60,9 @@ services:
       TRANSFORMERS_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
 
+      # Remote Embeddings Configuration
+      EMBEDDINGS_SERVICE_URL: "http://embeddings-eu-local:4006/embed"
+
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -90,92 +93,12 @@ services:
       - ./rag-daytona.v2/live_graph.py:/app/daytona_agent/services/rag/live_graph.py
       - ./rag-daytona.v2/tara_models.py:/app/tara_models.py
       - ./rag-daytona.v2/tara_models.py:/app/daytona_agent/services/rag/tara_models.py
-    command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 8003"
-    restart: unless-stopped
-    depends_on:
-      - redis
-
-  # ═══════════════════════════════════════════════════════════
-  # RAG Visual Copilot Service
-  # ═══════════════════════════════════════════════════════════
-  rag-visualcopilot:
-    build:
-      context: ./rag-visual-copilot
-      dockerfile: Dockerfile
-    container_name: rag-visualcopilot-local
-    env_file:
-      - .env
-    environment:
-      # LLM Configuration
-      LLM_PROVIDER: groq
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
-      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
-
-      # Ultimate TARA - Mind Reader
-      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
-
-      # Ultimate TARA - Hive Interface (Qdrant)
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_hive}
-      ENABLE_HIVE_MIND: ${ENABLE_HIVE_MIND:-true}
-      ENABLE_LOCAL_RETRIEVAL: "false"
-
-      # Ultimate TARA - Live Graph (Redis)
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-
-      # Feature Flags
-      USE_NEW_DETECTIVE: ${USE_NEW_DETECTIVE:-true}
-      USE_MISSION_BRAIN: ${USE_MISSION_BRAIN:-true}
-      USE_LIVE_GRAPH: ${USE_LIVE_GRAPH:-true}
-      USE_HIVE_INTERFACE: ${USE_HIVE_INTERFACE:-true}
-      ENABLE_PRE_ROUTER_VISION: ${ENABLE_PRE_ROUTER_VISION:-true}
-
-      # Remote Embeddings Configuration
-      EMBEDDINGS_SERVICE_URL: "http://tara-eu-embeddings-eu-local-1:4006/embed"
-
-      # Logging
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      TENANT_ID: ${TENANT_ID:-tara}
-      DAYTONA_RAG_ENABLE_CACHE: "false"
-      DAYTONA_RAG_CACHE_TTL: "0"
-      LIVE_GRAPH_SCAN_PATH: /app/daytona_agent/services/orchestra_daytona.v2/live_graph_scan.md
-
-      # Model cache
-      TRANSFORMERS_OFFLINE: "1"
-      HF_DATASETS_OFFLINE: "1"
-
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-
-    ports:
-      - '8005:8003'
-    volumes:
-      - rag-index:/app/index
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
-      - ./orchestra_daytona.v2:/app/daytona_agent/services/orchestra_daytona.v2
-      - ./rag-visual-copilot/visual_copilot:/app/visual_copilot
-      - ./rag-visual-copilot/visual_copilot:/app/daytona_agent/services/rag/visual_copilot
-      - ./rag-visual-copilot/ultimate_api.py:/app/ultimate_api.py
-      - ./rag-visual-copilot/ultimate_api.py:/app/daytona_agent/services/rag/ultimate_api.py
-      - ./rag-visual-copilot/app.py:/app/app.py
-      - ./rag-visual-copilot/app.py:/app/daytona_agent/services/rag/app.py
-      - ./rag-visual-copilot/hive_interface.py:/app/hive_interface.py
-      - ./rag-visual-copilot/hive_interface.py:/app/daytona_agent/services/rag/hive_interface.py
-      - ./rag-visual-copilot/mission_brain.py:/app/mission_brain.py
-      - ./rag-visual-copilot/mission_brain.py:/app/daytona_agent/services/rag/mission_brain.py
-      - ./rag-visual-copilot/mind_reader.py:/app/mind_reader.py
-      - ./rag-visual-copilot/mind_reader.py:/app/daytona_agent/services/rag/mind_reader.py
-      - ./rag-visual-copilot/mind_reader_domain_prompts:/app/mind_reader_domain_prompts
-      - ./rag-visual-copilot/mind_reader_domain_prompts:/app/daytona_agent/services/rag/mind_reader_domain_prompts
-      - ./rag-visual-copilot/semantic_detective.py:/app/semantic_detective.py
-      - ./rag-visual-copilot/semantic_detective.py:/app/daytona_agent/services/rag/semantic_detective.py
-      - ./rag-visual-copilot/live_graph.py:/app/live_graph.py
-      - ./rag-visual-copilot/live_graph.py:/app/daytona_agent/services/rag/live_graph.py
-      - ./rag-visual-copilot/tara_models.py:/app/tara_models.py
-      - ./rag-visual-copilot/tara_models.py:/app/daytona_agent/services/rag/tara_models.py
+      - ./rag-daytona.v2/remote_embeddings.py:/app/remote_embeddings.py
+      - ./rag-daytona.v2/remote_embeddings.py:/app/daytona_agent/services/rag/remote_embeddings.py
+      - ./rag-daytona.v2/optimized_embeddings.py:/app/optimized_embeddings.py
+      - ./rag-daytona.v2/optimized_embeddings.py:/app/daytona_agent/services/rag/optimized_embeddings.py
+      - ./rag-daytona.v2/rag_engine.py:/app/rag_engine.py
+      - ./rag-daytona.v2/rag_engine.py:/app/daytona_agent/services/rag/rag_engine.py
     command: "python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 8003"
     restart: unless-stopped
     networks:
@@ -285,6 +208,8 @@ services:
 
       # Service URLs
       RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag:8003}
+      VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu-local:4005
+      RAG_VISUAL_COPILOT_URL: http://visual-copilot-eu-local:4005
       STT_SERVICE_URL: ${STT_SERVICE_URL:-http://stt:8002}
       TTS_SERVICE_URL: ${TTS_SERVICE_URL:-http://tts:8000}
 
@@ -309,6 +234,9 @@ services:
     dns:
       - 8.8.8.8
     restart: unless-stopped
+    networks:
+      - default
+      - eu-stack
     depends_on:
       - redis
       - rag
@@ -316,7 +244,6 @@ services:
   # Qdrant (Optional - Local Vector Database)
   # Comment out if using cloud Qdrant
   # ═══════════════════════════════════════════════════════════
-
 
 volumes:
   redis-data:
@@ -329,4 +256,4 @@ networks:
     name: tara-local-network
   eu-stack:
     external: true
-    name: eu-stack
+    name: tara-eu_eu-local

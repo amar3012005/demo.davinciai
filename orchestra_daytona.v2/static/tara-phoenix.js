@@ -109,9 +109,12 @@
 
             return {
                 sessionId: recoveredSessionId, isRestoredSession, wasNavigating, pendingMissionGoal,
+                // REDUCED PERSISTENCE: Backend is now authoritative for mission state
+                // These fields are reconnect hints only, not authoritative state
                 missionId: sessionStorage.getItem('tara_mission_id') || localStorage.getItem('tara_mission_id') || null,
-                subgoalIndex: parseInt(sessionStorage.getItem('tara_subgoal_index') || localStorage.getItem('tara_subgoal_index') || '0', 10),
-                stepCount: parseInt(sessionStorage.getItem('tara_step_count') || localStorage.getItem('tara_step_count') || '0', 10)
+                // subgoalIndex and stepCount removed - backend provides authoritative values
+                subgoalIndex: 0,  // Will be overridden by backend resume_state
+                stepCount: 0      // Will be overridden by backend resume_state
             };
         },
 

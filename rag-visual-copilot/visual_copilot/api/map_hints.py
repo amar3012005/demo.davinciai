@@ -220,7 +220,33 @@ async def build_map_hints(
                     }
                     return result
 
-                # Step 2: Quick Hive probe only when DOM is available.
+                # Step 2: PageIndex Fast-Path (Vectorless Reasoning)
+                # If the domain has an index, we can skip the expensive Hive probe entirely.
+                from visual_copilot.orchestration.stages.pre_decision_stage import _page_index_available
+
+                if _page_index_available(domain_for_probe):
+                    logger.info(f"Map Hints: PageIndex AVAILABLE for {domain_for_probe}, skipping Hive probe.")
+                    # We can call run_pre_decision_gate with an empty hive_probe because PageIndex doesn't need it.
+                    _, pre_decision = await run_pre_decision_gate(
+                        goal=goal,
+                        current_url=current_url or "",
+                        nodes=nodes or [],
+                        hive_probe={}, # Empty hive probe is fine for PageIndex
+                        session_id=session_id or "map_hints",
+                    )
+                    
+                    if pre_decision and pre_decision.get("confidence", 0.0) >= 0.5:
+                        # Success!
+                        result: Dict[str, Any] = {
+                            "hints": "STRATEGY SEQUENCE: " + " -> ".join(pre_decision.get("recommended_strategy_order") or []),
+                            "pre_decision": pre_decision,
+                            "route_hint": pre_decision.get("route", "current_domain_hive"),
+                        }
+                        return result
+                    
+                    logger.warning("Map Hints: PageIndex found no match, falling back to Hive probe.")
+
+                # Step 3: Quick Hive probe ONLY if PageIndex was not available or failed.
                 quick_hive_start = time.time()
                 hive_probe = await hive_interface.quick_probe(
                     domain=domain_for_probe,

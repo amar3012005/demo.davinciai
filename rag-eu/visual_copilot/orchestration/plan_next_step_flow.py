@@ -89,6 +89,7 @@ detective_stage_logger = logging.getLogger("vc.stage.detective")
 
 from visual_copilot.orchestration.stages.session_stage import (
     build_excluded_ids,
+    apply_backend_recovery_reconciliation,
     apply_frontend_amnesia_guard,
     set_pre_mission_context,
 )
@@ -152,15 +153,31 @@ async def ultimate_plan_next_step_impl(
         excluded_ids = build_excluded_ids(action_history)
         logger.info(f"📋 action_history: {len(action_history or [])} entries, {len(excluded_ids)} excluded click IDs")
 
-        existing_mission, effective_step, early_response = await apply_frontend_amnesia_guard(
-            mission_brain=mission_brain,
-            session_id=session_id,
-            mission_id=mission_id,
-            step_number=step_number,
-            current_url=current_url,
-            is_last_mile_enabled_for_domain=_is_last_mile_enabled_for_domain,
-            logger=session_stage_logger,
-        )
+        recovery_state = None
+        redis_client = getattr(app.state, "redis", None)
+        if redis_client:
+            recovery_state, effective_step, _effective_subgoal_index, early_response = await apply_backend_recovery_reconciliation(
+                session_id=session_id,
+                mission_id=mission_id,
+                current_url=current_url,
+                page_title="",
+                frontend_step_count=step_number,
+                frontend_subgoal_index=0,
+                frontend_action_history=action_history or [],
+                redis_client=redis_client,
+                logger=session_stage_logger,
+            )
+            existing_mission = await mission_brain._load_session_mission(session_id)
+        else:
+            existing_mission, effective_step, early_response = await apply_frontend_amnesia_guard(
+                mission_brain=mission_brain,
+                session_id=session_id,
+                mission_id=mission_id,
+                step_number=step_number,
+                current_url=current_url,
+                is_last_mile_enabled_for_domain=_is_last_mile_enabled_for_domain,
+                logger=session_stage_logger,
+            )
         if early_response:
             return early_response
 

@@ -880,10 +880,18 @@ class HiveInterface:
             return None
         
         try:
+            vector = None
             if hasattr(self.embeddings, 'embed_query'):
-                return self.embeddings.embed_query(text)
+                vector = self.embeddings.embed_query(text)
             elif hasattr(self.embeddings, 'encode'):
-                return self.embeddings.encode(text).tolist()
+                vector = self.embeddings.encode(text).tolist()
+            
+            # Flatten 2D vectors (shape [1, dim]) to 1D (shape [dim])
+            # This prevents Qdrant from misinterpreting them as multi-vectors
+            if isinstance(vector, list) and len(vector) > 0 and isinstance(vector[0], list):
+                vector = vector[0]
+            
+            return vector
         except Exception as e:
             logger.warning(f"Embedding failed: {e}")
         return None

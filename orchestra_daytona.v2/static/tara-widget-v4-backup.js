@@ -20,7 +20,7 @@
     // ============================================
     // PARAMETERS & DEFAULTS
     // ============================================
-    
+
     // Check for environment configuration (injected via HTML or data attribute)
     const getEnvConfig = () => {
         // Try to get from window.TARA_ENV (set by backend or HTML)
@@ -30,7 +30,7 @@
                 wsUrl: window.TARA_ENV.WS_URL
             };
         }
-        
+
         // Try to get from data attribute on script tag
         const script = document.querySelector('script[src*="tara-widget.js"]');
         if (script) {
@@ -40,7 +40,7 @@
                 return { wsUrl };
             }
         }
-        
+
         // Check for localhost development (automatic detection)
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             const port = window.location.port || '8004';
@@ -48,14 +48,14 @@
             console.log('🔧 [Widget] Auto-detected localhost, using:', localUrl);
             return { wsUrl: localUrl };
         }
-        
+
         // Default to production URL
         console.log('🔧 [Widget] Using default production URL');
         return null;
     };
-    
+
     const ENV_CONFIG = getEnvConfig() || {};
-    
+
     const DEFAULTS = {
         wsUrl: ENV_CONFIG.wsUrl || 'wss://demo.davinciai.eu:8443/ws', // Default Production URL
         orbSize: 48, // Clean orb size for glass container
@@ -448,7 +448,7 @@
             this.container.id = 'tara-container';
             this.container.style.cssText = `
         position: fixed;
-        top: 124px;
+        bottom: 24px;
         right: 24px;
         pointer-events: auto;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

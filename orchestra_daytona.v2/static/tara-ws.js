@@ -193,6 +193,9 @@
          * Send Phoenix resume messages (request_history + execution_complete).
          * Called by startVisualCopilot AFTER session_config is sent, so the
          * backend has is_mission_active=true before execution_complete arrives.
+         * 
+         * DEPRECATED: Use sendBackendResume() for backend-driven recovery.
+         * This method is kept for backward compatibility with legacy clients.
          */
         sendPhoenixResume(widget) {
             if (!widget._phoenixResumeNeeded) return;
@@ -244,6 +247,154 @@
 
             widget.wasNavigating = false;
             widget.isRestoredSession = false;
+        },
+
+        /**
+         * Send Backend Resume request (backend-driven recovery).
+         * Called by startVisualCopilot to request authoritative mission state from backend.
+         * 
+         * This is the NEW recovery protocol that makes the backend the canonical owner
+         * of mission state, page position, and action history.
+         */
+        sendBackendResume(widget) {
+            const sessionId = sessionStorage.getItem('tara_session_id') ||
+                localStorage.getItem('tara_session_id');
+
+            if (!sessionId) {
+                console.log('📡 Backend Resume: No session ID found, skipping');
+                return;
+            }
+
+            // Load frontend storage hints (for reference only, backend is authoritative)
+            let frontendContext = {
+                step_count: parseInt(sessionStorage.getItem('tara_step_count') || localStorage.getItem('tara_step_count') || '0', 10),
+                subgoal_index: parseInt(sessionStorage.getItem('tara_subgoal_index') || localStorage.getItem('tara_subgoal_index') || '0', 10),
+                action_history: []
+            };
+
+            try {
+                frontendContext.action_history = JSON.parse(
+                    sessionStorage.getItem('tara_action_history') ||
+                    localStorage.getItem('tara_action_history') ||
+                    '[]'
+                );
+                if (!Array.isArray(frontendContext.action_history)) {
+                    frontendContext.action_history = [];
+                }
+            } catch (e) {
+                frontendContext.action_history = [];
+            }
+
+            // Send resume_session request to backend
+            if (widget.ws && widget.ws.readyState === WebSocket.OPEN) {
+                console.log('📡 Backend Resume: Requesting mission state from backend...', sessionId);
+                
+                widget.ws.send(JSON.stringify({
+                    type: 'resume_session',
+                    session_id: sessionId,
+                    current_url: window.location.href,
+                    page_title: document.title,
+                    goal_hint: widget.pendingMissionGoal || widget._currentMissionGoal || '',
+                    client_context: frontendContext
+                }));
+            }
+        },
+
+        /**
+         * Handle resume_state response from backend.
+         * Updates widget state with authoritative backend mission state.
+         */
+        handleResumeState(widget, msg) {
+            console.log('📥 Backend Resume State:', msg);
+
+            if (!msg.found) {
+                console.log('📡 Backend Resume: No active mission found');
+                // Clear frontend storage
+                sessionStorage.removeItem('tara_mission_id');
+                sessionStorage.removeItem('tara_step_count');
+                sessionStorage.removeItem('tara_subgoal_index');
+                localStorage.removeItem('tara_mission_id');
+                localStorage.removeItem('tara_step_count');
+                localStorage.removeItem('tara_subgoal_index');
+                return;
+            }
+
+            // Update widget state with backend authority
+            if (msg.mission_id) {
+                sessionStorage.setItem('tara_mission_id', msg.mission_id);
+                localStorage.setItem('tara_mission_id', msg.mission_id);
+            }
+
+            if (msg.goal) {
+                widget._currentMissionGoal = msg.goal;
+                widget.pendingMissionGoal = msg.goal;
+                sessionStorage.setItem('tara_goal', msg.goal);
+                localStorage.setItem('tara_goal', msg.goal);
+            }
+
+            // Update step count and subgoal index from backend
+            if (typeof msg.step_count === 'number') {
+                sessionStorage.setItem('tara_step_count', msg.step_count.toString());
+                localStorage.setItem('tara_step_count', msg.step_count.toString());
+            }
+
+            if (typeof msg.subgoal_index === 'number') {
+                sessionStorage.setItem('tara_subgoal_index', msg.subgoal_index.toString());
+                localStorage.setItem('tara_subgoal_index', msg.subgoal_index.toString());
+            }
+
+            // Log recent actions for debugging
+            if (msg.recent_actions && msg.recent_actions.length > 0) {
+                console.log('📋 Recent actions from backend:', msg.recent_actions);
+                sessionStorage.setItem('tara_action_history', JSON.stringify(msg.recent_actions));
+                localStorage.setItem('tara_action_history', JSON.stringify(msg.recent_actions));
+            }
+
+            // Handle pending pipeline (multi-action resumption)
+            if (msg.has_pending_pipeline) {
+                console.log('📋 Backend has pending pipeline for resumption');
+                // Pipeline will be sent separately via backend action dispatch
+            }
+
+            if (
+                msg.resume_instruction === 'request_dom_refresh' &&
+                widget.ws &&
+                widget.ws.readyState === WebSocket.OPEN
+            ) {
+                const Scanner = window.TARA.Scanner;
+                const freshDOM = Scanner.scanPageBlueprint(true) || [];
+                widget.ws.send(JSON.stringify({
+                    type: 'dom_update',
+                    elements: freshDOM,
+                    url: window.location.href,
+                    title: document.title,
+                    active_states: Scanner.detectActiveStates(),
+                    data_tables: Scanner.extractVisibleTables(),
+                    source: 'backend_resume_refresh'
+                }));
+                widget.ws.send(JSON.stringify({
+                    type: 'execution_complete',
+                    status: 'resume_sync',
+                    mission_id: msg.mission_id || null,
+                    subgoal_index: typeof msg.subgoal_index === 'number' ? msg.subgoal_index : 0,
+                    step_count: typeof msg.step_count === 'number' ? msg.step_count : 0,
+                    action_history: [],
+                    outcome: {
+                        current_url: window.location.href,
+                        url_changed: false,
+                        dom_changed: false
+                    },
+                    dom_context: freshDOM,
+                    active_states: Scanner.detectActiveStates(),
+                    data_tables: Scanner.extractVisibleTables(),
+                    title: document.title
+                }));
+            }
+
+            console.log(
+                `✅ Backend Resume Complete | mission=${msg.mission_id} | ` +
+                `phase=${msg.phase} | step=${msg.step_count} | subgoal=${msg.subgoal_index}`
+            );
         },
 
         /**
@@ -332,6 +483,10 @@
                     widget._currentMissionGoal = msg.mission_goal;
                     console.log('🎯 Phoenix: Mission goal restored:', msg.mission_goal);
                 }
+            }
+            else if (msg.type === 'resume_state') {
+                // Backend-driven recovery: handle resume state response
+                WS.handleResumeState(widget, msg);
             }
             else if (msg.type === 'mission_started') {
                 widget._currentMissionGoal = msg.goal;
@@ -438,6 +593,12 @@
                 // or the legacy msg.payload wrapper.
                 const rawAction = msg.action || msg.payload || msg;
                 const actionList = Array.isArray(rawAction) ? rawAction : [rawAction];
+
+                // Track pipeline_id for action acknowledgements (Backend Recovery)
+                if (msg.pipeline_id) {
+                    window.TARA._lastPipelineId = msg.pipeline_id;
+                    console.log(`📋 Pipeline ID: ${msg.pipeline_id}`);
+                }
 
                 // Track mission progress from backend (once, before the sequence)
                 if (msg.mission_id) {
@@ -571,6 +732,26 @@
                         }
                     })(),
                     pipeline_length: actionList.length,
+                    // Backend Recovery: Include action acknowledgements
+                    action_acknowledgements: (() => {
+                        // Track which backend actions were executed
+                        // This allows the backend to update the action ledger status
+                        const acks = [];
+                        if (window.TARA._lastPipelineId) {
+                            // Acknowledge all actions in the pipeline
+                            for (let i = 0; i < actionList.length; i++) {
+                                acks.push({
+                                    pipeline_id: window.TARA._lastPipelineId,
+                                    action_index: i,
+                                    action_type: actionList[i].type,
+                                    target_id: actionList[i].target_id,
+                                    executed: true,
+                                    url_after: window.location.href
+                                });
+                            }
+                        }
+                        return acks;
+                    })(),
                     outcome: {
                         action_attempted_count: actionableSteps,
                         action_executed_count: executedActionable,
