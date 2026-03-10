@@ -15,6 +15,7 @@ Vision pipeline:
     -> vision result fed back into the LLM conversation as a tool result
 """
 
+import asyncio
 import logging
 import os
 import re
@@ -22,9 +23,25 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from visual_copilot.constants import _CLICK_TAGS, _CLICK_ROLES
 from visual_copilot.text.tokenization import _tokenize
+from visual_copilot.mission.escalation_checkpoint import EscalationPayload
 
 logger = logging.getLogger(__name__)
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+
+# ═══════════════════════════════════════════════════════════════════════
+# Vision API Rate Limiting
+# ═══════════════════════════════════════════════════════════════════════
+
+_vision_rate_limiter: Optional[asyncio.Semaphore] = None
+
+
+def _get_vision_rate_limiter() -> asyncio.Semaphore:
+    """Get or create the vision API rate limiter semaphore (max 2 concurrent calls)."""
+    global _vision_rate_limiter
+    if _vision_rate_limiter is None:
+        _vision_rate_limiter = asyncio.Semaphore(2)
+    return _vision_rate_limiter
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Click Tracking for Semantic Guardrails
@@ -75,15 +92,281 @@ def _is_valid_id(target_id: str, nodes: List[Any]) -> bool:
     return False
 
 
+def _resolve_intent_to_target_id(
+    intent: Dict[str, Any],
+    nodes: List[Any],
+    excluded_ids: set[str],
+) -> Tuple[Optional[str], str]:
+    """
+    Map LLM intent description to actual DOM element ID.
+    
+    This is the core of the Intent-Based Architecture (Phase 2).
+    The LLM describes what it sees (text, zone, element type), and this
+    function finds the matching DOM element by scoring candidate nodes.
+    
+    Args:
+        intent: Dictionary with keys:
+            - text_label: The exact visible text on the element
+            - zone: Where it appears (nav, sidebar, main, header, footer)
+            - element_type: What type (button, link, input, dropdown, span)
+            - context: What it's near or what it does (optional)
+        nodes: Current LiveGraph nodes to search through
+        excluded_ids: Already-clicked IDs to avoid (to prevent loops)
+    
+    Returns:
+        Tuple of (target_id, resolve_reason) on success, or (None, error_reason) on failure.
+        The resolve_reason includes scoring info for debugging.
+    
+    Scoring Strategy:
+        - Text match: +0.5 (most important - LLM saw this text)
+        - Zone match: +0.3 (location context)
+        - Element type match: +0.2 (semantic type)
+        - Requires score >= 0.5 to succeed (at least text match)
+    """
+    text_label = intent.get("text_label", "")
+    zone = intent.get("zone", "")
+    element_type = intent.get("element_type", "")
+    context = intent.get("context", "")
+    
+    # Scoring function for intent matching
+    best_id: Optional[str] = None
+    best_score = 0.0
+    best_match_details = ""
+    
+    for n in nodes:
+        # Check if interactive
+        is_interactive = bool(getattr(n, "interactive", False))
+        
+        nid = str(getattr(n, "id", ""))
+        if not nid or nid in excluded_ids:
+            continue
+        
+        # Check zone match
+        node_zone = getattr(n, "zone", "").lower()
+        zone_match = zone.lower() in node_zone if zone else True
+        
+        # Check text match (most important)
+        node_text = (getattr(n, "text", "") or "").lower()
+        text_match = text_label.lower() in node_text if text_label else False
+        
+        # Check element type
+        node_tag = getattr(n, "tag", "").lower()
+        node_role = getattr(n, "role", "").lower()
+        type_match = (
+            element_type.lower() in node_tag or 
+            element_type.lower() in node_role
+        ) if element_type else True
+        
+        # Check context (optional bonus)
+        context_match = False
+        if context:
+            context_lower = context.lower()
+            # Check in text, aria labels, or nearby content
+            node_aria = (getattr(n, "aria_label", "") or "").lower()
+            if context_lower in node_text or context_lower in node_aria:
+                context_match = True
+        
+        # Score calculation
+        score = 0.15 if is_interactive else 0.0
+        match_details = []
+        if is_interactive:
+            match_details.append("is_interactive=+0.15")
+        
+        if text_match:
+            score += 0.5  # Text match is most important
+            match_details.append(f"text_match={text_label}")
+        
+        if zone_match:
+            score += 0.3
+            match_details.append(f"zone_match={zone}")
+        
+        if type_match:
+            score += 0.2
+            match_details.append(f"type_match={element_type}")
+        
+        if context_match:
+            score += 0.1  # Bonus for context match
+            match_details.append(f"context_match={context}")
+        
+        # Exact text match gets a bonus
+        if text_label and node_text.strip() == text_label.lower().strip():
+            score += 0.2
+            match_details.append("exact_text_match")
+        
+        if score > best_score:
+            best_score = score
+            best_id = nid
+            best_match_details = ", ".join(match_details)
+    
+    if best_id and best_score >= 0.5:  # Require at least text match
+        return best_id, f"intent_match_score_{best_score:.2f}({best_match_details})"
+
+    return None, f"no_match_for_intent_text={text_label}_zone={zone}_type={element_type}"
+
+
+def _extract_url_evidence(current_url: str, goal: str) -> Dict[str, Any]:
+    """
+    Extract evidence from URL parameters.
+    
+    Many dashboards encode filter state in URL (date ranges, tabs, models).
+    This helps recognize when the goal is already satisfied even if visible
+    text doesn't match exactly.
+    
+    Args:
+        current_url: The current page URL
+        goal: The user's goal statement
+    
+    Returns:
+        Dictionary with extracted evidence:
+        - date_range: {"from": str, "to": str, "days": int} if found
+        - tab: str if found
+        - model_filter: str if found
+        - has_time_range: bool
+    """
+    from urllib.parse import urlparse, parse_qs
+    import json
+    import re
+    from datetime import datetime
+    
+    evidence = {
+        "has_time_range": False,
+        "date_range": None,
+        "tab": None,
+        "model_filter": None,
+    }
+    
+    try:
+        parsed = urlparse(current_url)
+        query_params = parse_qs(parsed.query)
+        
+        # Check for dateRange parameter (common pattern)
+        if "dateRange" in query_params:
+            date_range_str = query_params["dateRange"][0]
+            # Try to parse JSON-encoded date range
+            try:
+                date_range = json.loads(date_range_str)
+                if "from" in date_range and "to" in date_range:
+                    # Calculate days between
+                    from_date = datetime.fromisoformat(date_range["from"].replace("Z", "+00:00"))
+                    to_date = datetime.fromisoformat(date_range["to"].replace("Z", "+00:00"))
+                    days = (to_date - from_date).days + 1
+                    
+                    evidence["date_range"] = {
+                        "from": date_range["from"],
+                        "to": date_range["to"],
+                        "days": days,
+                    }
+                    evidence["has_time_range"] = True
+                    
+                    # Check if it matches "last 7 days" goal
+                    if "7 days" in goal.lower() or "last week" in goal.lower():
+                        if 6 <= days <= 8:  # Allow 1 day tolerance
+                            evidence["matches_goal"] = True
+                            evidence["goal_match_reason"] = f"URL shows {days}-day range (goal: 7 days)"
+            except (json.JSONDecodeError, ValueError):
+                pass
+        
+        # Check for tab parameter
+        if "tab" in query_params:
+            evidence["tab"] = query_params["tab"][0]
+        
+        # Check for model filter
+        if "model" in query_params:
+            evidence["model_filter"] = query_params["model"][0]
+        
+    except Exception as e:
+        pass  # Silently ignore URL parsing errors
+    
+    return evidence
+
+
+def _should_force_click(text_label: str, context: str, node: Any) -> bool:
+    """
+    Determine if force_click should be enabled for reliable click execution.
+    
+    force_click uses simulated mouse events (mousedown → mouseup → click)
+    which work better for:
+    - Radix UI components (date pickers, dropdowns)
+    - Overlay menus
+    - Tab triggers
+    - Custom button components
+    
+    Args:
+        text_label: The text label from intent
+        context: The context description from intent
+        node: The DOM node being clicked
+    
+    Returns:
+        True if force_click should be used, False otherwise
+    """
+    # Check for Radix UI patterns (most common cause of click failures)
+    node_id = str(getattr(node, "id", ""))
+    if "radix" in node_id.lower():
+        return True
+    
+    # Check for date/time picker patterns
+    date_keywords = ["date", "time", "calendar", "picker", "select", "range", "month", "year"]
+    if any(kw in text_label.lower() for kw in date_keywords):
+        return True
+    if any(kw in context.lower() for kw in date_keywords):
+        return True
+    
+    # Check for dropdown/menu patterns
+    dropdown_keywords = ["dropdown", "menu", "option", "select", "trigger", "combobox"]
+    if any(kw in context.lower() for kw in dropdown_keywords):
+        return True
+    
+    # Check for tab and common navigation patterns
+    if any(kw in context.lower() for kw in ["tab", "trigger", "activity", "cost"]):
+        return True
+    if "trigger" in node_id.lower() or "tab" in node_id.lower():
+        return True
+    
+    # Check element role
+    node_role = getattr(node, "role", "").lower()
+    if node_role in ["tab", "menuitem", "option", "combobox"]:
+        return True
+    
+    return False
+
+
+def _list_available_elements(nodes: List[Any], limit: int = 10) -> str:
+    """
+    List clickable elements for debugging intent resolution failures.
+    
+    This helps the LLM understand what elements are actually available
+    when its intent description doesn't match anything.
+    
+    Args:
+        nodes: Current LiveGraph nodes
+        limit: Maximum number of elements to list (default 10)
+    
+    Returns:
+        Formatted string listing interactive elements with their text, zone, and tag.
+    """
+    clickable = []
+    for n in nodes:
+        if getattr(n, "interactive", False):
+            text = (getattr(n, "text", "") or "")[:40]
+            zone = getattr(n, "zone", "")
+            tag = getattr(n, "tag", "")
+            nid = getattr(n, "id", "")
+            clickable.append(f"- id={nid}: '{text}' (zone={zone}, tag={tag})")
+    return "\n".join(clickable[:limit])
+
+
 def _is_clickable_interactive_node(node: Any) -> bool:
     """Strict clickability gate: exists, interactive, not hidden, and clickable semantics."""
     if not node:
         return False
     if not bool(getattr(node, "interactive", False)):
-        return False
-    visible = getattr(node, "visible", True)
-    if isinstance(visible, bool) and not visible:
-        return False
+        # RELAXATION: Allow common text/content tags if they have text and are not obviously disabled
+        tag = (getattr(node, "tag", "") or "").lower()
+        if tag not in {"span", "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "em", "b", "i"}:
+            return False
+        if not (getattr(node, "text", "") or "").strip():
+            return False
+        # If it's one of these, we'll allow it if it has text and isn't hidden
     state = (getattr(node, "state", "") or "").lower()
     if any(flag in state for flag in ("disabled", "aria-disabled", "readonly", "hidden")):
         return False
@@ -115,6 +398,12 @@ def _requires_interaction_before_completion(goal: str, schema_action: str) -> bo
     if _is_question_like(g):
         return False
 
+    # EXCEPTION: If the goal contains extraction keywords, it's information-seeking, not purely action-oriented.
+    # e.g. "show me my usage" vs "show me the dashboard"
+    extraction_keywords = ("usage", "cost", "tokens", "spend", "balance", "limit", "status", "value", "price", "metric", "analytics", "stats", "history", "report", "logs", "details", "quota")
+    if any(k in g for k in extraction_keywords):
+        return False
+
     # Explicit action verbs from user intent
     action_phrases = (
         "show me",
@@ -128,6 +417,8 @@ def _requires_interaction_before_completion(goal: str, schema_action: str) -> bo
         "navigate ",
         "take me ",
         "find me ",
+        "create ",
+        "make ",
     )
     if any(p in g for p in action_phrases):
         return True
@@ -142,7 +433,7 @@ def _requires_interaction_before_completion(goal: str, schema_action: str) -> bo
 _GOAL_STOPWORDS = {
     "show", "me", "find", "open", "click", "select", "choose", "go", "to", "navigate",
     "take", "watch", "play", "view", "please", "the", "a", "an", "in", "with", "on",
-    "for", "from", "of", "is", "are", "at",
+    "for", "from", "of", "is", "are", "at", "create", "make", "generate", "new",
 }
 
 
@@ -151,7 +442,7 @@ def _goal_entity_and_qualifier_terms(goal: str) -> Tuple[List[str], List[str]]:
     if not g:
         return [], []
     g = re.sub(
-        r"^(show me|find me|find|show|open|click|select|choose|go to|navigate to|take me to)\s+",
+        r"^(show me|find me|find|show|open|click|select|choose|go to|navigate to|take me to|create me|create|make me|make|generate me|generate|new)\s+",
         "",
         g,
     )
@@ -359,7 +650,7 @@ def _filter_vision_hints(hints: Dict[str, Any], nodes: List[Any], excluded_ids: 
 
 
 def _render_vision_reasoning_brief(hints: Dict[str, Any], nodes: List[Any]) -> str:
-    """Render vision analysis into execution-oriented plain text for the compound loop."""
+    """Render vision analysis into observation-first plain text for the compound loop."""
     answer_visible = bool(hints.get("answer_visible"))
     best_target = str(hints.get("best_target_id") or "").strip()
     best_target_label = str(hints.get("best_target_label") or "").strip()
@@ -368,24 +659,30 @@ def _render_vision_reasoning_brief(hints: Dict[str, Any], nodes: List[Any]) -> s
     recommended_tool = str(hints.get("recommended_tool") or "").strip() or "read_page_content"
     evidence_summary = str(hints.get("evidence_summary") or "").strip()
     blocking_reason = str(hints.get("blocking_reason") or "").strip()
+    page_mode = str(hints.get("page_mode") or "").strip()
+    uncertainty = str(hints.get("uncertainty_summary") or "").strip()
     candidate_targets = hints.get("candidate_targets") or []
     actions = hints.get("recommended_actions") or []
 
     lines: List[str] = []
     lines.append("Vision Strategic Brief:")
-    lines.append("- Intent: choose fastest safe path to goal using currently visible controls.")
+    lines.append("- Intent: report what is visibly present and what is still missing.")
     lines.append(f"- Answer visible now: {'yes' if answer_visible else 'no'}")
+    if page_mode:
+        lines.append(f"- Visible page mode: {page_mode}")
     if evidence_summary:
         lines.append(f"- What is visible: {evidence_summary}")
     if blocking_reason:
         lines.append(f"- What is missing: {blocking_reason}")
+    if uncertainty:
+        lines.append(f"- Uncertainty: {uncertainty}")
     if best_target:
         if best_target_label:
-            lines.append(f"- Best clickable target: {best_target_label} ({best_target})")
+            lines.append(f"- Strongest visible control: {best_target_label} ({best_target})")
         else:
-            lines.append(f"- Best clickable target: {best_target}")
+            lines.append(f"- Strongest visible control: {best_target}")
     if candidate_targets:
-        lines.append("- Ranked clickable options:")
+        lines.append("- Ranked visible controls:")
         for t in sorted(candidate_targets, key=lambda x: int(x.get("priority", 99)))[:3]:
             tid = str(t.get("target_id") or "").strip()
             lbl = str(t.get("label") or "").strip()
@@ -394,9 +691,9 @@ def _render_vision_reasoning_brief(hints: Dict[str, Any], nodes: List[Any]) -> s
             why = str(t.get("why") or "").strip()
             p = int(t.get("priority", 99))
             lines.append(f"  - P{p}: {lbl or 'unknown'} ({tid or 'n/a'}) — {why or 'viable route'}")
-    lines.append(f"- Suggested primary tool: {recommended_tool}")
+    lines.append(f"- Safest next probe: {recommended_tool}")
     if actions:
-        lines.append("- Suggested next steps:")
+        lines.append("- Advisory probes:")
         for idx, a in enumerate(actions[:3], start=1):
             tool = a.get("tool") or "read_page_content"
             target = a.get("target_id") or "n/a"
@@ -409,7 +706,7 @@ def _render_vision_reasoning_brief(hints: Dict[str, Any], nodes: List[Any]) -> s
             why = (a.get("why") or "").strip()
             if tool == "click_element":
                 target_desc = f"{target_label} ({target})" if target_label else target
-                lines.append(f"  {idx}. click -> target={target_desc} force_click={force_click} ({why or 'navigate to relevant section'})")
+                lines.append(f"  {idx}. click -> target={target_desc} force_click={force_click} ({why or 'probe this control'})")
             elif tool == "type_text":
                 target_desc = f"{target_label} ({target})" if target_label else target
                 lines.append(f"  {idx}. type -> target={target_desc} text='{text}' press_enter={bool(a.get('press_enter', False))} ({why or 'refine results'})")
@@ -438,7 +735,7 @@ async def _call_groq_vision(
     if app and hasattr(app.state, "mind_reader") and hasattr(app.state.mind_reader, "llm"):
         llm = app.state.mind_reader.llm
 
-    # Build grounded prompt — include DOM IDs so vision model can map visuals to known elements
+    # Build grounded prompt — DOM IDs are advisory anchors, not a strict execution contract.
     interactive_ids = []
     for n in nodes[:80]:
         if getattr(n, "interactive", False):
@@ -450,30 +747,29 @@ async def _call_groq_vision(
 
     vision_prompt = (
         f"Goal: {reason}\n\n"
-        "You are TARA's strategic visual analyst for Last-Mile execution.\n"
-        "Think like a senior operator: brief, precise, action-first.\n"
-        "Do NOT return JSON. Return plain text in this exact structure:\n\n"
-        "Vision Strategic Brief:\n"
-        "Answer visible now: yes|no\n"
-        "Visible evidence: <one sentence, <=22 words>\n"
-        "Missing evidence: <one sentence, <=16 words>\n"
-        "Primary tool: click_element|type_text|wait_for_ui|scroll_page|read_page_content|complete_mission\n"
-        "Best target: <label> (id=t-xxxx)   [omit id if none]\n"
-        "Candidate targets:\n"
-        "1) <label> (id=t-xxxx) - <why>\n"
-        "2) <label> (id=t-yyyy) - <why>\n"
-        "3) <label> (id=t-zzzz) - <why>\n"
-        "Next steps:\n"
-        "1) <tool> -> <target label/id or n/a> | why: <reason>\n"
-        "2) <tool> -> <target label/id or n/a> | why: <reason>\n"
-        "3) <tool> -> <target label/id or n/a> | why: <reason>\n\n"
-        "Rules:\n"
-        "- Use ONLY IDs from KNOWN DOM element IDs when suggesting targets.\n"
-        "- Prefer 2-3 candidate targets, not only one.\n"
-        "- Prefer extraction (read_page_content) before more navigation when docs content is already visible.\n"
-        "- If answer is visible now, set Primary tool=complete_mission and include concrete evidence text.\n"
-        "- Keep output concise and strategic.\n\n"
-        f"KNOWN DOM element IDs:\n{id_context}"
+        "You are TARA's visual reasoning engine. Look at the screenshot and think through what you see.\n\n"
+        "Provide your analysis in a natural, reasoning-based format. Think step by step:\n\n"
+        "1. OBSERVE: What is currently visible on the screen? Describe the page layout, key elements, and content.\n"
+        "2. ASSESS: Given the goal above, is the answer or information we need already visible? Why or why not?\n"
+        "3. REASON: If the answer is not visible, what would be the most logical next step? Consider:\n"
+        "   - Are there navigation elements, tabs, or menus that might lead to the answer?\n"
+        "   - Is there a search field or filter that could help narrow down results?\n"
+        "   - Are there expandable sections or clickable elements that might reveal more information?\n"
+        "   - Is the page still loading or in a state where waiting would be appropriate?\n"
+        "4. RECOMMEND: Based on your reasoning, what specific action should be taken next?\n\n"
+        "Format your response naturally as a brief narrative (3-5 sentences), but include these precise key phrases:\n"
+        "- \"Answer visible now: yes\" or \"Answer visible now: no\"\n"
+        "- \"Visible page mode: [type]\" (e.g. dashboard, menu, documentation)\n"
+        "- \"Strongest visible control: [Label] ([ID])\" (e.g. Usage (t-123))\n"
+        "- \"Safest next probe: [tool]\" (e.g. click_element, read_page_content)\n"
+        "- \"Action Plan: [Step 1], [Step 2]\" (e.g. Action Plan: click t-123 (dropdown), click t-456 (item))\n"
+        "- \"Confidence: [high|medium|low]\"\n\n"
+        "**BUNDLE RULE**: For popups, dropdowns, or search fields, you are ENCOURAGED to propose a multi-step Action Plan (e.g., click dropdown THEN click item) so they can be executed together.\n\n"
+        "Be honest about uncertainty. If the screen is ambiguous or unclear, say so and explain why.\n"
+        "Do not force a recommendation if the situation is unclear.\n\n"
+        "Available DOM element IDs for reference (use only if clearly visible in screenshot):\n"
+        f"{id_context}\n\n"
+        "Remember: Think first, observe carefully, reason through the options, then recommend."
     )
 
     # Primary path: provider wrapper
@@ -501,8 +797,8 @@ async def _call_groq_vision(
             {
                 "role": "system",
                 "content": (
-                    "You are TARA's visual action planner. "
-                    "Return concise strategic plain text (no JSON), grounded strictly to visible UI and provided DOM IDs."
+                    "You are TARA's visual observer. "
+                    "Return concise observation-first plain text grounded to visible UI and provided DOM IDs."
                 ),
             },
             {
@@ -517,18 +813,51 @@ async def _call_groq_vision(
         "temperature": 0.2,
     }
     try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(
-                GROQ_ENDPOINT,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            resp.raise_for_status()
-            result = resp.json()["choices"][0]["message"]["content"].strip()
+        limiter = _get_vision_rate_limiter()
+        async with limiter:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(
+                    GROQ_ENDPOINT,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+                resp.raise_for_status()
+                result = resp.json()["choices"][0]["message"]["content"].strip()
         return result
     except Exception as e:
         logger.error(f"👁️ VISION CALL FAILED (direct fallback): {e}")
         return f"System: Groq Vision call failed ({e}). Rely on the provided DOM text."
+
+
+def escalate_to_human(
+    blockage_type: str,
+    speech: str,
+    ask: str,
+    diagnostics: Dict[str, Any],
+    resume_context: Dict[str, Any],
+    suggested_resolutions: List[str],
+    **kwargs
+) -> Dict[str, Any]:
+    """Escalate to human with structured context.
+
+    This replaces vague 'clarify' with specific escalation.
+    """
+    logger.warning(
+        f"TOOL_ESCALATE blockage={blockage_type} "
+        f"ask='{ask[:50]}...' "
+        f"resolutions={len(suggested_resolutions)}"
+    )
+
+    return {
+        "type": "escalate",
+        "blockage_type": blockage_type,
+        "speech": speech,
+        "ask": ask,
+        "diagnostics": diagnostics,
+        "resume_context": resume_context,
+        "suggested_resolutions": suggested_resolutions,
+        "terminal": True,  # This is a terminal action
+    }
 
 
 async def execute_internal_tool(
@@ -601,7 +930,57 @@ async def execute_internal_tool(
         return False, f"Page Content (focus: {focus or 'general'}):\n{content_text}", None
 
     if tool_name == "click_element":
-        target_id = args.get("target_id", "")
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 4: Intent-Based Action Resolution
+        # Check if this is an intent-based action (preferred) or direct ID-based
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # NEW: Check if intent-based action
+        if "intent" in args and args.get("intent"):
+            intent = args["intent"]
+            target_id = args.get("target_id", "")
+            
+            # If no target_id provided, resolve intent to ID
+            if not target_id or not _is_valid_id(target_id, nodes):
+                logger.info(
+                    f"🎯 INTENT_BASED_ACTION: Resolving intent to target ID | "
+                    f"intent={intent}"
+                )
+                
+                resolved_id, resolve_reason = _resolve_intent_to_target_id(
+                    intent=intent,
+                    nodes=nodes,
+                    excluded_ids=set(excluded_ids) if excluded_ids else set(),
+                )
+                
+                if not resolved_id:
+                    logger.warning(
+                        f"🎯 INTENT_RESOLUTION_FAILED: {resolve_reason} | "
+                        f"intent={intent}"
+                    )
+                    return (
+                        False,
+                        f"Could not find element matching intent: {intent}. "
+                        f"Reason: {resolve_reason}. "
+                        f"Available clickable elements:\n{_list_available_elements(nodes, limit=15)}",
+                        None,
+                    )
+                
+                logger.info(
+                    f"🎯 INTENT_RESOLVED: {intent} -> {resolved_id} ({resolve_reason})"
+                )
+                target_id = resolved_id
+                args["target_id"] = target_id  # Update for downstream logic
+            else:
+                logger.info(
+                    f"🎯 INTENT_WITH_EXPLICIT_ID: Using provided target_id={target_id} "
+                    f"(intent was advisory: {intent})"
+                )
+        else:
+            # Legacy path: direct target_id
+            target_id = args.get("target_id", "")
+        
+        # Continue with existing validation using resolved/provided target_id
         if not _is_valid_id(target_id, nodes):
             logger.warning(f"🛡️ GUARDRAIL: Hallucinated ID -> {target_id}")
             return (
@@ -623,7 +1002,9 @@ async def execute_internal_tool(
         target_node = next((n for n in nodes if getattr(n, "id", "") == target_id), None)
 
         # Strict clickability gate: reject non-clickable/hidden generic elements.
-        if not _is_clickable_interactive_node(target_node):
+        # EXCEPTION: If force_click is True (vision override), bypass this gate.
+        force_click = args.get("force_click", False)
+        if not force_click and not _is_clickable_interactive_node(target_node):
             logger.warning(
                 f"🛡️ CLICKABILITY_GATE rejected non-clickable target -> {target_id} "
                 f"(tag='{getattr(target_node, 'tag', '') if target_node else ''}' "
@@ -646,7 +1027,7 @@ async def execute_internal_tool(
         target_is_search = _is_search_like_node(target_node) if target_node else False
 
         # Anti-recursion guard: block redundant sidebar/nav section reclicks.
-        if _is_same_section_reclick_blocked(nodes, target_node):
+        if not force_click and _is_same_section_reclick_blocked(nodes, target_node):
             logger.warning(
                 "🛡️ SECTION_RECLICK_GUARD blocked redundant section nav click "
                 f"(target={target_id}, text='{(getattr(target_node, 'text', '') or '')[:40]}')"
@@ -696,16 +1077,83 @@ async def execute_internal_tool(
             label = (getattr(node, "text", "") or "") if node else ""
             tracker.record_click(target_id, label)
 
+        # ═══════════════════════════════════════════════════════════════════
+        # AUTO force_click DETECTION FOR RELIABLE CLICK EXECUTION
+        # ═══════════════════════════════════════════════════════════════════
+        # For Radix UI, date pickers, dropdowns, tabs, use simulated mouse events
+        # This fixes the "ghost cursor clicks but nothing happens" issue
+        force_click = args.get("force_click", False)
+        
+        # Auto-detect when force_click is needed (even if not explicitly set)
+        if not force_click and target_node:
+            text_label = args.get("intent", {}).get("text_label", "") if "intent" in args else ""
+            context = args.get("intent", {}).get("context", "") if "intent" in args else ""
+            
+            if _should_force_click(text_label, context, target_node):
+                force_click = True
+                logger.info(
+                    f"🖱️  FORCE_CLICK AUTO-ENABLED for {target_id} | "
+                    f"reason=radix_or_dropdown_pattern detected"
+                )
+
         return False, f"Action 'click_element' on '{target_id}' queued. You may queue more actions, or call `wait_for_ui` to execute the queue.", {
             "type": "click",
             "target_id": target_id,
             "text": (getattr(target_node, "text", "") or "").strip()[:120] if target_node else "",
             "speech": args.get("why", "Clicking element."),
-            "force_click": args.get("force_click", False),
+            "force_click": force_click,
         }
 
     elif tool_name == "type_text":
-        target_id = args.get("target_id", "")
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 4: Intent-Based Action Resolution for type_text
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Check if intent-based action
+        if "intent" in args and args.get("intent"):
+            intent = args["intent"]
+            target_id = args.get("target_id", "")
+            
+            # If no target_id provided, resolve intent to ID
+            if not target_id or not _is_valid_id(target_id, nodes):
+                logger.info(
+                    f"⌨️ INTENT_BASED_TYPE: Resolving intent to target ID | "
+                    f"intent={intent}"
+                )
+                
+                resolved_id, resolve_reason = _resolve_intent_to_target_id(
+                    intent=intent,
+                    nodes=nodes,
+                    excluded_ids=set(excluded_ids) if excluded_ids else set(),
+                )
+                
+                if not resolved_id:
+                    logger.warning(
+                        f"⌨️ INTENT_TYPE_RESOLUTION_FAILED: {resolve_reason} | "
+                        f"intent={intent}"
+                    )
+                    return (
+                        False,
+                        f"Could not find input element matching intent: {intent}. "
+                        f"Reason: {resolve_reason}. "
+                        f"Available clickable elements:\n{_list_available_elements(nodes, limit=15)}",
+                        None,
+                    )
+                
+                logger.info(
+                    f"⌨️ INTENT_TYPE_RESOLVED: {intent} -> {resolved_id} ({resolve_reason})"
+                )
+                target_id = resolved_id
+                args["target_id"] = target_id
+            else:
+                logger.info(
+                    f"⌨️ INTENT_TYPE_WITH_EXPLICIT_ID: Using provided target_id={target_id} "
+                    f"(intent was advisory: {intent})"
+                )
+        else:
+            # Legacy path: direct target_id
+            target_id = args.get("target_id", "")
+        
         text = args.get("text", "")
         press_enter = args.get("press_enter", True)
         if not _is_valid_id(target_id, nodes):
@@ -729,8 +1177,8 @@ async def execute_internal_tool(
         return False, f"Action 'scroll_page' queued. Call `wait_for_ui` to execute.", {"type": "scroll", "direction": direction, "speech": "Scrolling to reveal more content."}
 
     elif tool_name == "wait_for_ui":
-        seconds = args.get("seconds", 2)
-        return True, "", {"type": "wait", "seconds": seconds, "speech": "Waiting briefly for the page to update."}
+        seconds = float(args.get("seconds", 2) or 2)
+        return True, "", {"type": "wait", "seconds": seconds, "wait_ms": int(seconds * 1000), "speech": "Waiting briefly for the page to update."}
 
     elif tool_name == "request_vision":
         # ═══════════════════════════════════════════════════════════════════
@@ -833,22 +1281,11 @@ async def execute_internal_tool(
                     brief_parts.append(f"visible_now={hints.get('evidence_summary')}")
                 if hints.get("blocking_reason"):
                     brief_parts.append(f"missing={hints.get('blocking_reason')}")
+                if hints.get("uncertainty_summary"):
+                    brief_parts.append(f"uncertainty={hints.get('uncertainty_summary')}")
                 if brief_parts:
                     hint_suffix += "\n\n**Vision Brief:** " + " | ".join(brief_parts)
                 actions = hints.get("recommended_actions") or []
-                if actions:
-                    rows = []
-                    for idx, a in enumerate(actions[:3], start=1):
-                        rows.append(
-                            f"{idx}. {a.get('tool')} "
-                            f"(target={a.get('target_id') or 'n/a'} "
-                            f"text={a.get('text') or 'n/a'} "
-                            f"press_enter={a.get('press_enter', False)} "
-                            f"seconds={a.get('seconds', 2)} "
-                            f"force_click={a.get('force_click', False)}) "
-                            f"why={a.get('why') or ''}"
-                        )
-                    hint_suffix += "\n\n**Vision Action Plan (execute first if valid):**\n" + "\n".join(rows)
                 vision_result += hint_suffix
                 brief_text = _render_vision_reasoning_brief(hints, nodes)
                 logger.info(
@@ -880,25 +1317,70 @@ async def execute_internal_tool(
         main_goal = str(args.get("_main_goal", "") or "")
         target_entity = str(args.get("_target_entity", "") or "").strip()
         schema_action = str(args.get("_schema_action", "") or "")
+        current_url = str(args.get("_current_url", "") or "")
         session_clicks = 0
         if session_id:
             session_clicks = len(get_click_tracker(session_id).click_history)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # URL EVIDENCE CHECK - Recognize success from URL parameters
+        # ═══════════════════════════════════════════════════════════════════
+        # Many dashboards encode filter state in URL (date ranges, tabs, models).
+        # If URL shows the goal is satisfied, allow completion even without
+        # explicit visible text evidence.
+        url_evidence = _extract_url_evidence(current_url, main_goal)
+        if url_evidence.get("matches_goal"):
+            logger.info(
+                f"🎯 URL_EVIDENCE_MATCH: {url_evidence.get('goal_match_reason')} | "
+                f"goal='{main_goal[:60]}' url={current_url[:80]}"
+            )
+            # URL confirms goal is met - allow completion
+            # Inject URL evidence into response if not already present
+            if not evidence_refs or len(evidence_refs) < 20:
+                evidence_refs = url_evidence.get("goal_match_reason", current_url)
+            if not response or len(response) < 20:
+                response = f"URL confirms: {url_evidence.get('goal_match_reason')}"
+
+        # Extract mission context for better error messages
+        mission_ctx = str(args.get("_mission_ctx", "") or "")
+        expected_controls = []
+        if "Expected Controls:" in mission_ctx:
+            controls_section = mission_ctx.split("Expected Controls:")[1].split("\n")[0].strip()
+            expected_controls = [c.strip() for c in controls_section.split(",") if c.strip()]
 
         # ── Intent-based completion gate: require UI interaction for action intents ──
         if (
             status == "success"
             and _requires_interaction_before_completion(main_goal, schema_action)
             and session_clicks == 0
+            and not url_evidence.get("matches_goal")
         ):
             logger.warning(
                 "🛡️ COMPLETION_GATE interaction_required_blocked: no click before completion | "
                 f"goal='{main_goal[:80]}' action='{schema_action}' response='{response[:80]}'"
             )
+            
+            # Build specific guidance about what to click
+            guidance = ""
+            if expected_controls:
+                # Find the most relevant control for the goal
+                goal_lower = main_goal.lower()
+                for control in expected_controls:
+                    if "create" in goal_lower and "create" in control.lower():
+                        guidance = f" Click the '{control}' button to start the creation flow."
+                        break
+                    elif "new" in goal_lower and "new" in control.lower():
+                        guidance = f" Click the '{control}' button to create a new item."
+                        break
+                if not guidance and expected_controls:
+                    guidance = f" Click the '{expected_controls[0]}' button to proceed."
+            
             return (
                 False,
-                "REJECTED: This goal is action-oriented and requires at least one concrete UI interaction "
-                "before completion. Do not complete from partial text-only evidence. "
-                "Next step: click/select the most relevant result or control, then verify the updated content.",
+                f"REJECTED: This goal is action-oriented and requires at least one concrete UI interaction "
+                f"before completion. You must CLICK a button first, then complete after the action succeeds."
+                f"{guidance} After clicking, wait for the page to update, then call complete_mission with the "
+                f"actual result (e.g., the new API key value shown on screen).",
                 None,
             )
 
@@ -926,8 +1408,7 @@ async def execute_internal_tool(
                 _requires_interaction_before_completion(main_goal, schema_action)
                 and (
                     _weak_presence_claim(response)
-                    or (entity_terms and not entity_click_seen and not dom_joint_evidence)
-                    or (entity_terms and qualifier_terms and not (has_entity_in_answer and has_qualifier_in_answer) and not dom_joint_evidence)
+                    or (entity_terms and not entity_click_seen and not dom_joint_evidence and not has_entity_in_answer)
                     or (not anchor_satisfied)
                 )
             ):
@@ -1022,36 +1503,36 @@ async def execute_internal_tool(
                     None,
                 )
 
-        # ── Entity Anchor Guard ──
         # Strict validation ensuring the target entity exists in the evidence
-        # SKIP this guard for question-based goals (what/is/why/how questions)
-        if status == "success" and target_entity:
-            # Don't apply entity guard to question-based goals
-            question_words = {"what", "how", "why", "when", "where", "which", "who", "explain", "describe", "define"}
+        if (
+            status == "success" 
+            and target_entity 
+            and _requires_interaction_before_completion(main_goal, schema_action)
+        ):
             target_lower = target_entity.lower().strip()
-            is_question_goal = any(target_lower.startswith(qw) for qw in question_words)
+            # Only skip for very abstract questions (e.g. "what is x" where x is a definition)
+            # But if it's "what is the usage for X", we STILL want X as an anchor.
             
-            if not is_question_goal:
-                entity_lower = target_entity.lower()
-                evidence_lower = evidence_refs.lower()
-                # Split into tokens if it's multiple words, checking for any match to allow fuzzy but strict
-                entity_tokens = [t for t in re.findall(r"[a-z0-9]+", entity_lower) if len(t) > 2]
+            entity_lower = target_entity.lower()
+            evidence_lower = (f"{response} {evidence_refs}").lower()
+            # Split into tokens if it's multiple words, checking for any match to allow fuzzy but strict
+            entity_tokens = [t for t in re.findall(r"[a-z0-9]+", entity_lower) if len(t) > 2 and t not in _GOAL_STOPWORDS]
 
-                # Require at least 50% of significant entity keywords to be present, or 1 if there's only 1
-                if entity_tokens:
-                    found_count = sum(1 for et in entity_tokens if et in evidence_lower)
-                    if found_count == 0 or (len(entity_tokens) > 1 and found_count < len(entity_tokens) / 2):
-                        logger.warning(
-                            f"🛡️ COMPLETION_GATE ENTITY_ANCHOR blocked: requested '{target_entity}' "
-                            f"not adequately found in evidence. Response: '{response[:80]}'"
-                        )
-                        return (
-                            False,
-                            f"REJECTED: Target entity '{target_entity}' not found in your evidence. "
-                            f"You are looking at the wrong data or a placeholder. "
-                            f"Use click_element or scroll_page to navigate to '{target_entity}' data before completing.",
-                            None,
-                        )
+            # Require at least 50% of significant entity keywords to be present
+            if entity_tokens:
+                found_count = sum(1 for et in entity_tokens if et in evidence_lower)
+                if found_count == 0 or (len(entity_tokens) > 1 and found_count < len(entity_tokens) / 2):
+                    logger.warning(
+                        f"🛡️ COMPLETION_GATE ENTITY_ANCHOR blocked: requested '{target_entity}' "
+                        f"not adequately found in evidence. Response: '{response[:80]}'"
+                    )
+                    return (
+                        False,
+                        f"REJECTED: Target entity '{target_entity}' not adequately found in your response or evidence. "
+                        f"Your answer must explicitly mention the specific entity requested ('{target_entity}'). "
+                        f"If you are on a different page or looking at generic data, navigate to the correct entity first.",
+                        None,
+                    )
 
         # Completion gate: warn if answer is suspiciously short/empty for success
         if status == "success" and len(response.strip()) < 15 and not evidence_refs:
@@ -1084,6 +1565,25 @@ async def execute_internal_tool(
             "evidence_refs": evidence_refs,
             "answer_confidence": answer_confidence,
         }
+
+    elif tool_name == "escalate":
+        # Handle escalate tool called by LLM
+        blockage_type = args.get("blockage_type", "unknown")
+        speech = args.get("speech", "I need help with this task.")
+        ask = args.get("ask", "How should I proceed?")
+        diagnostics = args.get("diagnostics", {})
+        resume_context = args.get("resume_context", {})
+        suggested_resolutions = args.get("suggested_resolutions", [])
+
+        result = escalate_to_human(
+            blockage_type=blockage_type,
+            speech=speech,
+            ask=ask,
+            diagnostics=diagnostics,
+            resume_context=resume_context,
+            suggested_resolutions=suggested_resolutions,
+        )
+        return True, "", result
 
     else:
         return False, f"Error: Unknown tool '{tool_name}'.", None

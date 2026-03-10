@@ -2582,19 +2582,42 @@
                 this.simulateTyping(msg.text);
             }
             else if (msg.type === 'command') {
-                const payload = msg.payload || msg;
-                const type = payload.type;
-                const target_id = payload.target_id || payload.id; // Support both naming styles
-                const text = payload.text;
+                const rawAction = msg.action || msg.payload || msg;
+                const actionList = Array.isArray(rawAction) ? rawAction : [rawAction];
 
-                console.log(`🤖 Executing: ${type} on ${target_id}`);
+                console.log(`🤖 Pipeline: executing ${actionList.length} action(s)`);
 
-                // Save pre-action state for structured outcome reporting
                 const preActionUrl = window.location.href;
                 const preActionHash = this.lastDOMHash;
                 const settleStart = Date.now();
+                let actionableSteps = 0;
+                let executedActionable = 0;
 
-                await this.executeCommand(type, target_id, text);
+                for (let i = 0; i < actionList.length; i++) {
+                    const step = actionList[i];
+                    if (!step || typeof step !== 'object') continue;
+
+                    const rawType = step.type || step.action_type || step.action || '';
+                    const type = rawType === 'command' ? 'click' : rawType;
+                    const target_id = step.target_id || step.id || '';
+                    const text = step.text || step.target_label || step.label || step.speech || '';
+                    const wait_ms = step.wait_ms || null;
+
+                    console.log(`  ↳ [${i + 1}/${actionList.length}] ${type} ${target_id || ''}`);
+
+                    if (type === 'wait') {
+                        const delay = wait_ms || ((step.seconds || 2) * 1000);
+                        await new Promise(r => setTimeout(r, delay));
+                    } else {
+                        actionableSteps++;
+                        await this.executeCommand(type, target_id, text);
+                        executedActionable++;
+                    }
+
+                    if (i < actionList.length - 1 && type !== 'wait') {
+                        await new Promise(r => setTimeout(r, 800));
+                    }
+                }
 
                 const settleTime = Date.now() - settleStart;
 
@@ -2606,7 +2629,7 @@
 
                 this.ws.send(JSON.stringify({
                     type: 'execution_complete',
-                    status: 'success',
+                    status: executedActionable > 0 || actionableSteps === 0 ? 'success' : 'no_action',
                     outcome: {
                         dom_changed: domChanged,
                         url_changed: urlChanged,
@@ -2624,7 +2647,7 @@
                     timestamp: Date.now()
                 }));
 
-                console.log(`✅ Execution complete (${settleTime}ms settle, ${newElements} new, url_changed=${urlChanged})`);
+                console.log(`✅ Pipeline complete: ${actionList.length} actions in ${settleTime}ms (url_changed=${urlChanged})`);
 
                 this.waitingForExecution = false;
                 this.setOrbState('listening');

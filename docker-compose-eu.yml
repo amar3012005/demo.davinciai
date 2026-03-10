@@ -52,9 +52,9 @@ services:
       REDIS_URL: redis://redis-eu:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
-      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME}
       ORGANIZATION_LOCATION: ${ORGANIZATION_LOCATION:-Global}
-      TENANT_ID: ${TENANT_ID:-tara}
+      TENANT_ID: ${TENANT_ID}
 
       QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
@@ -63,7 +63,7 @@ services:
       ENABLE_LOCAL_RETRIEVAL: ${ENABLE_LOCAL_RETRIEVAL:-false}
       ENABLE_INGESTION_SERVICE: ${ENABLE_INGESTION_SERVICE:-false}
       USE_ULTIMATE_TARA: ${USE_ULTIMATE_TARA:-false}
-      HIVEMIND_IN_VISUAL_COPILOT: ${HIVEMIND_IN_VISUAL_COPILOT:-false}
+      HIVEMIND_IN_VISUAL_COPILOT: ${HIVEMIND_IN_VISUAL_COPILOT:-true}
 
       USE_NEW_DETECTIVE: "false"
       USE_MISSION_BRAIN: "false"
@@ -213,6 +213,45 @@ services:
       - coolify.service.subName=tts
     env_file:
       - .env.eu
+  # ═══════════════════════════════════════════════════════════
+  # Visual Copilot Service (Internal port 4005)
+  # ═══════════════════════════════════════════════════════════
+  visual-copilot-eu:
+    build:
+      context: ./rag-visual-copilot
+      dockerfile: Dockerfile
+    command: >
+      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn app:app --host 0.0.0.0 --port 4005'
+    environment:
+      GROQ_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
+      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
+
+      REDIS_URL: redis://redis-eu:6379/0
+
+      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TENANT_ID: ${TENANT_ID:-tara}
+      PORT: "4005"
+      COOLIFY_CONTAINER_NAME: visual-copilot-eu
+    restart: unless-stopped
+    depends_on:
+      redis-eu:
+        condition: service_healthy
+    networks:
+      eu-stack: null
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=visual-copilot-eu
+      - coolify.service.subType=application
+      - coolify.service.subName=visual-copilot
+    env_file:
+      - .env.eu
 
   # ═══════════════════════════════════════════════════════════
   # Orchestrator (Internal 4004 → External 4014 with SSL for WSS)
@@ -230,18 +269,16 @@ services:
       - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
       REDIS_URL: redis://redis-eu:6379/0
-
-      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
-      ORGANIZATION_FULL_NAME: ${ORGANIZATION_FULL_NAME:-Davinci AI}
-      KNOWLEDGE_BASE_PATH: "/app/daytona_knowledge_base"
-      AGENT_NAME: ${AGENT_NAME:-Tara}
-      AGENT_ID: ${AGENT_ID:-tara}
-      TENANT_ID: ${TENANT_ID:-tara}
-      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-"pdict_19NTe4RAAHgG8UbibcAcLG"}
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME}
+      ORGANIZATION_FULL_NAME: ${ORGANIZATION_FULL_NAME}
+      AGENT_NAME: ${AGENT_NAME}
+      AGENT_ID: ${AGENT_ID}
+      TENANT_ID: ${TENANT_ID}
 
       RAG_SERVICE_URL: http://rag-eu:4001
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
+      VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu:4005
 
       PUBLIC_URL: "https://demo.davinciai.eu:8030"
       # Tenant-agnostic websocket base endpoint.
@@ -255,7 +292,7 @@ services:
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
       BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
       IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-true}
-      TENANT_ID_INTRO: ${TENANT_ID_INTRO:-tara}
+      TENANT_ID_INTRO: ${TENANT_ID_INTRO}
       DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
       FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-}
@@ -282,6 +319,8 @@ services:
       rag-eu:
         condition: service_started
       tts-eu:
+        condition: service_started
+      visual-copilot-eu:
         condition: service_started
     labels:
       - coolify.managed=true

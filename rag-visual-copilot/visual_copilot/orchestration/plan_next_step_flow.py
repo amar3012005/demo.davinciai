@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from tara_models import ActionIntent
 from visual_copilot.tara_models import TacticalSchema, StrategyHint, HiveResponse, VisualHint
@@ -117,6 +117,17 @@ from visual_copilot.orchestration.stages.last_mile_stage import handle_last_mile
 from visual_copilot.orchestration.stages.detective_stage import run_detective_stage
 from visual_copilot.orchestration.stages.router_execution_stage import run_router_lexical_stage
 from visual_copilot.orchestration.stages.router_pre_detective_stage import run_router_pre_detective_stage
+
+def _action_fingerprint(action: dict) -> str:
+    import hashlib
+    action_type = str(action.get("type", "") or "").strip().lower()
+    raw = "|".join([
+        action_type,
+        str(action.get("target_id", "") or ""),
+        str(action.get("text", "") or "")[:120],
+        str(int(bool(action.get("press_enter", False)))),
+    ])
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 async def ultimate_plan_next_step_impl(
     app,
@@ -550,22 +561,25 @@ async def ultimate_plan_next_step_impl(
                         prefinal_clicks = bundled_clicks[:-1]
                         final_click = bundled_clicks[-1]
 
+                        # 1. Standardize history of pre-final clicks (optimistic)
                         for click in prefinal_clicks:
-                            await mission_brain.record_action(
-                                mission.mission_id,
-                                "click",
-                                click["target_id"],
-                                True,
-                            )
+                            action_key = f"click:{click['target_id']}"
+                            if action_key not in mission.action_history:
+                                mission.action_history.append(action_key)
 
-                        if prefinal_clicks:
-                            mission.current_subgoal_index = min(
-                                len(prefinal_clicks),
-                                max(len(mission.subgoals or []) - 1, 0),
-                            )
-                            await mission_brain._save_mission(mission)
+                        # Move index to the final nav goal in the bundle (so verifier knows what to check)
+                        # Example: [Click Dashboard, Click Usage, LAST_MILE]
+                        # Index becomes 1 (Click Usage).
+                        mission.current_subgoal_index = min(
+                            len(bundled_clicks) - 1, 
+                            max(len(mission.subgoals or []) - 1, 0)
+                        )
+                        
+                        await mission_brain._save_mission(mission)
 
+                        # 2. Stage final click for verification logic in next turn
                         if verified_advance_active:
+                            logger.info(f"🎯 PAGEINDEX_BUNDLED_NAV: Staging final click {final_click['target_id']} (subgoal {mission.current_subgoal_index}) for verification")
                             await _record_and_maybe_advance(
                                 mission_brain=mission_brain,
                                 mission=mission,
@@ -577,8 +591,13 @@ async def ultimate_plan_next_step_impl(
                                 verified_advance_active=True,
                                 is_zero_shot=is_zero_shot,
                             )
+                            # Reload to get the pending_action
                             mission = await mission_brain._load_mission(mission.mission_id) or mission
                         else:
+                            # If no verified advance, optimistically move past the whole bundle
+                            action_key = f"click:{final_click['target_id']}"
+                            if action_key not in mission.action_history:
+                                mission.action_history.append(action_key)
                             mission.current_subgoal_index = min(
                                 len(bundled_clicks),
                                 max(len(mission.subgoals or []) - 1, 0),
@@ -672,14 +691,24 @@ async def ultimate_plan_next_step_impl(
                 if compound_result:
                     action = compound_result.get("action") or {}
                     status = compound_result.get("status", "action")
+                    diagnostics = compound_result.get("diagnostics", {})
+                    lm_state = diagnostics.get("last_mile_state", {}) if diagnostics else {}
+                    now_ms = int(time.time() * 1000)
+
+                    # Initialize runtime to maintain state across turns
+                    mission.last_mile_runtime = {
+                        "subgoal_index": mission.current_subgoal_index,
+                        "last_overlay_ids": lm_state.get("last_overlay_ids", []),
+                        "last_action_dom_signature": _build_dom_signature(nodes),
+                        "last_action_ts_ms": now_ms,
+                        "vision_bootstrap_done": True,
+                    }
                     
                     # ── Handle bundled action pipelines ──
-                    # When compound returns a list of actions, pass through as-is
                     if isinstance(action, list):
                         logger.info(
                             f"INSTANT_LAST_MILE: Bundled pipeline ({len(action)} actions) — passing through"
                         )
-                        # Derive action_type from first non-wait action for routing
                         action_type = "action"
                         terminal_answer = None
                         for step in action:
@@ -690,15 +719,15 @@ async def ultimate_plan_next_step_impl(
                                     terminal_answer = step
                                     break
                         
-                        # Terminal handling for pipelines
                         if status == "complete" or (terminal_answer and status == "complete"):
                             speech = (terminal_answer or {}).get("speech") or (terminal_answer or {}).get("text") or f"Here's what I found."
                             mission.phase = "done"
                             mission.status = "completed"
+                            mission.last_mile_runtime = None
                             await mission_brain._save_mission(mission)
                             return {
                                 "success": True, "blocked": False,
-                                "action": action,  # Full list - frontend sequences it
+                                "action": action,
                                 "speech": speech, "complete": True,
                                 "mission_id": mission.mission_id,
                                 "subgoal_index": mission.current_subgoal_index,
@@ -710,6 +739,7 @@ async def ultimate_plan_next_step_impl(
                             speech = (terminal_answer or {}).get("speech") or f"I couldn't complete '{pre_decision_last_mile_goal}'."
                             mission.phase = "failed"
                             mission.status = "failed"
+                            mission.last_mile_runtime = None
                             await mission_brain._save_mission(mission)
                             return {
                                 "success": False, "blocked": True,
@@ -722,10 +752,21 @@ async def ultimate_plan_next_step_impl(
                             }
 
                         # Normal action pipeline
+                        rep_step = next((s for s in action if isinstance(s, dict) and s.get("type") not in ("", "wait", "scroll")), {})
+                        if not rep_step and action:
+                             rep_step = next((s for s in reversed(action) if isinstance(s, dict) and s.get("type") != "wait"), {})
+                        
+                        mission.last_mile_runtime.update({
+                            "last_action_type": rep_step.get("type", "action") if rep_step else "action",
+                            "last_action_fp": _action_fingerprint(rep_step) if rep_step else "",
+                            "wait_until_ms": now_ms + 700,
+                        })
+                        await mission_brain._save_mission(mission)
+
                         return {
                             "success": True,
                             "blocked": False,
-                            "action": action,  # Full list - frontend sequences it
+                            "action": action,
                             "speech": f"Executing {len(action)}-step sequence...",
                             "mission_id": mission.mission_id,
                             "subgoal_index": mission.current_subgoal_index,
@@ -735,9 +776,7 @@ async def ultimate_plan_next_step_impl(
                     
                     action_type = action.get("type", "")
 
-                    # ── Null-safety: ensure action is always a valid envelope ──
                     if not action_type:
-                        logger.warning("INSTANT_LAST_MILE: null action type, applying fallback envelope")
                         action = {
                             "type": "clarify",
                             "speech": f"I need help finding information about {pre_decision_last_mile_goal}.",
@@ -745,17 +784,13 @@ async def ultimate_plan_next_step_impl(
                         action_type = "clarify"
                         status = "last_mile_no_evidence"
 
-                    # ── Handle stuck/guardrail states from hardened compound loop ──
                     if status in ("stuck_no_progress", "last_mile_stuck", "last_mile_no_evidence", "last_mile_guardrail_blocked"):
                         speech = action.get("speech") or f"I couldn't complete '{pre_decision_last_mile_goal}'."
-                        logger.info(f"INSTANT_LAST_MILE: {status}, returning clarify")
-                        # Persist failure so amnesia guard can invalidate this mission if re-asked
+                        mission.status = "paused"
+                        mission.last_mile_runtime = None
                         try:
                             if mission and mission_brain:
-                                mission.action_history.append({
-                                    "result": "last_mile_failed",
-                                    "status": status,
-                                })
+                                mission.action_history.append({"result": "last_mile_failed", "status": status})
                                 await mission_brain._save_mission(mission)
                         except Exception as _save_err:
                             logger.warning(f"INSTANT_LAST_MILE: could not persist failure marker: {_save_err}")
@@ -772,6 +807,7 @@ async def ultimate_plan_next_step_impl(
                         speech = action.get("speech") or action.get("text") or f"Here's what I found about {pre_decision_last_mile_goal}."
                         mission.phase = "done"
                         mission.status = "completed"
+                        mission.last_mile_runtime = None
                         await mission_brain._save_mission(mission)
                         return {
                             "success": True, "blocked": False,
@@ -784,6 +820,15 @@ async def ultimate_plan_next_step_impl(
                         target_id = action.get("target_id", "")
                         if target_id:
                             await mission_brain.record_action(mission.mission_id, "click", target_id, True)
+                            refreshed = await mission_brain._load_mission(mission.mission_id)
+                            if refreshed: mission = refreshed
+                        
+                        mission.last_mile_runtime.update({
+                            "last_action_type": action_type,
+                            "last_action_fp": _action_fingerprint(action),
+                            "wait_until_ms": now_ms + 700,
+                        })
+                        await mission_brain._save_mission(mission)
                         return {
                             "success": True, "blocked": False,
                             "action": {"type": "click", "target_id": target_id, "text": action.get("text", "")},
@@ -793,15 +838,34 @@ async def ultimate_plan_next_step_impl(
                         }
 
                     if action_type == "type_text":
+                        target_id = action.get("target_id", "")
+                        text_to_type = action.get("text", "")
+                        if target_id:
+                            await mission_brain.record_action(mission.mission_id, "type", target_id, True, text=text_to_type)
+                            refreshed = await mission_brain._load_mission(mission.mission_id)
+                            if refreshed: mission = refreshed
+                        
+                        mission.last_mile_runtime.update({
+                            "last_action_type": action_type,
+                            "last_action_fp": _action_fingerprint(action),
+                            "wait_until_ms": now_ms + (2000 if action.get("press_enter") else 700),
+                        })
+                        await mission_brain._save_mission(mission)
                         return {
                             "success": True, "blocked": False,
-                            "action": {"type": "type_text", "target_id": action.get("target_id", ""), "text": action.get("text", ""), "press_enter": bool(action.get("press_enter", False))},
+                            "action": {"type": "type_text", "target_id": target_id, "text": text_to_type, "press_enter": bool(action.get("press_enter", False))},
                             "speech": action.get("speech", "Typing..."),
                             "mission_id": mission.mission_id,
                             "pipeline": "instant_last_mile", "confidence": "high",
                         }
 
                     if action_type in ("scroll", "wait"):
+                        mission.last_mile_runtime.update({
+                            "last_action_type": action_type,
+                            "last_action_fp": _action_fingerprint(action),
+                            "wait_until_ms": now_ms + 700,
+                        })
+                        await mission_brain._save_mission(mission)
                         return {
                             "success": True, "blocked": False,
                             "action": {"type": action_type},

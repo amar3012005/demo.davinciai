@@ -76,8 +76,8 @@ _NOISE_WORDS = {
     "stats", "data", "tab", "page", "section"
 }
 _DOMAIN_ALIASES = {"usage", "billing", "activity", "analytics", "models", "token", "tokens"}
-_CLICK_TAGS = {"a", "button", "summary", "span"}
-_CLICK_ROLES = {"button", "link", "tab", "menuitem"}
+_CLICK_TAGS = {"a", "button", "summary", "span", "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "em"}
+_CLICK_ROLES = {"button", "link", "tab", "menuitem", "switch", "checkbox"}
 _TYPE_TAGS = {"input", "textarea", "select"}
 _TYPE_ROLES = {"searchbox", "combobox", "textbox"}
 _TEXT_HEAVY_TAGS = {"div", "summary", "p", "section", "article"}

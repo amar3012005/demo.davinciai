@@ -87,10 +87,10 @@ class OrchestratorSession:
     mission_id: Optional[str] = None
     is_mission_active: bool = False
     goal_step_count: int = 0
-    max_mission_steps: int = 10
+    max_mission_steps: int = 15
     last_dom_hash: Optional[str] = None
     stagnation_count: int = 0
-    max_stagnation: int = 3
+    max_stagnation: int = 6
     current_url: str = ""  # Current page URL for GPS hints
     last_action: str = ""  # Summary of last action taken
     action_history: List[str] = field(default_factory=list)  # Last N actions for loop detection
@@ -2372,7 +2372,9 @@ class OrchestratorWSHandler:
             if session_type == "visual_copilot":
                 import os
                 session.rag_url = os.environ.get('RAG_VISUAL_COPILOT_URL', 'http://rag-visualcopilot:8003')
-                logger.info(f"[{session.session_id}] 🎯 Route identified as VISUAL COPILOT session type, setting rag_url to {session.rag_url}")
+                # FORCE CARTESIA VOICE FOR VISUAL COPILOT
+                session.voice_id_override = "b9de4a89-2257-424b-94c2-db18ba68c81a" 
+                logger.info(f"[{session.session_id}] 🎯 Route identified as VISUAL COPILOT session type, setting rag_url to {session.rag_url} and voice_id to {session.voice_id_override}")
         else:
             logger.debug(f"[{session.session_id}] session_type not in message, keys: {list(msg.keys())}")
 
@@ -2383,12 +2385,15 @@ class OrchestratorWSHandler:
 
             # SAFETY NET: Also set rag_url when mode is visual-copilot,
             # even if session_type wasn't explicitly sent.
-            if mode == "visual-copilot" and not session_type:
+            if mode == "visual-copilot":
                 import os
                 vc_url = os.environ.get('RAG_VISUAL_COPILOT_URL')
                 if vc_url:
                     session.rag_url = vc_url
-                    logger.info(f"[{session.session_id}] 🎯 Visual Co-Pilot mode detected, setting rag_url to {session.rag_url}")
+                
+                # FORCE CARTESIA VOICE FOR VISUAL COPILOT
+                session.voice_id_override = "b9de4a89-2257-424b-94c2-db18ba68c81a"
+                logger.info(f"[{session.session_id}] 🎯 Visual Co-Pilot mode/type identified, setting voice_id to {session.voice_id_override}")
 
             # analyse_only: lightweight mode — just TTS + WebSocket, no intro, no mission
             if mode == "analyse_only":
@@ -4397,9 +4402,10 @@ class OrchestratorWSHandler:
                 await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, session._audio_chunk_counter)
 
             session._audio_chunk_counter += 1
-            # CRITICAL: Yield to event loop to prevent blocking other tasks (like Pings)
-            # during large audio bursts. This prevents "keepalive ping failed" errors.
-            await asyncio.sleep(0)
+            # CRITICAL: Yield to event loop with a small delay to prevent blocking 
+            # other tasks (like Pings) during large audio bursts. 
+            # Using 5ms instead of 0 ensures other tasks actually get a slice.
+            await asyncio.sleep(0.005)
 
         # Handle flush (pad remainder)
         if flush and len(session.fg_buffer) > 0:
@@ -4473,9 +4479,11 @@ class OrchestratorWSHandler:
 
             if session:
                 async with session.send_lock:
-                    await websocket.send_json(data)
+                    # Shield the send to ensure it completes even if the task is cancelled.
+                    # This prevents AssertionError in underlying websockets library.
+                    await asyncio.shield(websocket.send_json(data))
             else:
-                await websocket.send_json(data)
+                await asyncio.shield(websocket.send_json(data))
             return True
         except (RuntimeError, ConnectionError, Exception) as e:
             # Mark session as closed if we get a transport error
@@ -4503,9 +4511,10 @@ class OrchestratorWSHandler:
 
             if session:
                 async with session.send_lock:
-                    await websocket.send_bytes(data)
+                    # Shield binary sends as well for consistency.
+                    await asyncio.shield(websocket.send_bytes(data))
             else:
-                await websocket.send_bytes(data)
+                await asyncio.shield(websocket.send_bytes(data))
             return True
         except Exception as e:
             if session: session.is_closed = True
@@ -5230,16 +5239,10 @@ class OrchestratorWSHandler:
                     command_msg["action"] = raw_action_payload
                 await self._send_json(session.websocket, command_msg, session)
             
-            # CONDITIONAL SYNC: Wait for voice to finish ONLY if speaker is NOT muted
-            # When muted, go to TURBO MODE (execute immediately)
-            if tts_task and not tts_task.done() and not session.speaker_muted:
-                logger.debug(f"[{session.session_id}] 🔊 Speaker unmuted - waiting for TTS to complete before next action")
-                try:
-                    await tts_task
-                except asyncio.CancelledError:
-                    pass
-            elif session.speaker_muted:
-                logger.debug(f"[{session.session_id}] 🚀 TURBO MODE: Speaker muted - executing next action immediately")
+            # OPTIMIZATION: Do NOT wait for TTS to finish here. 
+            # We send the command to the browser immediately (parallel execution).
+            # The browser's sequencer handles any required interlocking.
+            logger.debug(f"[{session.session_id}] 🚀 Action sent to browser (parallel with narration)")
 
     async def _call_visual_planner(self, session: OrchestratorSession, dom: list, warning: str) -> dict:
         """

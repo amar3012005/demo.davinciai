@@ -105,8 +105,8 @@ class LanguageConfig:
 @dataclass
 class AgentConfig:
     """Agent identity and ground truth configuration"""
-    name: str = "Tara"
-    id: str = "tara"
+    name: str = "Agent"
+    id: str = "agent"
     tenant_id: str = "tenant"
     wss_url: str = "ws://localhost:8004/ws"
     public_url: str = "http://localhost:8004"
@@ -116,12 +116,12 @@ class AgentConfig:
 @dataclass
 class OrganizationConfig:
     """Organization configuration"""
-    name: str = "Davinci AI"
-    full_name: str = "Davinci AI"
+    name: str = "Organization"
+    full_name: str = "Organization"
     knowledge_base_path: str = ""
     # Identity (Env Var Overrides)
-    agent_id: str = "tara"
-    agent_name: str = "Tara"
+    agent_id: str = "agent"
+    agent_name: str = "Agent"
     tenant_id: str = "tenant"
     # Integrations
     fsm_appointment_url: str = ""
@@ -238,8 +238,8 @@ class ConfigLoader:
         if "organization" in data:
             org_data = data["organization"]
             config.organization = OrganizationConfig(
-                name=os.getenv("ORGANIZATION_NAME", org_data.get("name", "Davinci AI")),
-                full_name=os.getenv("ORGANIZATION_FULL_NAME", org_data.get("full_name", "Davinci AI")),
+                name=os.getenv("ORGANIZATION_NAME", org_data.get("name", "Organization")),
+                full_name=os.getenv("ORGANIZATION_FULL_NAME", org_data.get("full_name", "Organization")),
                 knowledge_base_path=os.getenv("KNOWLEDGE_BASE_PATH", org_data.get("knowledge_base_path", "")),
                 # New identity fields with env overrides
                 agent_id=os.getenv("AGENT_ID", org_data.get("agent_id", "tara")),
@@ -254,8 +254,8 @@ class ConfigLoader:
         if "agent" in data:
             agent_data = data["agent"]
             config.agent = AgentConfig(
-                name=os.getenv("AGENT_NAME", agent_data.get("name", "Tara")),
-                id=os.getenv("AGENT_ID", agent_data.get("id", "tara")),
+                name=os.getenv("AGENT_NAME", agent_data.get("name", "Agent")),
+                id=os.getenv("AGENT_ID", agent_data.get("id", "agent")),
                 tenant_id=os.getenv("TENANT_ID", agent_data.get("tenant_id", "tenant")),
                 wss_url=os.getenv("WIDGET_WS_URL", agent_data.get("wss_url", os.getenv("ORCHESTRATOR_WS_URL", ""))),
                 public_url=os.getenv("PUBLIC_URL", agent_data.get("public_url", "")),

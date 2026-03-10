@@ -192,6 +192,7 @@ def build_vision_context_packet(
 def parse_vision_response(raw_response: str) -> Dict[str, Any]:
     """
     Parse the raw vision model response into structured hints.
+    Handles both reasoning-based narrative and structured formats.
     Returns a dict with answer_visible, best_target_id, recommended_tool.
     """
     response_lower = raw_response.lower()
@@ -207,11 +208,32 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
     except Exception:
         json_payload = {}
 
-    # Detect if answer is visible
-    answer_visible = bool(json_payload.get("answer_visible")) if isinstance(json_payload, dict) and "answer_visible" in json_payload else any(kw in response_lower for kw in [
-        "answer is visible", "can see the answer", "information is shown",
-        "data is displayed", "content shows", "i can see", "answer visible now: yes",
-    ])
+    # Detect if answer is visible - look for reasoning indicators
+    answer_visible = False
+    if isinstance(json_payload, dict) and "answer_visible" in json_payload:
+        answer_visible = bool(json_payload.get("answer_visible"))
+    else:
+        # Parse from reasoning-based narrative
+        # Look for positive indicators
+        positive_indicators = [
+            "answer is visible", "can see the answer", "information is shown",
+            "data is displayed", "content shows", "i can see", "answer visible now: yes",
+            "the answer appears to be visible", "information is already visible",
+            "the data is present", "i can see the", "visible on the screen",
+        ]
+        # Look for negative indicators
+        negative_indicators = [
+            "answer is not visible", "cannot see the answer", "information is not shown",
+            "data is not displayed", "answer visible now: no", "not visible",
+            "the answer is not present", "i cannot see", "not shown on the screen",
+            "missing evidence", "still need to", "need to find", "need to navigate",
+        ]
+
+        positive_count = sum(1 for ind in positive_indicators if ind in response_lower)
+        negative_count = sum(1 for ind in negative_indicators if ind in response_lower)
+
+        # Default to not visible if uncertain
+        answer_visible = positive_count > negative_count
 
     # Try to extract a suggested target ID (IDs are alphanumeric, e.g. t-s0t1lp, t-123, t-abc4)
     import re
@@ -219,44 +241,79 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
     if isinstance(json_payload, dict):
         best_target_id = str(json_payload.get("best_target_id") or "").strip()
     if not best_target_id:
-        id_match = re.search(r"\b(t-[a-z0-9]+)\b", raw_response, re.IGNORECASE)
+        # Look for DOM IDs in the text: (t-123), id: t-123, or just t-123
+        id_match = re.search(r"\(?(t-[a-z0-9]+)\)?", raw_response, re.IGNORECASE)
         best_target_id = id_match.group(1) if id_match else ""
 
-    # Recommend a probe based on what vision found. Prefer safe observation over forced action.
+    # Extract page mode/type from reasoning
+    page_mode = ""
+    if isinstance(json_payload, dict):
+        page_mode = str(json_payload.get("page_mode") or "").strip()[:80]
+    if not page_mode:
+        # Try to infer from reasoning text
+        mode_patterns = [
+            r"page[\s/]*(type|mode)[\s:]*(\w+)",
+            r"(dashboard|menu|tab|page|screen)[\s:]*(\w+)",
+            r"appears to be (?:a|an) (\w+)",
+            r"this is (?:a|an) (\w+)",
+        ]
+        for pattern in mode_patterns:
+            m = re.search(pattern, response_lower)
+            if m:
+                page_mode = m.group(2) if m.lastindex > 1 else m.group(1)
+                break
+
+    # Recommend a probe based on what vision found
     recommended_tool = ""
     if isinstance(json_payload, dict):
         recommended_tool = str(json_payload.get("recommended_tool") or "").strip()
+
     if not recommended_tool:
-        tool_match = re.search(
-            r"(?:primary tool|recommended tool|safest probe)\s*:\s*(click_element|type_text|wait_for_ui|scroll_page|read_page_content|complete_mission)",
-            response_lower,
-        )
-        if tool_match:
-            recommended_tool = tool_match.group(1)
+        # Parse from reasoning text
+        tool_patterns = [
+            (r"(?:should|could|recommend|suggest).*?(?:click|clicking).*?(?:on|the)", "click_element"),
+            (r"(?:should|could|recommend|suggest).*?(?:type|typing|enter|input)", "type_text"),
+            (r"(?:should|could|recommend|suggest).*?(?:wait|waiting|pause|delay)", "wait_for_ui"),
+            (r"(?:should|could|recommend|suggest).*?(?:scroll|scrolling)", "scroll_page"),
+            (r"(?:should|could|recommend|suggest).*?(?:read|re-read|examine|check).*?(?:content|text|page)", "read_page_content"),
+            (r"(?:should|could|recommend|suggest).*?(?:complete|finish|done|answer)", "complete_mission"),
+        ]
+
+        for pattern, tool in tool_patterns:
+            if re.search(pattern, response_lower):
+                recommended_tool = tool
+                break
+
+    # SECOND PASS: If we found a target ID but the tool isn't 'click_element', double check if the text implies a click
+    if best_target_id and recommended_tool != "click_element":
+        if any(kw in response_lower for kw in ["click", "press", "select", "interact", "choose"]):
+            recommended_tool = "click_element"
+
+    # Fallback logic if still no recommendation
     if not recommended_tool:
         if answer_visible:
             recommended_tool = "complete_mission"
         elif best_target_id:
             recommended_tool = "click_element"
-        elif any(kw in response_lower for kw in ["loading", "spinner", "fetching"]):
+        elif any(kw in response_lower for kw in ["loading", "spinner", "fetching", "wait"]):
             recommended_tool = "wait_for_ui"
-        elif any(kw in response_lower for kw in ["scroll", "below", "more content"]):
+        elif any(kw in response_lower for kw in ["scroll", "below", "more content", "down"]):
             recommended_tool = "scroll_page"
         else:
             recommended_tool = "read_page_content"
 
+    # Extract evidence and reasoning summaries
     evidence_summary = ""
     blocking_reason = ""
     best_target_label = ""
-    page_mode = ""
     uncertainty_summary = ""
     candidate_targets = []
     actions = []
+
     if isinstance(json_payload, dict):
         evidence_summary = str(json_payload.get("evidence_summary") or "").strip()[:260]
         blocking_reason = str(json_payload.get("blocking_reason") or "").strip()[:260]
         best_target_label = str(json_payload.get("best_target_label") or "").strip()[:120]
-        page_mode = str(json_payload.get("page_mode") or "").strip()[:80]
         uncertainty_summary = str(json_payload.get("uncertainty_summary") or "").strip()[:180]
         raw_targets = json_payload.get("candidate_targets") or []
         if isinstance(raw_targets, list):
@@ -271,87 +328,66 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
                         "why": str(t.get("why") or "").strip()[:180],
                     }
                 )
-        raw_controls = json_payload.get("candidate_controls") or []
-        if isinstance(raw_controls, list) and not candidate_targets:
-            for t in raw_controls[:4]:
-                if not isinstance(t, dict):
-                    continue
-                candidate_targets.append(
-                    {
-                        "target_id": str(t.get("target_id") or "").strip(),
-                        "label": str(t.get("label") or "").strip()[:120],
-                        "priority": int(t.get("priority", 99) or 99),
-                        "why": str(t.get("why") or t.get("reason") or "").strip()[:180],
-                    }
-                )
-        raw_actions = json_payload.get("recommended_actions") or []
-        if isinstance(raw_actions, list):
-            for a in raw_actions[:4]:
-                if not isinstance(a, dict):
-                    continue
-                tool = str(a.get("tool") or "").strip()
-                if tool not in {"click_element", "type_text", "wait_for_ui", "scroll_page", "read_page_content", "complete_mission"}:
-                    continue
-                actions.append(
-                    {
-                        "tool": tool,
-                        "target_id": str(a.get("target_id") or "").strip(),
-                        "target_label": str(a.get("target_label") or "").strip()[:120],
-                        "text": str(a.get("text") or "").strip(),
-                        "press_enter": bool(a.get("press_enter", False)),
-                        "seconds": int(a.get("seconds", 2) or 2),
-                        "force_click": bool(a.get("force_click", False)),
-                        "why": str(a.get("why") or "").strip()[:220],
-                    }
-                )
 
-    # Plain-text strategic brief parsing (non-JSON mode)
+    # Plain-text parsing from reasoning narrative
     if not evidence_summary:
-        m = re.search(r"visible evidence\s*:\s*(.+)", raw_response, re.IGNORECASE)
+        # Look for "visible" or "can see" statements
+        m = re.search(r"(?:i can see|visible|observed|the page shows)[\s:]*([^\.\n]+)", response_lower)
         if m:
             evidence_summary = m.group(1).strip()[:260]
+
     if not blocking_reason:
-        m = re.search(r"missing evidence\s*:\s*(.+)", raw_response, re.IGNORECASE)
+        # Look for what's missing or needed
+        m = re.search(r"(?:missing|need to|should|could|next step|logical next)[\s:]*([^\.\n]+)", response_lower)
         if m:
             blocking_reason = m.group(1).strip()[:260]
-    if not page_mode:
-        m = re.search(r"page mode\s*:\s*(.+)", raw_response, re.IGNORECASE)
-        if m:
-            page_mode = m.group(1).strip()[:80]
+
     if not uncertainty_summary:
-        m = re.search(r"uncertainty\s*:\s*(.+)", raw_response, re.IGNORECASE)
+        # Look for uncertainty expressions
+        m = re.search(r"(?:uncertain|unclear|not sure|ambiguous|difficult to|hard to)[\s:]*([^\.\n]+)", response_lower)
         if m:
             uncertainty_summary = m.group(1).strip()[:180]
-    if not best_target_label:
-        m = re.search(r"best (?:target|visible control)\s*:\s*(.+?)(?:\s*\((?:id=)?[a-zA-Z0-9_\-]+\)|$)", raw_response, re.IGNORECASE)
+
+    if not best_target_label and best_target_id:
+        # Try to find label near the ID
+        m = re.search(rf"{re.escape(best_target_id)}[^\.\n]*?(?:is|appears|looks|seems)?[^\.\n]*?(\w+(?:\s+\w+){0,3})", raw_response, re.IGNORECASE)
         if m:
             best_target_label = m.group(1).strip()[:120]
-    if not best_target_id:
-        m = re.search(r"best (?:target|visible control)\s*:\s*.+?\((?:id=)?([a-zA-Z0-9_\-]+)\)", raw_response, re.IGNORECASE)
-        if m:
-            best_target_id = m.group(1)
 
-    if not candidate_targets:
-        for line in raw_response.splitlines():
-            m = re.search(
-                r"^\s*\d+\)\s*(.+?)(?:\s*\((?:id=)?([a-zA-Z0-9_\-]+)\))?\s*-\s*(?:confidence=(?:high|medium|low)\s*-\s*)?(.+)$",
-                line.strip(),
-                re.IGNORECASE,
-            )
-            if m:
-                candidate_targets.append(
-                    {
-                        "target_id": str(m.group(2) or "").strip(),
-                        "label": m.group(1).strip()[:120],
-                        "priority": len(candidate_targets) + 1,
-                        "why": m.group(3).strip()[:180],
-                    }
-                )
-                if len(candidate_targets) >= 4:
-                    break
+    # PARSE ACTION PLAN: [Step 1], [Step 2]
+    action_plan_match = re.search(r"action plan[\s:]*(.+)", response_lower)
+    if action_plan_match:
+        plan_text = action_plan_match.group(1)
+        # Split by comma or semicolon
+        steps = re.split(r"[,;]", plan_text)
+        for step in steps:
+            step = step.strip()
+            if not step: continue
+            
+            # Identify tool and ID
+            step_tool = "click_element" # default
+            if any(kw in step for kw in ["type", "input", "enter"]): step_tool = "type_text"
+            elif any(kw in step for kw in ["wait", "pause"]): step_tool = "wait_for_ui"
+            elif any(kw in step for kw in ["scroll"]): step_tool = "scroll_page"
+            elif any(kw in step for kw in ["read", "examine"]): step_tool = "read_page_content"
+            
+            step_id_match = re.search(r"(t-[a-z0-9]+)", step, re.IGNORECASE)
+            step_id = step_id_match.group(1) if step_id_match else ""
+            
+            if step_id or step_tool in {"wait_for_ui", "scroll_page", "read_page_content"}:
+                actions.append({
+                    "tool": step_tool,
+                    "target_id": step_id,
+                    "target_label": "", # resolved later
+                    "text": "", # text extraction would need more regex but this is a good start
+                    "press_enter": "enter" in step.lower(),
+                    "seconds": 2,
+                    "force_click": True,
+                    "why": f"Action Plan step: {step[:80]}"
+                })
 
+    # Build actions from reasoning
     if not actions:
-        # Derive safe advisory actions from candidate controls when the vision model only observed.
         if answer_visible:
             actions.append(
                 {
@@ -362,37 +398,28 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
                     "press_enter": False,
                     "seconds": 2,
                     "force_click": False,
-                    "why": "Answer appears visible in the screenshot.",
+                    "why": "Answer appears visible based on visual analysis.",
                 }
             )
-        elif candidate_targets:
-            first = candidate_targets[0]
-            if first.get("target_id"):
-                actions.append(
-                    {
-                        "tool": "click_element",
-                        "target_id": str(first.get("target_id") or "").strip(),
-                        "target_label": str(first.get("label") or "").strip()[:120],
-                        "text": "",
-                        "press_enter": False,
-                        "seconds": 2,
-                        "force_click": True,
-                        "why": str(first.get("why") or "Probe the strongest visible control.").strip()[:220],
-                    }
-                )
-            else:
-                actions.append(
-                    {
-                        "tool": "read_page_content",
-                        "target_id": "",
-                        "target_label": "",
-                        "text": "",
-                        "press_enter": False,
-                        "seconds": 2,
-                        "force_click": False,
-                        "why": "Vision found possible controls but no grounded DOM id; re-read visible content first.",
-                    }
-                )
+        elif best_target_id:
+            # Extract reasoning for why this target
+            why_text = "Probe the strongest visible control."
+            m = re.search(rf"{re.escape(best_target_id)}[^\.\n]*?(?:because|as|since|to|might|could|would)[^\.\n]*", raw_response, re.IGNORECASE)
+            if m:
+                why_text = m.group(0).strip()[:220]
+
+            actions.append(
+                {
+                    "tool": "click_element",
+                    "target_id": best_target_id,
+                    "target_label": best_target_label[:120],
+                    "text": "",
+                    "press_enter": False,
+                    "seconds": 2,
+                    "force_click": True,
+                    "why": why_text,
+                }
+            )
         elif recommended_tool in {"read_page_content", "wait_for_ui", "scroll_page"}:
             actions.append(
                 {
@@ -403,49 +430,9 @@ def parse_vision_response(raw_response: str) -> Dict[str, Any]:
                     "press_enter": False,
                     "seconds": 2,
                     "force_click": False,
-                    "why": "Safest probe derived from visual observation.",
+                    "why": "Recommended based on visual observation and reasoning.",
                 }
             )
-
-    if not actions:
-        for line in raw_response.splitlines():
-            m = re.search(
-                r"^\s*\d+\)\s*(click_element|type_text|wait_for_ui|scroll_page|read_page_content|complete_mission)\s*->\s*(.+?)(?:\s*\|\s*why:\s*(.+))?$",
-                line.strip(),
-                re.IGNORECASE,
-            )
-            if not m:
-                continue
-            tool = m.group(1).strip()
-            target_part = (m.group(2) or "").strip()
-            why = (m.group(3) or "").strip()
-            tid = ""
-            tlbl = ""
-            idm = re.search(r"\(id=(t-[a-z0-9]+)\)", target_part, re.IGNORECASE)
-            if idm:
-                tid = idm.group(1)
-                tlbl = re.sub(r"\s*\(id=t-[a-z0-9]+\)", "", target_part, flags=re.IGNORECASE).strip()
-            else:
-                inline_id = re.search(r"\b(t-[a-z0-9]+)\b", target_part, re.IGNORECASE)
-                if inline_id:
-                    tid = inline_id.group(1)
-                    tlbl = target_part.replace(tid, "").strip(" -()")
-                else:
-                    tlbl = target_part if target_part.lower() != "n/a" else ""
-            actions.append(
-                {
-                    "tool": tool,
-                    "target_id": tid,
-                    "target_label": tlbl[:120],
-                    "text": "",
-                    "press_enter": False,
-                    "seconds": 2,
-                    "force_click": tool == "click_element",
-                    "why": why[:220],
-                }
-            )
-            if len(actions) >= 4:
-                break
 
     return {
         "answer_visible": answer_visible,

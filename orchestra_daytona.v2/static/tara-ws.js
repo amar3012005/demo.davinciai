@@ -590,6 +590,19 @@
                 // at the very end. This eliminates the 4-5s per-step latency tax.
                 // ═══════════════════════════════════════════════════════════
 
+                // ── Voice-Action Synchronization: Pause audio during action execution ──
+                if (widget.audioManager && widget.sessionMode === 'interactive') {
+                    try {
+                        if (widget.audioManager.audioCtx && widget.audioManager.audioCtx.state === 'running') {
+                            console.log('🔊 Pausing audio during action execution...');
+                            widget.audioManager.audioCtx.suspend();
+                            widget._audioWasSuspended = true;
+                        }
+                    } catch (e) {
+                        console.warn('⚠️ Audio suspend failed:', e);
+                    }
+                }
+
                 // Normalise payload — backend may send msg.action (array or object)
                 // or the legacy msg.payload wrapper.
                 const rawAction = msg.action || msg.payload || msg;
@@ -714,6 +727,71 @@
                     console.warn(`⚠️ Pipeline executed no actionable UI steps (attempted=${actionableSteps})`, actionErrors);
                 }
 
+                // ── Generate action summary and next steps ──
+                const actionSummary = (() => {
+                    const executed = [];
+                    const failed = [];
+                    const skipped = [];
+
+                    for (let i = 0; i < actionList.length; i++) {
+                        const step = actionList[i];
+                        const stepNum = i + 1;
+                        const type = step.type || step.action_type || step.action || 'unknown';
+                        const target = step.target_id || step.id || step.text || 'unknown';
+                        const error = actionErrors.find(e => e.step === stepNum);
+
+                        if (error) {
+                            failed.push({
+                                step: stepNum,
+                                type,
+                                target,
+                                reason: error.reason
+                            });
+                        } else if (type === 'wait') {
+                            skipped.push({ step: stepNum, type, reason: 'wait_step' });
+                        } else {
+                            executed.push({ step: stepNum, type, target });
+                        }
+                    }
+
+                    return { executed, failed, skipped };
+                })();
+
+                // ── Generate next steps based on outcome ──
+                const nextSteps = (() => {
+                    const steps = [];
+
+                    if (actionSummary.failed.length > 0) {
+                        steps.push({
+                            type: 'review_failed_actions',
+                            description: 'Review the failed actions and consider rephrasing your request'
+                        });
+                    }
+
+                    if (urlChanged) {
+                        steps.push({
+                            type: 'wait_for_navigation',
+                            description: 'Wait for the page to fully load before next action'
+                        });
+                    }
+
+                    if (actionSummary.executed.length > 0 && actionSummary.failed.length === 0) {
+                        steps.push({
+                            type: 'await_next_command',
+                            description: 'Waiting for your next instruction'
+                        });
+                    }
+
+                    if (actionSummary.skipped.length > 0) {
+                        steps.push({
+                            type: 'pipeline_continues',
+                            description: 'Pipeline will continue with remaining steps'
+                        });
+                    }
+
+                    return steps;
+                })();
+
                 widget.ws.send(JSON.stringify({
                     type: 'execution_complete',
                     status: execStatus,
@@ -753,6 +831,10 @@
                         }
                         return acks;
                     })(),
+                    // ── NEW: Action execution summary ──
+                    action_summary: actionSummary,
+                    // ── NEW: Next recommended steps ──
+                    next_steps: nextSteps,
                     outcome: {
                         action_attempted_count: actionableSteps,
                         action_executed_count: executedActionable,
@@ -775,8 +857,24 @@
                 }));
 
                 console.log(`✅ Pipeline complete: ${actionList.length} actions in ${settleTime}ms (url_changed=${urlChanged}, screenshot=${screenshotB64 ? Math.round(screenshotB64.length / 1024) + 'KB' : 'none'})`);
+                console.log('📊 Action Summary:', actionSummary);
+                console.log('➡️ Next Steps:', nextSteps);
                 widget.waitingForExecution = false;
                 widget.setOrbState('listening');
+
+                // ── Voice-Action Synchronization: Resume audio after action execution ──
+                if (widget._audioWasSuspended && widget.audioManager && widget.sessionMode === 'interactive') {
+                    try {
+                        if (widget.audioManager.audioCtx && widget.audioManager.audioCtx.state === 'suspended') {
+                            console.log('🔊 Resuming audio after action execution...');
+                            await widget.audioManager.audioCtx.resume();
+                        }
+                    } catch (e) {
+                        console.warn('⚠️ Audio resume failed:', e);
+                    } finally {
+                        widget._audioWasSuspended = false;
+                    }
+                }
             }
             else if (msg.type === 'state_update') {
                 if (msg.state) {

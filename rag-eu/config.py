@@ -77,7 +77,7 @@ class RAGConfig:
     # Retrieval settings
     top_k: int = 8
     top_n: int = 5
-    similarity_threshold: float = 0.2
+    similarity_threshold: float = 0.1
     
     # Chunking settings
     chunk_size_min: int = 500
@@ -113,8 +113,8 @@ class RAGConfig:
     enable_local_retrieval: bool = False
     
     # Organization context
-    organization_name: str = "TASK"
-    organization_location: str = "Telangana"
+    organization_name: str = "Organization"
+    organization_location: str = "Global"
     
     # Fallback provider configuration (NEW)
     enable_llm_fallback: bool = False
@@ -372,7 +372,7 @@ class RAGConfig:
             enable_local_retrieval=get_env_bool("ENABLE_LOCAL_RETRIEVAL", True),
             
             # Organization context
-            organization_name=os.getenv("ORGANIZATION_NAME", "Daytona") or "Daytona",
+            organization_name=os.getenv("ORGANIZATION_NAME", "Organization") or "Organization",
             organization_location=os.getenv("ORGANIZATION_LOCATION", "Global") or "Global",
             
             # Fallback provider settings

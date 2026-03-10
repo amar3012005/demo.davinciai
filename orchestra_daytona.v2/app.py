@@ -166,7 +166,8 @@ async def check_tts_prewarm(url: str, timeout: float = 10.0, skip_ssl: bool = Fa
 
 async def websockets_connect_with_prewarm(ws_url: str, ssl_context: Optional[ssl.SSLContext] = None) -> dict:
     """Helper function to handle WebSocket connection and prewarm."""
-    async with websockets.connect(ws_url, ssl=ssl_context) as ws:
+    # Disable internal ping to avoid keepalive conflicts and AssertionErrors
+    async with websockets.connect(ws_url, ssl=ssl_context, ping_interval=None) as ws:
         # Send prewarm message
         await ws.send(json.dumps({"type": "prewarm"}))
         # Wait for response (should be prewarmed or error)
@@ -908,7 +909,8 @@ async def proxy_hive_mind_ws(websocket: WebSocket):
     rag_ws_url = config.services.rag.url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/hive-mind"
     
     try:
-        async with websockets.connect(rag_ws_url) as rag_ws:
+        # Disable internal ping to avoid keepalive conflicts and AssertionErrors
+        async with websockets.connect(rag_ws_url, ping_interval=None) as rag_ws:
             async def forward_to_client():
                 try:
                     while True:

@@ -1,8 +1,24 @@
 import hashlib
+import logging
 import time
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
+from visual_copilot.navigation.site_map_validator import SiteMapValidator, get_validator
 from visual_copilot.text.tokenization import _canonicalize_label, _strategy_focus_terms
+
+logger = logging.getLogger(__name__)
+
+# Site map validator instance (lazy-loaded)
+_site_map_validator: SiteMapValidator = None
+
+
+def _get_validator() -> SiteMapValidator:
+    """Get or create the site map validator instance."""
+    global _site_map_validator
+    if _site_map_validator is None:
+        _site_map_validator = get_validator()
+    return _site_map_validator
 
 
 def should_advance_from_dom(*, query: str, nodes: List[Any], min_hits: int = 1) -> bool:
@@ -73,8 +89,122 @@ def verify_pending_action_effect(
     prev_sig = (getattr(mission, "last_dom_signature", "") or "").strip()
     prev_snapshot = pending.get("target_snapshot") or {}
 
+    # ── STRICT NAVIGATION VALIDATION ─────────────────────────────────────────
+    # For navigation subgoals (e.g., "Click Usage"), verify URL changed to expected destination
+    
+    # First, check if this is a navigation subgoal
+    subgoals = getattr(mission, "subgoals", []) or []
+    current_idx = getattr(mission, "current_subgoal_index", 0) or 0
+    is_navigation_subgoal = False
+    expected_target_name = ""
+    
+    if current_idx < len(subgoals):
+        subgoal = subgoals[current_idx]
+        subgoal_text = (subgoal or "").lower()
+        if subgoal_text.startswith("click "):
+            is_navigation_subgoal = True
+            expected_target_name = subgoal_text[6:].strip().lower()
+    
+    # For navigation subgoals, URL MUST change to expected destination
+    if is_navigation_subgoal and prev_url and current_url:
+        # ── SITE MAP VALIDATION ─────────────────────────────────────────────
+        # Use site map to validate navigation against ground truth
+        validator = _get_validator()
+
+        # Get the node we were on before navigation
+        from_node = validator.get_node_for_url(prev_url)
+
+        if from_node:
+            # Use site map to predict expected outcome
+            outcome = validator.get_expected_navigation_outcome(
+                from_node.get("node_id", ""),
+                expected_target_name
+            )
+
+            if outcome and outcome.expected_node:
+                # Validate against site map expected URL pattern
+                expected_url_pattern = outcome.expected_url
+                expected_node_id = outcome.expected_node.get("node_id", "")
+
+                # Check if current URL matches expected pattern
+                is_valid, validation_msg = validator.validate_navigation_success(
+                    from_url=prev_url,
+                    to_url=current_url,
+                    clicked_target=expected_target_name
+                )
+
+                if is_valid:
+                    logger.info(
+                        f"PENDING_VERIFY_SITE_MAP_SUCCESS: Navigation to '{expected_target_name}' "
+                        f"validated via site map. Reached '{expected_node_id}'. "
+                        f"Reason: {validation_msg}"
+                    )
+                    return True, f"site_map_validated_{validation_msg}"
+                else:
+                    # Site map validation failed
+                    logger.warning(
+                        f"PENDING_VERIFY_SITE_MAP_FAILED: {validation_msg}. "
+                        f"From '{from_node.get('node_id')}' expected '{expected_node_id}' "
+                        f"but current URL is '{current_url}'"
+                    )
+
+                    # Provide recovery suggestion
+                    recovery = outcome.alternative_targets
+                    if recovery:
+                        alt_ids = [n.get('node_id', '?') for n in recovery[:2]]
+                        logger.info(f"PENDING_VERIFY_RECOVERY_SUGGESTION: Try alternatives {alt_ids}")
+
+                    return False, f"site_map_validation_failed_{validation_msg}"
+
+        # ── FALLBACK: Pattern-based validation ──────────────────────────────
+        # If site map validation unavailable, use pattern matching
+        url_lower = current_url.lower()
+        expected_patterns = [
+            f"/{expected_target_name}",
+            f"/{expected_target_name}/",
+            f"-{expected_target_name}",
+            f"_{expected_target_name}",
+        ]
+        matches_expected = any(p in url_lower for p in expected_patterns)
+
+        if prev_url == current_url:
+            # URL didn't change at all - navigation definitely failed
+            logger.warning(
+                f"PENDING_VERIFY_NAV_FAILED: Navigation subgoal 'Click {expected_target_name}' "
+                f"did not change URL (still '{current_url}'). Click likely failed."
+            )
+            return False, "navigation_failed_url_unchanged"
+        elif not matches_expected:
+            # URL changed but not to expected destination
+            logger.warning(
+                f"PENDING_VERIFY_URL_MISMATCH: Expected navigation to '{expected_target_name}' "
+                f"but URL changed from '{prev_url}' to '{current_url}'"
+            )
+            return False, "navigation_failed_wrong_destination"
+        else:
+            # URL changed to expected destination
+            return True, f"url_changed_to_expected_{expected_target_name}"
+    
+    # For non-navigation actions, use standard verification
     if prev_url and current_url and prev_url != current_url:
-        return True, "url_changed"
+        # URL changed but couldn't verify it was the expected destination
+        # This is a weaker signal - only accept if the change is significant
+        # (not just a hash or query param change)
+        from urllib.parse import urlparse
+        prev_parsed = urlparse(prev_url)
+        curr_parsed = urlparse(current_url)
+
+        # Check if path changed (not just hash or query)
+        if prev_parsed.path != curr_parsed.path:
+            return True, "url_path_changed"
+        else:
+            # Only hash or query changed - this is likely not a real navigation
+            logger.warning(
+                f"PENDING_VERIFY_WEAK_URL_CHANGE: Path unchanged, only hash/query changed "
+                f"from '{prev_url}' to '{current_url}'"
+            )
+            # Don't return True - this is likely a false positive
+    
     if prev_sig and current_dom_signature and prev_sig != current_dom_signature:
         return True, "dom_signature_changed"
 

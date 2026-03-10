@@ -11,6 +11,7 @@ Redis Keys:
 TTL: 24 hours for active sessions
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -237,16 +238,17 @@ class RecoveryStore:
     async def save_recovery_state(self, state: RecoveryState) -> bool:
         """
         Save recovery state to Redis.
-        
+
         Stores state under both session and mission keys for flexible lookup.
         Updates the timestamp and sets TTL for automatic expiration.
-        
+        Uses exponential backoff retry logic for resilience.
+
         Args:
             state: RecoveryState object to persist
-            
+
         Returns:
             True if save successful, False otherwise
-            
+
         Example:
             >>> state = RecoveryState(session_id="s123", mission_id="m456", goal="Test")
             >>> await store.save_recovery_state(state)
@@ -254,41 +256,50 @@ class RecoveryStore:
         if not self.redis:
             logger.error("Redis client not available")
             return False
-        
-        try:
-            # Update timestamp
-            state.updated_at = time.time()
-            
-            # Convert to dict for Redis hash storage
-            state_dict = state.to_dict()
-            
-            # Save under session key
-            session_key = self._session_key(state.session_id)
-            await self.redis.hset(session_key, mapping={
-                k: json.dumps(v) if isinstance(v, (dict, list)) else str(v)
-                for k, v in state_dict.items()
-            })
-            await self.redis.expire(session_key, self.SESSION_TTL)
-            
-            # Save under mission key (for mission-based lookup)
-            if state.mission_id:
-                mission_key = self._mission_key(state.mission_id)
-                await self.redis.hset(mission_key, mapping={
+
+        # Retry loop with exponential backoff
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Update timestamp
+                state.updated_at = time.time()
+
+                # Convert to dict for Redis hash storage
+                state_dict = state.to_dict()
+
+                # Save under session key
+                session_key = self._session_key(state.session_id)
+                await self.redis.hset(session_key, mapping={
                     k: json.dumps(v) if isinstance(v, (dict, list)) else str(v)
                     for k, v in state_dict.items()
                 })
-                await self.redis.expire(mission_key, self.SESSION_TTL)
-            
-            logger.info(
-                f"💾 Recovery state saved | session={state.session_id} | "
-                f"mission={state.mission_id} | phase={state.phase} | "
-                f"step={state.step_count} | url={state.current_url[:50]}..."
-            )
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to save recovery state: {e}", exc_info=True)
-            return False
+                await self.redis.expire(session_key, self.SESSION_TTL)
+
+                # Save under mission key (for mission-based lookup)
+                if state.mission_id:
+                    mission_key = self._mission_key(state.mission_id)
+                    await self.redis.hset(mission_key, mapping={
+                        k: json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                        for k, v in state_dict.items()
+                    })
+                    await self.redis.expire(mission_key, self.SESSION_TTL)
+
+                logger.info(
+                    f"💾 Recovery state saved | session={state.session_id} | "
+                    f"mission={state.mission_id} | phase={state.phase} | "
+                    f"step={state.step_count} | url={state.current_url[:50]}..."
+                )
+                return True
+
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Failed to save recovery state after {max_retries} attempts: {e}", exc_info=True)
+                    return False
+                backoff_time = 2 ** attempt
+                logger.warning(f"Redis save failed (attempt {attempt+1}/{max_retries}), retrying in {backoff_time}s: {e}")
+                await asyncio.sleep(backoff_time)
+
+        return False
     
     async def load_recovery_state(
         self,

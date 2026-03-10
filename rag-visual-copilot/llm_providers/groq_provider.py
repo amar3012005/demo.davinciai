@@ -205,9 +205,10 @@ class GroqProvider(LLMProvider):
         GROQ API RULES FOR REASONING MODELS (GPT-OSS):
         1. Use max_completion_tokens (NOT max_tokens) — CoT tokens count against this
         2. NO system messages — put ALL instructions in user message
-        3. NO response_format — incompatible with reasoning mode  
+        3. response_format={"type":"json_object"} is supported and should be paired with
+           include_reasoning or hidden reasoning depending on caller needs
         4. reasoning_effort: "low" | "medium" | "high" (GPT-OSS only)
-        5. include_reasoning: true to get CoT back in response.choices[0].message.reasoning
+        5. include_reasoning and reasoning_format are mutually exclusive
         
         Returns dict with 'content' and 'reasoning' keys.
         """
@@ -215,8 +216,9 @@ class GroqProvider(LLMProvider):
             raise RuntimeError("Groq provider not initialized")
         
         try:
-            # Pop response_format — reasoning mode CANNOT use it
-            wants_json = kwargs.pop("response_format", None) is not None
+            response_format = kwargs.pop("response_format", None)
+            reasoning_format = kwargs.pop("reasoning_format", None)
+            include_reasoning = kwargs.pop("include_reasoning", True)
             # Also pop max_tokens if someone accidentally passes it
             kwargs.pop("max_tokens", None)
             
@@ -237,11 +239,22 @@ class GroqProvider(LLMProvider):
             else:
                 user_content = prompt
             
-            # Add JSON format instruction (since we can't use response_format)
-            if wants_json:
+            # Reinforce JSON mode in-prompt because callers depend on strict machine parsing.
+            if response_format and response_format.get("type") == "json_object":
                 user_content += "\n\nIMPORTANT: You MUST respond with ONLY a valid JSON object. No explanation text, no markdown code fences, no commentary — just the raw JSON."
             
             messages = [{"role": "user", "content": user_content}]
+
+            if include_reasoning and reasoning_format:
+                raise ValueError("include_reasoning and reasoning_format cannot be used together")
+
+            extra_args: Dict[str, Any] = {}
+            if response_format:
+                extra_args["response_format"] = response_format
+            if reasoning_format:
+                extra_args["reasoning_format"] = reasoning_format
+            else:
+                extra_args["include_reasoning"] = include_reasoning
 
             chat_completion = await self._client.chat.completions.create(
                 messages=messages,
@@ -249,8 +262,8 @@ class GroqProvider(LLMProvider):
                 temperature=temperature,
                 max_completion_tokens=max_completion_tokens,
                 reasoning_effort=reasoning_effort,
-                include_reasoning=True,
                 stream=False,
+                **extra_args,
                 **kwargs
             )
             
@@ -309,15 +322,31 @@ class GroqProvider(LLMProvider):
 
         effective_model = model or self.model_name
         try:
-            chat_completion = await self._client.chat.completions.create(
-                messages=messages,
-                model=effective_model,
-                tools=tools,
-                tool_choice=tool_choice,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs,
-            )
+            extra_args = {}
+            if self._is_gpt_oss(effective_model):
+                # GPT-OSS reasoning models use max_completion_tokens and special reasoning params
+                extra_args["max_completion_tokens"] = max_tokens
+                # If tool_choice is required, we still need to pass it, but some reasoning models prefer auto
+                chat_completion = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=effective_model,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    temperature=temperature,
+                    reasoning_effort=kwargs.pop("reasoning_effort", "low"),
+                    **extra_args,
+                    **kwargs,
+                )
+            else:
+                chat_completion = await self._client.chat.completions.create(
+                    messages=messages,
+                    model=effective_model,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
 
             # Log usage
             if hasattr(chat_completion, "usage") and chat_completion.usage:

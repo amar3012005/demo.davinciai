@@ -1,6 +1,74 @@
 import time
 from typing import Any, Dict, Optional, Set, Tuple
 
+from visual_copilot.navigation.site_map_validator import SiteMapValidator, get_validator
+
+# Site map validator instance (lazy-loaded)
+_site_map_validator: Optional[SiteMapValidator] = None
+
+
+def _get_validator() -> Optional[SiteMapValidator]:
+    """Get or create the site map validator instance."""
+    global _site_map_validator
+    if _site_map_validator is None:
+        try:
+            _site_map_validator = get_validator()
+        except Exception as e:
+            logger.warning(f"Failed to initialize SiteMapValidator: {e}")
+            return None
+    return _site_map_validator
+
+
+def _validate_click_target(
+    current_url: str,
+    click_target: str,
+    nodes: list
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """Validate that a click target is an expected control on the current page.
+
+    Args:
+        current_url: Current page URL
+        click_target: The target being clicked (e.g., "Usage")
+        nodes: List of DOM nodes
+
+    Returns:
+        Tuple of (is_valid, message, expected_outcome)
+    """
+    validator = _get_validator()
+    if not validator:
+        return True, "validator_unavailable", None
+
+    # Get current node
+    current_node = validator.get_node_for_url(current_url)
+    if not current_node:
+        return True, "url_not_in_site_map", None
+
+    # Get expected controls for this node
+    expected_controls = current_node.get("expected_controls", []) or []
+
+    # Check if click target matches any expected control
+    click_lower = click_target.lower().strip()
+    for control in expected_controls:
+        if click_lower in control.lower() or control.lower() in click_lower:
+            # Valid control - get expected navigation outcome
+            outcome = validator.get_expected_navigation_outcome(
+                current_node.get("node_id", ""),
+                click_target
+            )
+            return True, f"valid_control_{control}", outcome.expected_node if outcome else None
+
+    # Check if it's a required control
+    required_controls = current_node.get("required_controls", []) or []
+    for control in required_controls:
+        if click_lower in control.lower() or control.lower() in click_lower:
+            return True, f"required_control_{control}", None
+
+    # Not an expected control - provide warning
+    return False, (
+        f"'{click_target}' is not an expected control on '{current_node.get('title')}'. "
+        f"Expected: {', '.join(expected_controls[:5])}"
+    ), None
+
 
 async def prepare_mission_and_query(
     *,
@@ -203,8 +271,32 @@ async def prepare_mission_and_query(
                     # rendered dropdowns like "Pics", "Tags", etc.).
                     # Treat the action as done and advance so we don't spin on the same
                     # subgoal with a stream of different DOM node IDs forever.
+                    # 
+                    # CRITICAL: For navigation subgoals (e.g., "Click Usage"), do NOT
+                    # optimistically advance. Navigation MUST be verified by URL change
+                    # to prevent "ghost cursor" issues where the click doesn't actually
+                    # navigate but the mission advances anyway.
+                    # ─────────────────────────────────────────────────────────────────────────
                     subgoal_count = len(mission.subgoals or [])
-                    if mission.current_subgoal_index < subgoal_count:
+                    current_subgoal_text = (
+                        mission.subgoals[mission.current_subgoal_index].lower()
+                        if mission.current_subgoal_index < subgoal_count
+                        else ""
+                    )
+                    is_navigation = current_subgoal_text.startswith("click ")
+                    
+                    if is_navigation:
+                        # For navigation subgoals, require successful verification
+                        # Do NOT optimistically advance - the navigation must actually happen
+                        logger.warning(
+                            f"PENDING_ACTION_DROP_NAVIGATION mission={mission.mission_id} "
+                            f"subgoal={mission.current_subgoal_index}/{subgoal_count} "
+                            f"reason=navigation_requires_verification "
+                            f"subgoal='{current_subgoal_text}'"
+                        )
+                        # Keep the mission at the same subgoal - don't advance
+                        # The next iteration will try a different approach
+                    elif mission.current_subgoal_index < subgoal_count:
                         logger.warning(
                             f"PENDING_ACTION_DROP_ADVANCE mission={mission.mission_id} "
                             f"subgoal={mission.current_subgoal_index}/{subgoal_count} "
@@ -246,6 +338,45 @@ async def prepare_mission_and_query(
         if mission.current_subgoal_index < len(mission.subgoals)
         else schema.target_entity
     )
+
+    # ── SITE MAP VALIDATION FOR NAVIGATION SUBGOALS ─────────────────────────
+    # Before executing a "Click X" subgoal, validate that X is an expected control
+    subgoal_lower = (current_subgoal or "").lower().strip()
+    if subgoal_lower.startswith("click "):
+        click_target = subgoal_lower[6:].strip()
+        is_valid, validation_msg, expected_node = _validate_click_target(
+            current_url, click_target, nodes
+        )
+
+        if is_valid:
+            if expected_node:
+                logger.info(
+                    f"SITE_MAP_CLICK_VALID: '{click_target}' is valid on current page. "
+                    f"Expected outcome: '{expected_node.get('title', '?')}' "
+                    f"({expected_node.get('node_id', '?')})"
+                )
+                # Store expected node for post-navigation validation
+                mission.expected_navigation_target = expected_node.get("node_id", "")
+                await mission_brain._save_mission(mission)
+            else:
+                logger.info(f"SITE_MAP_CLICK_VALID: '{click_target}' - {validation_msg}")
+        else:
+            # Click target not recognized as expected control
+            logger.warning(f"SITE_MAP_CLICK_WARNING: {validation_msg}")
+
+            # Check if we might be on the wrong page
+            validator = _get_validator()
+            if validator:
+                current_node = validator.get_node_for_url(current_url)
+                if current_node:
+                    # Suggest backtracking if we have a parent
+                    parent = validator.get_parent_node(current_node.get("node_id", ""))
+                    if parent:
+                        logger.info(
+                            f"SITE_MAP_RECOVERY_SUGGESTION: Backtrack to parent "
+                            f"'{parent.get('title', '?')}' ({parent.get('node_id', '?')})"
+                        )
+
     query = current_subgoal
     _subgoal_total = len(mission.subgoals or [])
     _subgoal_display_idx = (

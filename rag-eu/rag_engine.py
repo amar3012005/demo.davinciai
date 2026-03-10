@@ -578,7 +578,7 @@ class RAGEngine:
                                 tenant_id=tenant_id,
                                 doc_types=target_types,
                                 limit=8, # Slightly higher limit to get mix of types
-                                score_threshold=0.35
+                                score_threshold=0.2
                             ),
                             timeout=1.2 # Allow slightly more time for complex filter
                         )

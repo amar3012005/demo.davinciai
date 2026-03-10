@@ -131,6 +131,11 @@ class OrchestratorSession:
     audio_playback_server_timer: Optional[asyncio.Task] = None  # Server-side timer task
     audio_playback_turn_id: int = 0  # Monotonic playback id for stale-event rejection
     
+    # Tenant-specific Qdrant configuration (resolved at connect)
+    qdrant_url: Optional[str] = None
+    qdrant_api_key: Optional[str] = None
+    qdrant_collection: Optional[str] = None
+    
     # Filler coordination
     immediate_filler_played: bool = False  # Track if immediate filler was played to prevent double filling
 
@@ -515,6 +520,23 @@ class OrchestratorWSHandler:
 
         return fallback_voice_id or os.getenv("DEFAULT_VOICE_ID") or os.getenv("CARTESIA_VOICE_ID")
 
+    def _resolve_tenant_metadata(self, tenant_id: Optional[str], field: str, fallback: Optional[str] = None) -> Optional[str]:
+        """
+        Dynamically resolve metadata (agent_name, agent_id, etc.) from environment
+        based on the provided tenant_id.
+        """
+        if not tenant_id:
+            return fallback
+        
+        # Pattern: <tenant_id>_<field> e.g. bundb_agent
+        safe_tenant = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant_id.lower())
+        safe_field = field.lower()
+        
+        # Attempt to find <tenant>_<field> or <TENANT>_<FIELD>
+        env_val = os.getenv(f"{safe_tenant}_{safe_field}") or os.getenv(f"{safe_tenant.upper()}_{safe_field.upper()}")
+        
+        return env_val or fallback
+
     async def _persist_session_runtime_config(self, session: OrchestratorSession):
         """Persist dynamic runtime session routing config in Redis for stability/debugging."""
         if not self.redis_client:
@@ -597,13 +619,42 @@ class OrchestratorWSHandler:
         # Priority: Query Param > Host Config > Default Config
         if query_params.get("tenant_id"):
             session.tenant_id = str(query_params.get("tenant_id"))
-        session.agent_name = query_params.get("agent_name") or host_config["agent_name"]
+        
+        # DYNAMIC METADATA RESOLUTION:
+        # If tenant_id is known, attempt to resolve identity fields from environment (e.g. bundb_agent)
+        # We only override if the query param is missing OR if it matches a generic "hardcoded" default (like "DA VINCI AI" or "agent")
+        client_agent_name = query_params.get("agent_name")
+        resolved_agent_name = self._resolve_tenant_metadata(session.tenant_id, "agent")
+        
+        # Identity Logic: Enforce resolved env name if client is using a generic placeholder
+        if resolved_agent_name and (not client_agent_name or client_agent_name in ["DA VINCI AI", "agent", "Tara"]):
+            session.agent_name = resolved_agent_name
+        else:
+            session.agent_name = client_agent_name or host_config["agent_name"]
+            
+        # Repeat for agent_id
+        client_agent_id = query_params.get("agent_id")
+        resolved_agent_id = self._resolve_tenant_metadata(session.tenant_id, "id") # e.g. bundb_id
+        if resolved_agent_id and (not client_agent_id or client_agent_id in ["agent", "tara"]):
+            session.agent_id = resolved_agent_id
+        else:
+            session.agent_id = client_agent_id or self.config.agent.id
+
         session.rag_url = query_params.get("rag_url") or host_config["rag_url"]
+        
+        # Resolve Tenant Qdrant Config (for RAG/Mission planning if needed, 
+        # but primarily RAG handles this internally via tenant_id)
+        session.qdrant_url = self._resolve_tenant_metadata(session.tenant_id, "qdrant_url")
+        session.qdrant_api_key = self._resolve_tenant_metadata(session.tenant_id, "apikey")
+        session.qdrant_collection = self._resolve_tenant_metadata(session.tenant_id, "collectionname")
+        
         base_voice = query_params.get("voice_id") or host_config["voice_id"]
         session.voice_id_override = self._resolve_tenant_voice_id(session.tenant_id, base_voice, session.agent_name, session.agent_id)
         
         if query_params.get("rag_url"):
             logger.info(f"[{session_id}] 🚀 DYNAMIC RAG OVERRIDE: {session.rag_url}")
+        if session.qdrant_url:
+            logger.info(f"[{session_id}] 🧠 DYNAMIC QDRANT MAPPING: {session.qdrant_url} (Collection: {session.qdrant_collection})")
         if query_params.get("voice_id"):
             logger.info(f"[{session_id}] 🎤 DYNAMIC VOICE OVERRIDE: {session.voice_id_override}")
 
@@ -2553,6 +2604,19 @@ class OrchestratorWSHandler:
         # Dynamic per-session identity/service routing metadata
         if effective_msg.get("tenant_id"):
             session.tenant_id = str(effective_msg.get("tenant_id"))
+            # RE-RESOLVE METADATA if tenant changed to ensure pipeline uses correct collections
+            session.qdrant_url = self._resolve_tenant_metadata(session.tenant_id, "qdrant_url") or session.qdrant_url
+            session.qdrant_api_key = self._resolve_tenant_metadata(session.tenant_id, "apikey") or session.qdrant_api_key
+            session.qdrant_collection = self._resolve_tenant_metadata(session.tenant_id, "collectionname") or session.qdrant_collection
+            
+            # Re-resolve agent identity if not explicitly provided or generic
+            if not effective_msg.get("agent_name"):
+                session.agent_name = self._resolve_tenant_metadata(session.tenant_id, "agent") or session.agent_name
+            if not effective_msg.get("agent_id"):
+                session.agent_id = self._resolve_tenant_metadata(session.tenant_id, "id") or session.agent_id
+            
+            logger.info(f"[{session.session_id}] 🧠 Metadata re-resolved for tenant {session.tenant_id} | Agent: {session.agent_name} | Qdrant: {session.qdrant_collection}")
+
         if effective_msg.get("user_id"):
             session.user_id = str(effective_msg.get("user_id"))
         if effective_msg.get("agent_name"):
@@ -2582,10 +2646,9 @@ class OrchestratorWSHandler:
         if mode in ["voice", "visual-copilot"]:
             prev_mode = session.mode
             session.mode = mode
-            logger.info(
-                f"[{session.session_id}] 🛠️ Session mode changed from {prev_mode} to: {mode} | "
-                f"tenant={session.tenant_id} agent={session.agent_name} stt={session.stt_mode} tts={session.tts_mode}"
-            )
+            if mode == "visual-copilot" or effective_msg.get("session_type") == "visual_copilot":
+                session.voice_id_override = "b9de4a89-2257-424b-94c2-db18ba68c81a"
+                logger.info(f"[{session.session_id}] 🎯 Visual Copilot identified, forcing voice_id to {session.voice_id_override}")
             
             await self._send_json(session.websocket, {
                 "type": "session_config_ack",
@@ -4318,9 +4381,10 @@ class OrchestratorWSHandler:
                 await self._send_audio_via_control_ws(session, chunk, sample_rate, encoding, session._audio_chunk_counter)
 
             session._audio_chunk_counter += 1
-            # CRITICAL: Yield to event loop to prevent blocking other tasks (like Pings)
-            # during large audio bursts. This prevents "keepalive ping failed" errors.
-            await asyncio.sleep(0)
+            # CRITICAL: Yield to event loop with a small delay to prevent blocking 
+            # other tasks (like Pings) during large audio bursts. 
+            # Using 5ms instead of 0 ensures other tasks actually get a slice.
+            await asyncio.sleep(0.005)
 
         # Handle flush (pad remainder)
         if flush and len(session.fg_buffer) > 0:
@@ -4394,9 +4458,11 @@ class OrchestratorWSHandler:
 
             if session:
                 async with session.send_lock:
-                    await websocket.send_json(data)
+                    # Shield the send to ensure it completes even if the task is cancelled.
+                    # This prevents AssertionError in underlying websockets library.
+                    await asyncio.shield(websocket.send_json(data))
             else:
-                await websocket.send_json(data)
+                await asyncio.shield(websocket.send_json(data))
             return True
         except (RuntimeError, ConnectionError, Exception) as e:
             # Mark session as closed if we get a transport error
@@ -4424,9 +4490,10 @@ class OrchestratorWSHandler:
 
             if session:
                 async with session.send_lock:
-                    await websocket.send_bytes(data)
+                    # Shield binary sends as well for consistency.
+                    await asyncio.shield(websocket.send_bytes(data))
             else:
-                await websocket.send_bytes(data)
+                await asyncio.shield(websocket.send_bytes(data))
             return True
         except Exception as e:
             if session: session.is_closed = True
@@ -4489,10 +4556,10 @@ class OrchestratorWSHandler:
         now_ts = time.time()
         report = {
             "session_id": session.session_id,
-            "user_id": session.user_id or "anonymous",
+            "user_id": session.user_id or "anonymous_user",
+            "tenant_id": session.tenant_id,
             "agent_name": session.agent_name,
             "agent_id": session.agent_id,
-            "tenant_id": session.tenant_id,
             "session_type": (
                 session.metadata.get("session_type")
                 or ("telephony" if isinstance(session, PhoneOrchestratorSession) else "webcall")
@@ -4500,18 +4567,10 @@ class OrchestratorWSHandler:
             "start_time": datetime.fromtimestamp(session.created_at).isoformat(),
             "end_time": datetime.fromtimestamp(now_ts).isoformat(),
             "timestamp": datetime.fromtimestamp(now_ts).isoformat(),
-            "duration_seconds": now_ts - session.created_at,
-            "total_turns": len(session.turn_metrics),
+            "duration_seconds": round(now_ts - session.created_at, 2),
+            "total_turns": 0,
             "avg_ttft_ms": 0.0,
-            "avg_ttfc_ms": 0.0,
-            # LLM cumulative metrics
-            "llm_model": session.llm_model or "unknown",
-            "total_prompt_tokens": session.total_prompt_tokens,
-            "total_completion_tokens": session.total_completion_tokens,
             "total_llm_tokens": session.total_prompt_tokens + session.total_completion_tokens,
-            # TTS cumulative metrics
-            "tts_streamed_chars": session.tts_streamed_chars,
-            "tts_total_time_ms": round(session.tts_total_time_ms, 1),
             "status": "completed"
         }
 
@@ -4520,9 +4579,9 @@ class OrchestratorWSHandler:
         ttfc_values = [m.get("ttfc_ms") for m in session.turn_metrics if m.get("ttfc_ms") is not None]
         
         if ttft_values:
-            report["avg_ttft_ms"] = sum(ttft_values) / len(ttft_values)
-        if ttfc_values:
-            report["avg_ttfc_ms"] = sum(ttfc_values) / len(ttfc_values)
+            report["avg_ttft_ms"] = round(sum(ttft_values) / len(ttft_values), 2)
+            
+        report["total_turns"] = len(session.turn_metrics)
             
         logger.info(f"[{session.session_id}] 📑 SESSION REPORT: {json.dumps(report)}")
         logger.info("============================================================")
@@ -4623,9 +4682,10 @@ class OrchestratorWSHandler:
         # 3. 📡 EXTERNAL METRICS WEBHOOK (BACKEND)
         webhook_url = self.config.services.davinciai_backend_url
         if webhook_url:
+            webhook_url = webhook_url.rstrip('/')
             parsed = urlparse(webhook_url)
-            # If only base host is configured, target the expected webhook endpoint.
-            if not parsed.path or parsed.path == "/":
+            # Safely enforce the correct endpoint to avoid 405 Method Not Allowed / 307 redirects
+            if not parsed.path or parsed.path == "/" or "api/webhooks/session" not in parsed.path:
                 webhook_url = urlunparse(parsed._replace(path="/api/webhooks/session"))
                 logger.info(f"[{session.session_id}] ℹ️ Normalized backend webhook URL to: {webhook_url}")
         try:

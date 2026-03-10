@@ -1,19 +1,19 @@
 # 📸 Live Graph Scan Log
 
-> Session started: `2026-03-09 01:41:09`
+> Session started: `2026-03-10 00:49:44`
 > This file is rewritten every time TARA starts a NEW session.
 > Subsequent scans in the same session are appended below.
 
 ---
 
 ---
-## 📸 Scan — 2026-03-09 01:41:09
-**Session:** `wNtLQz7UZpe0…`  **URL:** `https://console.groq.com/playground?model=openai/gpt-oss-120b`  **Nodes:** 57  ⏱ 6ms
+## 📸 Scan — 2026-03-10 00:49:44
+**Session:** `iaye7ibP1Qkj…`  **URL:** `https://console.groq.com/keys`  **Nodes:** 41  ⏱ 12ms
 
 | # | Node ID | Tag | Zone | Interactive | Visible | Text |
 |---|---------|-----|------|:-----------:|:-------:|------|
-| 1 | `t-1xxdb3i` | a | main | ✅ | ✅ |  |
-| 2 | `tara-1w9n4zv` | button | main | ✅ | ✅ | PersonalPersonal |
+| 1 | `t-1wqllit` | a | main | ✅ | ✅ |  |
+| 2 | `tara-zk9aoy` | button | main | ✅ | ✅ | PersonalPersonal |
 | 3 | `tara-c8avdd` | button | main | ✅ | ✅ | Default ProjectDefault Project |
 | 4 | `tara-cj9kq5` | button | main | ✅ | ✅ |  |
 | 5 | `tara-120npmh` | a | main | ✅ | ✅ |  |
@@ -23,49 +23,33 @@
 | 9 | `tara-izrmcn` | a | nav | ✅ | ✅ | Dashboard |
 | 10 | `tara-1duyijr` | a | nav | ✅ | ✅ | Docs |
 | 11 | `tara-1nfaobr` | a | nav | ✅ | ✅ | Settings |
-| 12 | `tara-22m6hk` | button | main | ✅ | ✅ | Amar Saiamarsai2005@gmail.com |
+| 12 | `tara-1b6r98` | button | main | ✅ | ✅ | Amar Saiamarsai2005@gmail.com |
 | 13 | `tara-z1hf65` | button | main | ✅ | ✅ |  |
 | 14 | `tara-z1hf65` | button | main | ✅ | ✅ |  |
 | 15 | `tara-1i84apn` | button | main | ✅ | ✅ |  |
 | 16 | `tara-1iasinj` | button | main | ✅ | ✅ | Sign Out |
-| 17 | `t-tnt4g3` | a | nav | ✅ | ✅ | Playground |
-| 18 | `t-1gils6y` | a | nav | ✅ | ✅ | API Keys |
-| 19 | `t-1mx69c1` | a | nav | ✅ | ✅ | Dashboard |
-| 20 | `t-u7kzts` | a | nav | ✅ | ✅ | Docs |
-| 21 | `t-1iokwrm` | a | nav | ✅ | ✅ |  |
+| 17 | `t-irn03c` | a | nav | ✅ | ✅ | Playground |
+| 18 | `t-oaa3nl` | a | nav | ✅ | ✅ | API Keys |
+| 19 | `t-1ozkz3u` | a | nav | ✅ | ✅ | Dashboard |
+| 20 | `t-10wvbq3` | a | nav | ✅ | ✅ | Docs |
+| 21 | `t-3x44u1` | a | nav | ✅ | ✅ |  |
 | 22 | `tara-3f31cl` | button | main | ✅ | ✅ |  |
-| 23 | `t-1w7updc` | h2 | main | ✅ | ✅ | Playground |
-| 24 | `tara-cl5ogj` | button | main | ✅ | ✅ | Select a model |
-| 25 | `tara-1id744t` | button | main | ✅ | ✅ | Copy model id |
-| 26 | `t-d0dw3b` | button | nav | ✅ | ✅ | Chat |
-| 27 | `t-jm4neg` | button | nav | ✅ | ✅ | Studio |
-| 28 | `tara-q44uys` | button | main | ✅ | ✅ | Region: auto |
-| 29 | `t-qenkmd` | button | main | ✅ | ✅ | Select a model |
-| 30 | `t-sy440s` | button | main | ✅ | ✅ | Copy model id |
-| 31 | `tara-s2jae6` | button | main | ✅ | ✅ | View code |
-| 32 | `tara-8u4df8` | button | main | ✅ | — |  |
-| 33 | `t-1tsuvfx` | button | main | ✅ | ✅ | Hide code |
-| 34 | `tara-8u4df8` | button | main | ✅ | — |  |
-| 35 | `tara-1e747f4` | button | main | ✅ | — |  |
-| 36 | `tara-xe8xpr` | div | main | ✅ | ✅ | SystemEnter system message (Optional) |
-| 37 | `tara-1wx6kkf` | button | main | ✅ | ✅ | user |
-| 38 | `tara-1i05bsv` | button | main | ✅ | — | Delete message |
-| 39 | `tara-1li423y` | textarea | main | ✅ | ✅ | Enter user message... |
-| 40 | `tara-1t9dkjv` | button | main | ✅ | ✅ |  |
-| 41 | `tara-9z0j4a` | button | main | ✅ | — | Add |
-| 42 | `tara-nd7q5v` | button | main | ✅ | ✅ | Clear |
-| 43 | `tara-k0qqtk` | button | main | ✅ | — |  |
-| 44 | `tara-ebfux6` | button | main | ✅ | ✅ | Submit |
-| 45 | `tara-xe8xpr` | div | main | ✅ | ✅ | SystemEnter system message (Optional) |
-| 46 | `tara-1wx6kkf` | button | main | ✅ | ✅ | user |
-| 47 | `tara-1i05bsv` | button | main | ✅ | — | Delete message |
-| 48 | `tara-1li423y` | textarea | main | ✅ | ✅ | Enter user message... |
-| 49 | `t-qhj6n5` | button | main | ✅ | ✅ |  |
-| 50 | `tara-9z0j4a` | button | main | ✅ | — | Add |
-| 51 | `t-v1w1ay` | button | main | ✅ | ✅ | Clear |
-| 52 | `tara-k0qqtk` | button | main | ✅ | — |  |
-| 53 | `t-erqlwq` | button | main | ✅ | ✅ | Submit |
-| 54 | `t-1dvpx7k` | button | main | ✅ | ✅ | Select a language |
-| 55 | `t-1btqh8m` | button | main | ✅ | ✅ | Copy |
-| 56 | `t-1m1jluk` | button | main | ✅ | ✅ |  |
-| 57 | `tara-4hshrn` | button | main | ✅ | — |  |
+| 23 | `t-gwcz9s` | h1 | main | ✅ | ✅ | API Keys |
+| 24 | `t-f22gnz` | button | main | ✅ | ✅ | Create API Key |
+| 25 | `t-it4u8f` | th | main | ✅ | ✅ | Name |
+| 26 | `t-1qie1ew` | th | main | ✅ | ✅ | Secret Key |
+| 27 | `t-jwd4wa` | th | main | ✅ | ✅ | Created |
+| 28 | `t-llozt2` | th | main | ✅ | ✅ | Last Used |
+| 29 | `t-am8oek` | th | main | ✅ | ✅ | Expires |
+| 30 | `t-1puigva` | th | main | ✅ | ✅ | Usage (24hrs) |
+| 31 | `tara-abb64u` | span | main | ✅ | ✅ | 1 |
+| 32 | `t-m53byr` | button | main | ✅ | ✅ |  |
+| 33 | `t-m53bzm` | button | main | ✅ | ✅ |  |
+| 34 | `t-1a8eyya` | button | main | ✅ | ✅ |  |
+| 35 | `t-1a8eyxf` | button | main | ✅ | ✅ |  |
+| 36 | `tara-tm72c` | span | main | ✅ | ✅ | 784 |
+| 37 | `t-1ybnpn5` | button | main | ✅ | ✅ |  |
+| 38 | `t-1ybnpo0` | button | main | ✅ | ✅ |  |
+| 39 | `t-ndvank` | button | main | ✅ | ✅ |  |
+| 40 | `t-ndvamp` | button | main | ✅ | ✅ |  |
+| 41 | `tara-4hshrn` | button | main | ✅ | — |  |

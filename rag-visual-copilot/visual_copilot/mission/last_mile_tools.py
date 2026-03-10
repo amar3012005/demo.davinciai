@@ -1,6 +1,9 @@
 """
 Tool Specifications for the TARA Compound Last-Mile Execution Agent.
 
+NOTE: This is the legacy native tool-calling path.
+The one-call JSON reasoning-action path is now preferred when LAST_MILE_ONECALL_REASONING_ACTION_ENABLED is enabled.
+
 These schemas define the specific rigid capabilities the Groq LLM can invoke
 when attempting to autonomously resolve a goal in the `last_mile` phase.
 
@@ -184,6 +187,51 @@ LAST_MILE_TOOLS = [
                     }
                 },
                 "required": ["reason"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "escalate",
+            "description": (
+                "Escalate to human user when blocked or clarification is needed. "
+                "Use this when you encounter: missing required information, "
+                "ambiguous options requiring user choice, CAPTCHA or human verification, "
+                "unsupported page formats (PDF, Canvas), or when stuck after multiple attempts. "
+                "Provide a clear explanation and specific question for the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blockage_type": {
+                        "type": "string",
+                        "enum": ["information_wall", "ambiguity_wall", "verification_wall", "captcha_wall", "architecture_wall", "unknown"],
+                        "description": "Type of blockage requiring escalation"
+                    },
+                    "speech": {
+                        "type": "string",
+                        "description": "Human-friendly explanation of the situation"
+                    },
+                    "ask": {
+                        "type": "string",
+                        "description": "Specific question for the user"
+                    },
+                    "diagnostics": {
+                        "type": "object",
+                        "description": "Diagnostic information for debugging"
+                    },
+                    "resume_context": {
+                        "type": "object",
+                        "description": "Context for resuming mission"
+                    },
+                    "suggested_resolutions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Suggested ways to resolve the blockage"
+                    }
+                },
+                "required": ["blockage_type", "speech", "ask"]
             }
         }
     },

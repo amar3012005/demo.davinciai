@@ -276,7 +276,7 @@ class HiveInterface:
                 vector=vector,
                 query_filter=query_filter,
                 limit=1,
-                score_threshold=0.6
+                score_threshold=0.2
             )
             
             if not results:
@@ -360,8 +360,8 @@ class HiveInterface:
                 results = await self._query_qdrant(
                     vector=vector or [],
                     query_filter=query_filter,
-                    limit=5,
-                    score_threshold=0.3  # Lower threshold to find relevant chunks
+                    limit=8, # Slightly higher limit to get mix of types
+                    score_threshold=0.2  # Lower threshold to find relevant chunks
                 )
                 
                 for point in (results or []):

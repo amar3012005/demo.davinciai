@@ -22,6 +22,8 @@ def _last_mile_dom_signature(nodes: list) -> str:
                     str(getattr(n, "tag", "") or ""),
                     str(getattr(n, "zone", "") or ""),
                     str((getattr(n, "text", "") or "")[:80]),
+                    str(getattr(n, "value", "") or ""),
+                    str(getattr(n, "placeholder", "") or ""),
                 ]
             )
         )
@@ -351,6 +353,7 @@ async def handle_last_mile_stage(
                 goal_url=str(getattr(mission, "last_url", "") or ""),
                 user_goal=goal,
                 force_vision_bootstrap=force_vision_bootstrap,
+                initial_overlay_ids=set(runtime.get("last_overlay_ids", [])),
             )
         except Exception as e:
             logger.error(f"COMPOUND_LAST_MILE_ERROR: {e}, falling back to legacy planner")
@@ -431,12 +434,20 @@ async def handle_last_mile_stage(
                         f"stall={lm_state.get('stall_count')} "
                         f"exit={lm_state.get('exit_reason')}"
                     )
+                    # Sync overlay state for next turn
+                    runtime["last_overlay_ids"] = lm_state.get("last_overlay_ids", [])
 
             mission.last_mile_attempts = attempts + 1
 
             # ── Complete: The agent answered the goal ──
             if compound_status == "complete":
-                speech = compound_action.get("speech") or compound_action.get("text") or f"I've completed {schema.target_entity}."
+                # compound_action might be a dict or a list (bundled pipeline)
+                if isinstance(compound_action, list):
+                    # Use info from the terminal action in the pipeline
+                    last_step = compound_action[-1] if compound_action else {}
+                    speech = last_step.get("speech") or last_step.get("text") or f"I've completed {schema.target_entity}."
+                else:
+                    speech = compound_action.get("speech") or compound_action.get("text") or f"I've completed {schema.target_entity}."
                 mission.phase = "done"
                 mission.status = "completed"
                 mission.last_mile_runtime = None
@@ -454,7 +465,11 @@ async def handle_last_mile_stage(
 
             # ── Stuck / No Progress: Deterministic hard-stop from state machine ──
             if compound_status in ("stuck_no_progress", "last_mile_stuck", "last_mile_no_evidence", "last_mile_guardrail_blocked"):
-                speech = compound_action.get("speech") or f"I couldn't find the information for '{mission.main_goal}'."
+                if isinstance(compound_action, list):
+                    last_step = compound_action[-1] if compound_action else {}
+                    speech = last_step.get("speech") or f"I couldn't find the information for '{mission.main_goal}'."
+                else:
+                    speech = compound_action.get("speech") or f"I couldn't find the information for '{mission.main_goal}'."
                 # Evidence rescue attempt
                 evidence = extract_model_usage_evidence_fn(mission.main_goal or schema.target_entity, nodes)
                 if not evidence:
@@ -493,7 +508,11 @@ async def handle_last_mile_stage(
 
             # ── Impossible / Max iterations: Agent is stuck ──
             if compound_status in ("impossible", "max_iterations"):
-                speech = compound_action.get("speech") or f"I couldn't complete '{mission.main_goal}'."
+                if isinstance(compound_action, list):
+                    last_step = compound_action[-1] if compound_action else {}
+                    speech = last_step.get("speech") or f"I couldn't complete '{mission.main_goal}'."
+                else:
+                    speech = compound_action.get("speech") or f"I couldn't complete '{mission.main_goal}'."
                 # Before giving up, check for visible evidence one last time
                 evidence = extract_model_usage_evidence_fn(mission.main_goal or schema.target_entity, nodes)
                 if not evidence:
@@ -560,15 +579,25 @@ async def handle_last_mile_stage(
                     else:
                         await mission_brain._save_mission(mission)
 
+                    # Incorporate wait time from bundled actions if present
+                    pipe_wait_ms = 700
+                    for step in compound_action:
+                        if isinstance(step, dict) and step.get("type") == "wait":
+                            s = float(step.get("seconds", 0) or 0)
+                            w = int(step.get("wait_ms", 0) or 0)
+                            if s > 0: pipe_wait_ms = max(pipe_wait_ms, int(s * 1000))
+                            if w > 0: pipe_wait_ms = max(pipe_wait_ms, w)
+
                     mission.last_mile_runtime = {
                         **runtime,
                         "last_action_type": rep_type,
                         "last_action_fp": _action_fingerprint(rep_step) if rep_step else "",
                         "last_action_dom_signature": current_dom_sig,
                         "last_action_ts_ms": now_ms,
-                        "wait_until_ms": now_ms + 700,
+                        "wait_until_ms": now_ms + pipe_wait_ms,
                         "dedupe_hits": 0,
                         "subgoal_index": int(getattr(mission, "current_subgoal_index", 0) or 0),
+                        "last_overlay_ids": runtime.get("last_overlay_ids", []),
                     }
                     await mission_brain._save_mission(mission)
 
@@ -609,6 +638,7 @@ async def handle_last_mile_stage(
                         "wait_until_ms": now_ms + 700,
                         "dedupe_hits": 0,
                         "subgoal_index": int(getattr(mission, "current_subgoal_index", 0) or 0),
+                        "last_overlay_ids": runtime.get("last_overlay_ids", []),
                     }
                     await mission_brain._save_mission(mission)
                     return mission, {
@@ -646,6 +676,7 @@ async def handle_last_mile_stage(
                         "wait_until_ms": now_ms + wait_ms,
                         "dedupe_hits": 0,
                         "subgoal_index": int(getattr(mission, "current_subgoal_index", 0) or 0),
+                        "last_overlay_ids": runtime.get("last_overlay_ids", []),
                     }
                     await mission_brain._save_mission(mission)
                     return mission, {
@@ -687,6 +718,7 @@ async def handle_last_mile_stage(
                         "wait_until_ms": now_ms + 600,
                         "dedupe_hits": 0,
                         "subgoal_index": int(getattr(mission, "current_subgoal_index", 0) or 0),
+                        "last_overlay_ids": runtime.get("last_overlay_ids", []),
                     }
                     await mission_brain._save_mission(mission)
                     return mission, {
@@ -701,7 +733,13 @@ async def handle_last_mile_stage(
                     }
 
                 if action_type == "wait":
+                    # Extract wait time (support both 'wait_ms' and 'seconds' from LLM)
                     requested_wait_ms = int(compound_action.get("wait_ms", 0) or 0)
+                    if requested_wait_ms <= 0:
+                        seconds = float(compound_action.get("seconds", 0) or 0)
+                        if seconds > 0:
+                            requested_wait_ms = int(seconds * 1000)
+                    
                     if requested_wait_ms <= 0:
                         requested_wait_ms = LAST_MILE_WAIT_GRACE_MS
                     mission.last_mile_runtime = {
@@ -713,6 +751,7 @@ async def handle_last_mile_stage(
                         "wait_until_ms": now_ms + requested_wait_ms,
                         "dedupe_hits": 0,
                         "subgoal_index": int(getattr(mission, "current_subgoal_index", 0) or 0),
+                        "last_overlay_ids": runtime.get("last_overlay_ids", []),
                     }
                     await mission_brain._save_mission(mission)
                     return mission, {

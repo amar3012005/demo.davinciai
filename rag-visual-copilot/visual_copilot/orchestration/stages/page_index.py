@@ -15,6 +15,7 @@ ALGORITHM:
 NO VECTOR SEARCH — pure reasoning over a JSON tree.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -569,6 +570,22 @@ def traverse_index(
         f"target={target_node.get('node_id', 'none') if target_node else 'none'} "
         f"path_len={len(transition)} conf={confidence:.2f} ms={elapsed_ms}"
     )
+
+    if target_node:
+        try:
+            subgraph_lines = []
+            def _walk(n, d):
+                title = n.get("title") or n.get("node_id") or "Unnamed Node"
+                controls = n.get("expected_controls", []) or []
+                subgraph_lines.append(f"{'  ' * d} • {title}")
+                for ctrl in controls:
+                    subgraph_lines.append(f"{'  ' * (d+1)} └─ [element] {ctrl}")
+                for c in n.get("children", []):
+                    _walk(c, d + 1)
+            _walk(target_node, 0)
+            logger.info(f"🎯 PageIndex Target Goal Subgraph ({target_node.get('node_id', '?')}):\n" + "\n".join(subgraph_lines))
+        except Exception as subgraph_err:
+            logger.warning(f"Failed to print PageIndex subgraph: {subgraph_err}")
 
     return {
         "has_index": True,

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -5,13 +6,52 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from visual_copilot.constants import _CLICK_ROLES, _CLICK_TAGS, _TYPE_ROLES, _TYPE_TAGS
+from visual_copilot.navigation.site_map_validator import SiteMapValidator, ValidationResult
 from visual_copilot.routing.action_guard import _is_clickable_node, _is_type_node, _resolve_clickable_by_label_context, _resolve_clickable_target_id
 from visual_copilot.text.tokenization import _tokenize
+from visual_copilot.mission.page_state import (
+    build_page_state_snapshot,
+    compare_page_state,
+    should_count_as_stagnant,
+    format_page_state_for_prompt,
+    PageStateSnapshot,
+    PageStateDelta,
+    LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED,
+    LAST_MILE_LOADING_STATE_GUARD_ENABLED,
+)
+from visual_copilot.mission.visit_graph import (
+    VisitGraphV1,
+    VisitRecord,
+    EvidenceEntry,
+    LAST_MILE_VISIT_GRAPH_V1_ENABLED,
+    LAST_MILE_VISIT_EVIDENCE_VAULT_ENABLED,
+)
+from visual_copilot.mission.escalation_checkpoint import (
+    EscalationDetector,
+    EscalationPayload,
+    should_escalate,
+    LAST_MILE_ESCALATION_CHECKPOINT_ENABLED,
+)
 
 logger = logging.getLogger(__name__)
+
+# Site map validator instance (lazy-loaded)
+_site_map_validator: Optional[SiteMapValidator] = None
+
+
+def _get_validator() -> Optional[SiteMapValidator]:
+    """Get or create the site map validator instance."""
+    global _site_map_validator
+    if _site_map_validator is None:
+        try:
+            _site_map_validator = SiteMapValidator()
+        except Exception as e:
+            logger.warning(f"Failed to initialize SiteMapValidator: {e}")
+            return None
+    return _site_map_validator
 LOG_FULL_REASONING = (os.getenv("LOG_FULL_REASONING", "true").strip().lower() in {"1", "true", "yes", "on"})
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -73,6 +113,8 @@ class ProposedAction:
     evidence_refs: str = ""
     answer_confidence: str = ""
     why: str = ""
+    # Intent-based action fields (Phase 1: Intent-Based Architecture)
+    intent: Optional[Dict[str, Any]] = None  # {text_label, zone, element_type, context}
 
 @dataclass
 class LastMileDecision:
@@ -126,6 +168,16 @@ class LastMileState:
     # Repeat rejection tracking: count consecutive same-action rejections
     last_rejected_action: str = ""
     repeat_rejection_count: int = 0
+    last_overlay_ids: Set[str] = field(default_factory=set)
+
+    # Phase 1: Semantic stability tracking
+    last_page_snapshot: Optional[PageStateSnapshot] = None
+    page_state_history: List[PageStateDelta] = field(default_factory=list)
+    consecutive_loading_states: int = 0
+
+    # Phase 2: Visit graph tracking
+    visit_graph: Optional[VisitGraphV1] = None
+    visit_graph_context: str = ""  # cached context string
 
     def record_action(self, action_label: str) -> None:
         self.last_3_actions.append(action_label)
@@ -258,10 +310,20 @@ class LastMileState:
 
     def should_hard_stop(self) -> bool:
         """Deterministic hard-stop when no progress is being made."""
+        # If semantic fingerprinting is enabled, use semantic stagnancy
+        if LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED and self.page_state_history:
+            # Check if we've been stagnant for too many turns
+            recent_classifications = [d.classification for d in self.page_state_history[-PROGRESS_STALL_MAX:]]
+            if len(recent_classifications) >= PROGRESS_STALL_MAX:
+                all_stagnant = all(c == "stable_no_change" for c in recent_classifications)
+                if all_stagnant:
+                    return True
+
+        # Fallback to original logic
         return self.stall_count >= PROGRESS_STALL_MAX
 
     def to_diagnostic(self) -> Dict[str, Any]:
-        return {
+        result = {
             "phase": self.phase.value,
             "iteration": self.iteration,
             "evidence_hits": self.evidence_hits,
@@ -272,9 +334,41 @@ class LastMileState:
             "vision_used": self.vision_used,
             "exit_reason": self.exit_reason,
             "semantic_summaries": self.semantic_summaries,
+            "last_overlay_ids": list(self.last_overlay_ids) if self.last_overlay_ids else [],
+            "page_state_enabled": LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED,
+            "loading_guard_enabled": LAST_MILE_LOADING_STATE_GUARD_ENABLED,
+            "last_classification": self.page_state_history[-1].classification if self.page_state_history else None,
+            "consecutive_loading": self.consecutive_loading_states,
+            "visit_graph_enabled": LAST_MILE_VISIT_GRAPH_V1_ENABLED,
+            "evidence_vault_enabled": LAST_MILE_VISIT_EVIDENCE_VAULT_ENABLED,
+            "escalation_checkpoint_enabled": LAST_MILE_ESCALATION_CHECKPOINT_ENABLED,
         }
 
+        if self.visit_graph:
+            summary = self.visit_graph.get_mission_summary()
+            result.update({
+                "total_visits": summary["total_visits"],
+                "current_visit": summary["current_visit"][:8] if summary["current_visit"] else None,
+                "total_evidence_score": summary["total_evidence_score"],
+                "highest_evidence_visit": summary["highest_evidence_visit"][:8] if summary["highest_evidence_visit"] else None,
+            })
+
+        return result
+
 def _get_page_index_node(current_url: str) -> Optional[Dict[str, Any]]:
+    """Get the site map node for a URL using SiteMapValidator.
+
+    Args:
+        current_url: The current page URL
+
+    Returns:
+        Site map node dictionary or None if not found
+    """
+    validator = _get_validator()
+    if validator:
+        return validator.get_node_for_url(current_url)
+
+    # Fallback to legacy implementation if validator unavailable
     import json, re, os
     try:
         sm_path = os.path.join(
@@ -299,6 +393,152 @@ def _get_page_index_node(current_url: str) -> Optional[Dict[str, Any]]:
         return _walk(site_map.get("root", {}))
     except Exception:
         return None
+
+
+def _build_last_mile_page_context(
+    current_url: str,
+    nodes: List[Any],
+    expected_node_id: Optional[str] = None
+) -> LastMilePageContext:
+    """Build page context enriched with site map information.
+
+    Args:
+        current_url: Current page URL
+        nodes: List of DOM nodes
+        expected_node_id: Optional expected node ID for validation
+
+    Returns:
+        LastMilePageContext with site map enrichment
+    """
+    validator = _get_validator()
+
+    # Get current node from site map
+    current_node = validator.get_node_for_url(current_url) if validator else None
+
+    # Validate page state if we have a validator
+    validation_result: Optional[ValidationResult] = None
+    if validator and expected_node_id:
+        validation_result = validator.validate_page_state(
+            url=current_url,
+            nodes=nodes,
+            expected_node_id=expected_node_id
+        )
+
+    if current_node:
+        # Build enriched context from site map
+        current_node_id = current_node.get("node_id", "")
+        current_title = current_node.get("title", "")
+        current_url_pattern = current_node.get("path_regex", "")
+
+        # Get parent info
+        parent_node = validator.get_parent_node(current_node_id) if validator else None
+        parent_node_id = parent_node.get("node_id", "") if parent_node else ""
+        parent_title = parent_node.get("title", "") if parent_node else ""
+
+        # Get child titles
+        child_titles = [
+            child.get("title", "")
+            for child in current_node.get("children", [])
+        ]
+
+        # Get expected controls and terminal capabilities
+        expected_controls = current_node.get("expected_controls", []) or []
+        terminal_capabilities = current_node.get("terminal_capabilities", []) or []
+
+        # Build route summary
+        breadcrumb = validator.get_breadcrumb(current_url) if validator else []
+        route_summary = " → ".join([
+            n.get("title", "?") for n in breadcrumb
+        ]) if breadcrumb else current_title
+
+        # Log validation status
+        if validation_result:
+            if validation_result.is_valid:
+                logger.info(
+                    f"LAST_MILE_CONTEXT_VALID: On '{current_title}' ({current_node_id}) - "
+                    f"{len(validation_result.present_expected_controls)}/{len(expected_controls)} controls present"
+                )
+            else:
+                logger.warning(
+                    f"LAST_MILE_CONTEXT_INVALID: On '{current_title}' but expected '{expected_node_id}'. "
+                    f"Recovery: {validation_result.suggested_recovery}"
+                )
+
+        return LastMilePageContext(
+            current_node_id=current_node_id,
+            current_title=current_title,
+            current_url_pattern=current_url_pattern,
+            parent_node_id=parent_node_id,
+            parent_title=parent_title,
+            child_titles=child_titles,
+            expected_controls=expected_controls,
+            terminal_capabilities=terminal_capabilities,
+            route_summary=route_summary
+        )
+
+    # Fallback: return minimal context
+    return LastMilePageContext(
+        current_node_id="unknown",
+        current_title="Unknown Page",
+        current_url_pattern="",
+        parent_node_id="",
+        parent_title="",
+        child_titles=[],
+        expected_controls=[],
+        terminal_capabilities=[],
+        route_summary="unknown"
+    )
+
+
+def validate_last_mile_context(
+    current_url: str,
+    nodes: List[Any],
+    expected_node_id: Optional[str] = None
+) -> Tuple[bool, str, Optional[LastMilePageContext]]:
+    """Validate that we're on the correct node before extraction.
+
+    Args:
+        current_url: Current page URL
+        nodes: List of DOM nodes
+        expected_node_id: Expected node ID from strategy
+
+    Returns:
+        Tuple of (is_valid, message, page_context)
+    """
+    validator = _get_validator()
+    if not validator:
+        return True, "validator_unavailable", None
+
+    # Get current node
+    current_node = validator.get_node_for_url(current_url)
+    if not current_node:
+        return True, "url_not_in_site_map", None
+
+    # If no expected node, just return context
+    if not expected_node_id:
+        context = _build_last_mile_page_context(current_url, nodes)
+        return True, "no_expected_node", context
+
+    # Validate against expected node
+    validation_result = validator.validate_page_state(
+        url=current_url,
+        nodes=nodes,
+        expected_node_id=expected_node_id
+    )
+
+    context = _build_last_mile_page_context(current_url, nodes, expected_node_id)
+
+    if validation_result.is_valid:
+        return True, validation_result.validation_message, context
+
+    # Validation failed - provide recovery guidance
+    if validation_result.suggested_recovery:
+        return False, (
+            f"Wrong node: {validation_result.validation_message}. "
+            f"Recovery: {validation_result.suggested_recovery}"
+        ), context
+
+    return False, validation_result.validation_message, context
 
 @dataclass
 class LastMilePlan:
@@ -1027,6 +1267,48 @@ def _goal_focus_terms(main_goal: str) -> Tuple[set[str], set[str], set[str]]:
     return entity_terms, qualifier_terms, all_terms
 
 
+def _detect_overlay_active_ids(nodes: list) -> Set[str]:
+    """
+    Returns a set of IDs for elements considered active overlays (dropdowns, popups, modals).
+    """
+    active_ids = set()
+    for n in nodes:
+        # Check if it's a Node object or a dict
+        is_visible = getattr(n, "visible", False) if hasattr(n, "visible") else n.get("visible", False)
+        if not is_visible:
+            continue
+        
+        node_id = getattr(n, "id", "") if hasattr(n, "id") else n.get("id", "")
+        if not node_id:
+            continue
+
+        # 1. ARIA-Expanded elements (usually dropdown triggers)
+        aria_expanded = getattr(n, "aria_expanded", "") if hasattr(n, "aria_expanded") else n.get("aria_expanded", "")
+        if str(aria_expanded).lower() in {"true"}:
+             active_ids.add(node_id)
+             
+        # 2. Key Overlay Roles
+        role = getattr(n, "role", "") if hasattr(n, "role") else n.get("role", "")
+        role = str(role or "").lower()
+        if role in {"dialog", "menu", "listbox", "popover", "status", "alert"}:
+             active_ids.add(node_id)
+             
+        # 3. Zone-based markers
+        zone = getattr(n, "zone", "") if hasattr(n, "zone") else n.get("zone", "")
+        if zone == "modal":
+             active_ids.add(node_id)
+             
+        # 4. Common Radix/Modern primitives patterns
+        tag = getattr(n, "tag", "") if hasattr(n, "tag") else n.get("tag", "")
+        if tag in {"div"} and "radix-" in node_id:
+             # Heuristic: interactive radix div often implies a new popup/dropdown content
+             is_interactive = getattr(n, "interactive", False) if hasattr(n, "interactive") else n.get("interactive", False)
+             if is_interactive:
+                 active_ids.add(node_id)
+        
+    return active_ids
+
+
 def _score_evidence_relevance(main_goal: str, nodes: list) -> Tuple[int, str, bool]:
     """Score goal relevance in readable content. Returns (hit_count, best_excerpt, has_entity_evidence)."""
     entity_terms, qualifier_terms, goal_terms = _goal_focus_terms(main_goal)
@@ -1178,12 +1460,13 @@ def _build_mission_state_context(
 def _build_onecall_prompt() -> str:
     """
     Simplified One-Call JSON Schema.
-    
+
     Changes from original:
     - Removed expected_gain entirely
     - Made why_not_complete optional
     - Kept page_assessment optional
     - Minimized required fields to improve JSON reliability
+    - Added intent-based action format (Phase 1: Intent-Based Architecture)
     """
     return """You are TARA's Last-Mile Execution Agent. Your mission is to translate human "Free Language" intent into precisely ONE structured JSON decision.
 You MUST return EXACTLY ONE JSON object matching this schema. NO markdown backticks, NO explanation text before or after.
@@ -1198,21 +1481,61 @@ You MUST return EXACTLY ONE JSON object matching this schema. NO markdown backti
   "execution_mode": "single | pipeline",
   "action": {
     "type": "complete_mission | click_element | type_text | scroll_page | wait_for_ui | read_page_content",
-    "target_id": "t-xxx (REQUIRED for click_element, type_text)",
+    "target_id": "t-xxx (REQUIRED for click_element/type_text UNLESS using intent format)",
+    "intent": {  // ALTERNATIVE to target_id for click_element/type_text
+      "text_label": "The exact visible text on the element",
+      "zone": "Where it appears (nav, sidebar, main, header, footer)",
+      "element_type": "What type (button, link, input, dropdown, span)",
+      "context": "What it's near or what it does"
+    },
     "text": "string (REQUIRED for type_text; optional focus for read_page_content)",
     "direction": "down | up (for scroll_page)",
     "seconds": 1-3 (for wait_for_ui),
     "press_enter": true | false (for type_text),
     "force_click": true | false (for click_element on dropdowns/menus),
     "response": "Complete grounded answer (REQUIRED for complete_mission)",
-    "evidence_refs": "Exact text snippets from page (REQUIRED for complete_mission)",
-    "answer_confidence": "high | medium | low (REQUIRED for complete_mission)",
+    "evidence_refs": "Exact text snippets from page supporting the answer (REQUIRED for complete_mission)",
+    "answer_confidence": "high | medium | low (REQUIRED for complete_mission, must be high/medium)",
     "why": "Brief reason for action (REQUIRED for non-terminal actions)"
   },
   "actions": [
-    {"type": "...", "target_id": "...", ...}
+    {"type": "...", "target_id": "...", ...}  // or use "intent": {...} instead of target_id
   ]
 }
+
+## INTENT-BASED ACTION FORMAT (PREFERRED for click_element/type_text):
+
+When proposing click_element or type_text actions, describe the element using intent fields:
+
+{
+  "action": {
+    "type": "click_element",
+    "intent": {
+      "text_label": "Last 7 days",
+      "zone": "main",
+      "element_type": "button",
+      "context": "Time range selector dropdown"
+    },
+    "why": "Change time range to view last 7 days of usage data"
+  }
+}
+
+### PIPELINE ACTION FORMAT (FOR POPUPS/DROPDOWNS):
+
+When an overlay (modal/dropdown) is detected, you MUST use `execution_mode: pipeline` to perform multiple steps at once (e.g. click dropdown AND click item).
+
+{
+  "reasoning": { "goal_status": "not_found", "evidence_summary": "Dropdown t-123 is visible" },
+  "execution_mode": "pipeline",
+  "actions": [
+    { "type": "click_element", "target_id": "t-123", "why": "Open the dropdown" },
+    { "type": "click_element", "target_id": "t-456", "why": "Select the target option" },
+    { "type": "wait_for_ui", "seconds": 2, "why": "Allow menu to close and page to update" }
+  ]
+}
+
+The backend will automatically map your intent description to the correct element ID.
+Your job is to describe WHAT you see, not technical implementation details.
 
 ## REQUIRED FIELDS BY ACTION TYPE:
 
@@ -1223,13 +1546,15 @@ You MUST return EXACTLY ONE JSON object matching this schema. NO markdown backti
 - answer_confidence: Must be "high" or "medium" (NOT "low" — low confidence triggers re-exploration)
 
 ### click_element (Non-terminal):
-- REQUIRED: target_id, why
+- REQUIRED: target_id OR intent, why
 - target_id: MUST exist in provided DOM list (NEVER invent IDs)
+- OR intent: Describe the element using text_label, zone, element_type, context
 - why: What new evidence this click will reveal
 
 ### type_text (Non-terminal):
-- REQUIRED: target_id, text, press_enter
+- REQUIRED: target_id OR intent, text, press_enter
 - target_id: MUST be an input field in DOM
+- OR intent: Describe the input field using text_label, zone, element_type, context
 - text: The exact text to type
 - press_enter: true if this is a search submission
 
@@ -1249,21 +1574,27 @@ You MUST return EXACTLY ONE JSON object matching this schema. NO markdown backti
 
 1. **NO FAKE COMPLETIONS**: If response contains "not displayed", "not visible", "cannot find", or answer_confidence is "low" → DO NOT call complete_mission. Instead, explore further.
 
-2. **NO HALLUCINATED IDs**: Every target_id MUST exist in the provided DOM list. IDs like "t-?", "unknown", "none" are FORBIDDEN.
+2. **NO HALLUCINATED IDs**: Every target_id MUST exist in the provided DOM list. IDs like "t-?", "unknown", "none" are FORBIDDEN. Use intent format instead if unsure of ID.
 
-3. **ENTITY ANCHORING**: Before complete_mission, verify the target entity (e.g., "Whisper", "Llama-3", "Usage") appears in your evidence_refs.
+3. **PREFER INTENT FORMAT**: When you see an element but don't know its ID, use the intent format. The backend will resolve it to the correct ID.
 
-4. **METRIC MATCHING**: If user asks for TOKENS, do NOT return DOLLARS. Match the exact metric requested.
+4. **ENTITY ANCHORING**: Before complete_mission, verify the target entity (e.g., "Whisper", "Llama-3", "Usage") appears in your evidence_refs.
 
-5. **PIPELINE RULES**:
+5. **METRIC MATCHING**: If user asks for TOKENS, do NOT return DOLLARS. Match the exact metric requested.
+
+6. **MENU PERSISTENCE**: If you open a dropdown, combobox, or menu, you are PROHIBITED from ending your turn without either clicking a selection inside that menu or explicitly closing it.
+
+7. **POPUP BUNDLING (CRITICAL)**: For popups, dropdowns, or multi-step forms, you MUST prioritize `execution_mode: pipeline`. Execute all intermediate steps (clicks/typing) and call `wait_for_ui` as the last step. Verification happens AFTER the whole bundle is executed.
+
+8. **PIPELINE RULES**:
    - Max 3 actions in pipeline
-   - Allowed patterns: click->wait, type->wait, scroll->wait, read->complete_mission
+   - Allowed patterns: click->click->wait, click->wait, type->wait, type->type->wait, click->type->wait, scroll->wait, read->complete_mission
    - complete_mission must be last if present
 
 ## OUTPUT RULES:
 1. Return ONLY one JSON object.
 2. Do NOT include markdown or prose.
-3. Use only IDs that appear in the provided DOM list.
+3. Use only IDs that appear in the provided DOM list, or use intent format.
 4. Prefer the smallest valid JSON object that satisfies the schema."""
 
 
@@ -1475,11 +1806,25 @@ def _build_onecall_runtime_prompt(
     readable_text: str,
     evidence_hint: str,
     excluded_ids: set[str],
+    vision_hints: str = "",
+    page_state_delta: Optional[PageStateDelta] = None,
+    visit_context: str = "",
 ) -> str:
     # Increased from 500 to 2000 to preserve full navigation reasoning for complex missions
     recent_block = mission_ctx[:2000]
     excluded_line = ", ".join(sorted(excluded_ids)[:10]) if excluded_ids else "none"
-    return (
+
+    # Build page state hint for prompt
+    page_state_hint = ""
+    if page_state_delta:
+        page_state_hint = format_page_state_for_prompt(page_state_delta)
+
+    # Build visit context hint for prompt
+    visit_hint = ""
+    if visit_context:
+        visit_hint = f"\n\n**Mission Navigation History**:\n{visit_context}\n"
+
+    prompt = (
         f"{_build_onecall_prompt()}\n\n"
         f"Goal: {main_goal}\n"
         f"Target entity: {target_entity or 'unknown'}\n"
@@ -1490,8 +1835,14 @@ def _build_onecall_runtime_prompt(
         f"Mission context:\n{recent_block}\n\n"
         f"Current interactable DOM:\n{dom_text}\n\n"
         f"Current readable content:\n{readable_text}\n"
+        f"{page_state_hint}\n"
         f"{evidence_hint}\n"
+        f"{visit_hint}"
     )
+    # Append vision hints if provided (from forced vision bootstrap)
+    if vision_hints:
+        prompt += f"\n\n**VISION HINTS (from visual bootstrap):**\n{vision_hints}\n"
+    return prompt
 
 async def _generate_last_mile_onecall_decision(llm: Any, full_prompt: str) -> str:
     """
@@ -1507,7 +1858,7 @@ async def _generate_last_mile_onecall_decision(llm: Any, full_prompt: str) -> st
             result = await llm.generate_with_reasoning(
                 prompt=full_prompt,
                 model=os.getenv("LLM_MODEL", "openai/gpt-oss-120b"),
-                max_completion_tokens=650,  # Increased from 400 to prevent truncation
+                max_completion_tokens=1200,  # Increased from 650 to prevent truncation and validation failures
                 temperature=0.1,
                 reasoning_effort="low",
                 include_reasoning=LAST_MILE_ONECALL_INCLUDE_REASONING,
@@ -1538,13 +1889,33 @@ def _parse_last_mile_onecall_json(raw_json: str) -> Optional[LastMileDecision]:
     try:
         if not text:
             return None
-        if LAST_MILE_ONECALL_JSON_SCHEMA_STRICT:
+            
+        data = None
+        # Strategy 1: Direct parse
+        try:
             data = json.loads(text)
-        else:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if not match:
-                return None
-            data = json.loads(match.group())
+        except:
+            pass
+            
+        # Strategy 2: Find outermost { }
+        if data is None:
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1:
+                json_str = text[start:end+1]
+                try:
+                    data = json.loads(json_str)
+                except:
+                    # Strategy 3: Aggressive repair (trailing commas)
+                    try:
+                        repaired = re.sub(r",\s*([}\]])", r"\1", json_str)
+                        data = json.loads(repaired)
+                    except:
+                        pass
+        
+        if data is None:
+            return None
+
         reas = data.get("reasoning", {})
         act = data.get("action", {})
         if not isinstance(reas, dict) or not isinstance(act, dict):
@@ -1575,10 +1946,11 @@ def _parse_last_mile_onecall_json(raw_json: str) -> Optional[LastMileDecision]:
                 response=act.get("response", ""),
                 evidence_refs=act.get("evidence_refs", ""),
                 answer_confidence=act.get("answer_confidence", ""),
-                why=act.get("why", "")
+                why=act.get("why", ""),
+                intent=act.get("intent")  # Phase 1: Intent-Based Architecture
             )
             return LastMileDecision(reasoning=reasoning, execution_mode=execution_mode, action=action)
-            
+
         elif execution_mode == "pipeline":
             parsed_actions = []
             for a in actions_list:
@@ -1593,7 +1965,8 @@ def _parse_last_mile_onecall_json(raw_json: str) -> Optional[LastMileDecision]:
                     response=a.get("response", ""),
                     evidence_refs=a.get("evidence_refs", ""),
                     answer_confidence=a.get("answer_confidence", ""),
-                    why=a.get("why", "")
+                    why=a.get("why", ""),
+                    intent=a.get("intent")  # Phase 1: Intent-Based Architecture
                 ))
             return LastMileDecision(reasoning=reasoning, execution_mode=execution_mode, actions=parsed_actions)
             
@@ -1672,38 +2045,89 @@ def _validate_onecall_action(
         }])
         
     elif type_ == "click_element":
-        # 🛡️ STRENGTHENED: Validate target_id exists BEFORE any other checks
-        if not act.target_id:
-            return LastMileValidationResult(False, "missing_target_id", "click_element requires 'target_id'")
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 1: Intent-Based Architecture Validation
+        # Allow either target_id (direct) OR intent (resolved at execution time)
+        # ═══════════════════════════════════════════════════════════════════
         
-        # Block hallucinated/placeholder IDs early
-        if act.target_id.lower() in {"?", "unknown", "none", "missing", "id", "n/a"} or "t-?" in act.target_id:
-            return LastMileValidationResult(
-                False,
-                "invalid_target_id",
-                f"Target ID '{act.target_id}' is a placeholder — MUST use actual ID from DOM",
-                retryable=True
-            )
+        # Check if intent-based action (preferred) or direct ID-based
+        has_intent = bool(act.intent and isinstance(act.intent, dict))
+        has_target_id = bool(act.target_id and act.target_id.lower() not in {"?", "unknown", "none", "missing", "id", "n/a"} and "t-?" not in act.target_id)
         
-        if act.target_id in excluded_ids:
-            return LastMileValidationResult(False, "already_clicked", "Target ID has already been visited.")
-        
-        # CRITICAL: Validate target_id exists in DOM BEFORE other checks
-        if node is None:
+        # Require at least one of: target_id OR intent
+        if not has_target_id and not has_intent:
             return LastMileValidationResult(
                 False, 
-                "target_not_in_live_graph",
-                f"click_element target_id '{act.target_id}' is not present in the current DOM — DO NOT invent IDs",
-                retryable=True
+                "missing_target_id_or_intent", 
+                "click_element requires either 'target_id' OR 'intent' object"
             )
         
-        if not bool(getattr(node, "interactive", False)):
-            return LastMileValidationResult(False, "target_not_interactive", "click_element target must be interactive")
-        if not ((getattr(node, "tag", "") or "").lower() in _CLICK_TAGS or (getattr(node, "role", "") or "").lower() in _CLICK_ROLES or _is_clickable_node(node)):
-            return LastMileValidationResult(False, "target_not_clickable", "click_element target must be clickable")
+        # If target_id provided, validate it (legacy path + explicit ID with intent)
+        if has_target_id:
+            # Block hallucinated/placeholder IDs early
+            if act.target_id.lower() in {"?", "unknown", "none", "missing", "id", "n/a"} or "t-?" in act.target_id:
+                return LastMileValidationResult(
+                    False,
+                    "invalid_target_id",
+                    f"Target ID '{act.target_id}' is a placeholder — MUST use actual ID from DOM or use intent format",
+                    retryable=True
+                )
+            
+            if act.target_id in excluded_ids:
+                return LastMileValidationResult(False, "already_clicked", "Target ID has already been visited.")
+            
+            # CRITICAL: Validate target_id exists in DOM BEFORE other checks
+            if node is None:
+                return LastMileValidationResult(
+                    False,
+                    "target_not_in_live_graph",
+                    f"click_element target_id '{act.target_id}' is not present in the current DOM — DO NOT invent IDs",
+                    retryable=True
+                )
+            
+            if not bool(getattr(node, "interactive", False)):
+                return LastMileValidationResult(False, "target_not_interactive", "click_element target must be interactive")
+            if not ((getattr(node, "tag", "") or "").lower() in _CLICK_TAGS or (getattr(node, "role", "") or "").lower() in _CLICK_ROLES or _is_clickable_node(node)):
+                return LastMileValidationResult(False, "target_not_clickable", "click_element target must be clickable")
+        
+        # If intent-based, validate intent structure
+        if has_intent:
+            intent = act.intent
+            if not isinstance(intent, dict):
+                return LastMileValidationResult(
+                    False,
+                    "invalid_intent_type",
+                    "click_element intent must be a dict",
+                    retryable=True
+                )
+            if not intent.get("text_label"):
+                return LastMileValidationResult(
+                    False,
+                    "missing_intent_text_label",
+                    "click_element with intent requires 'text_label' field",
+                    retryable=True
+                )
+            if not intent.get("zone"):
+                return LastMileValidationResult(
+                    False,
+                    "missing_intent_zone",
+                    "click_element with intent requires 'zone' field (nav, sidebar, main, etc.)",
+                    retryable=True
+                )
+            if not intent.get("element_type"):
+                return LastMileValidationResult(
+                    False,
+                    "missing_intent_element_type",
+                    "click_element with intent requires 'element_type' field (button, link, input, etc.)",
+                    retryable=True
+                )
+        
+        # Validate reason (why) is required for non-terminal actions
         if not (act.why or "").strip():
             return LastMileValidationResult(False, "missing_reason", "click_element requires 'why'")
-        if page_ctx and page_ctx.current_node_id == "usage_section" and page_ctx.expected_controls:
+        
+        # Page context validation for usage section (only if we have a resolved target_id)
+        if node and page_ctx and page_ctx.current_node_id == "usage_section" and page_ctx.expected_controls:
             control_terms = {
                 token
                 for control in page_ctx.expected_controls
@@ -1721,26 +2145,86 @@ def _validate_onecall_action(
             ).lower()
             if control_terms and not any(term in node_text for term in control_terms):
                 logger.warning(f"⚠️ unexpected_usage_control target='{act.target_id}' text='{node_text}'. Proceeding anyway.")
+        
         return LastMileValidationResult(True, "ok", "", normalized_actions=[{
             "type": "click_element",
-            "target_id": act.target_id,
+            "target_id": act.target_id,  # May be empty if intent-only (resolved at execution)
             "why": act.why,
-            "force_click": act.force_click
+            "force_click": act.force_click,
+            "intent": act.intent,  # Phase 1: Intent-Based Architecture
         }])
     elif type_ == "type_text":
-        if not act.target_id or not act.text:
-            return LastMileValidationResult(False, "missing_args", "type_text requires 'target_id' and 'text'")
-        if node is None:
-            return LastMileValidationResult(False, "target_not_in_live_graph", "type_text target_id is not present in the current DOM")
-        if not bool(getattr(node, "interactive", False)):
-            return LastMileValidationResult(False, "target_not_interactive", "type_text target must be interactive")
-        if not ((getattr(node, "tag", "") or "").lower() in _TYPE_TAGS or (getattr(node, "role", "") or "").lower() in _TYPE_ROLES or _is_type_node(node)):
-            return LastMileValidationResult(False, "type_target_not_input", "type_text target must be a text input")
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 1: Intent-Based Architecture Validation for type_text
+        # Allow either target_id (direct) OR intent (resolved at execution time)
+        # ═══════════════════════════════════════════════════════════════════
+        
+        if not act.text:
+            return LastMileValidationResult(False, "missing_text", "type_text requires 'text'")
+        
+        # Check if intent-based action (preferred) or direct ID-based
+        has_intent = bool(act.intent and isinstance(act.intent, dict))
+        has_target_id = bool(act.target_id and act.target_id.lower() not in {"?", "unknown", "none", "missing", "id", "n/a"} and "t-?" not in act.target_id)
+        
+        # Require at least one of: target_id OR intent
+        if not has_target_id and not has_intent:
+            return LastMileValidationResult(
+                False, 
+                "missing_target_id_or_intent", 
+                "type_text requires either 'target_id' OR 'intent' object"
+            )
+        
+        # If target_id provided, validate it
+        if has_target_id:
+            if node is None:
+                return LastMileValidationResult(
+                    False,
+                    "target_not_in_live_graph",
+                    f"type_text target_id '{act.target_id}' is not present in the current DOM"
+                )
+            if not bool(getattr(node, "interactive", False)):
+                return LastMileValidationResult(False, "target_not_interactive", "type_text target must be interactive")
+            if not ((getattr(node, "tag", "") or "").lower() in _TYPE_TAGS or (getattr(node, "role", "") or "").lower() in _TYPE_ROLES or _is_type_node(node)):
+                return LastMileValidationResult(False, "type_target_not_input", "type_text target must be a text input")
+
+        # If intent-based, validate intent structure
+        if has_intent:
+            intent = act.intent
+            if not isinstance(intent, dict):
+                return LastMileValidationResult(
+                    False,
+                    "invalid_intent_type",
+                    "type_text intent must be a dict",
+                    retryable=True
+                )
+            if not intent.get("text_label"):
+                return LastMileValidationResult(
+                    False,
+                    "missing_intent_text_label",
+                    "type_text with intent requires 'text_label' field",
+                    retryable=True
+                )
+            if not intent.get("zone"):
+                return LastMileValidationResult(
+                    False,
+                    "missing_intent_zone",
+                    "type_text with intent requires 'zone' field",
+                    retryable=True
+                )
+            if not intent.get("element_type"):
+                return LastMileValidationResult(
+                    False,
+                    "missing_intent_element_type",
+                    "type_text with intent requires 'element_type' field (should be 'input')",
+                    retryable=True
+                )
+        
         return LastMileValidationResult(True, "ok", "", normalized_actions=[{
             "type": "type_text",
-            "target_id": act.target_id,
+            "target_id": act.target_id,  # May be empty if intent-only (resolved at execution)
             "text": act.text,
-            "press_enter": act.press_enter
+            "press_enter": act.press_enter,
+            "intent": act.intent,  # Phase 1: Intent-Based Architecture
         }])
     elif type_ == "scroll_page":
         if act.direction not in ["up", "down"]:
@@ -1807,7 +2291,8 @@ def _validate_onecall_decision(
         if decision.action:
             return LastMileValidationResult(False, "invalid_action", "execution_mode=pipeline must not have 'action'")
         if len(decision.actions) > 3:
-            return LastMileValidationResult(False, "too_many_actions", "pipeline max length is 3")
+            logger.warning(f"LAST_MILE_PIPELINE_TRUNCATED: LLM proposed {len(decision.actions)} actions, truncating to 3")
+            decision.actions = decision.actions[:3]
             
         types = [a.type for a in decision.actions]
         is_terminal = ("complete_mission" in types)
@@ -1819,15 +2304,28 @@ def _validate_onecall_decision(
             if a.type == "complete_mission" and i != len(decision.actions) - 1:
                 return LastMileValidationResult(False, "invalid_pipeline", "complete_mission must be the final action")
                 
-        # Known allowed pipeline transitions
+        # Known allowed pipeline patterns (common for popups/dropdowns/forms)
         joined_types = "->".join([t for t in types if t])
         allowed = {
             "click_element->wait_for_ui",
             "type_text->wait_for_ui",
             "scroll_page->wait_for_ui",
             "click_element->click_element->wait_for_ui",
+            "click_element->type_text->wait_for_ui",
+            "type_text->type_text->wait_for_ui",
+            "type_text->click_element->wait_for_ui",
             "read_page_content->complete_mission"
         }
+        # AUTO-APPEND wait_for_ui: For latency and stability, UI action pipelines 
+        # (clicks/types) must end in a wait to allow the page to settle before next turn.
+        if not is_terminal and types and types[-1] not in ["wait_for_ui", "read_page_content"]:
+            logger.info(f"🛡️ AUTO-APPENDING wait_for_ui to pipeline pattern {joined_types}")
+            # Note: We append to decision.actions so it gets validated/normalized in the next loop
+            from visual_copilot.mission.last_mile import ProposedAction
+            decision.actions.append(ProposedAction(type="wait_for_ui", seconds=2.0, why="Wait for UI settle."))
+            types.append("wait_for_ui")
+            joined_types = "->".join(types)
+
         if joined_types not in allowed:
             logger.warning(f"⚠️ Unusual pipeline pattern {joined_types}. Proceeding anyway to avoid retry loops.")
             
@@ -1862,6 +2360,7 @@ async def run_compound_last_mile(
     goal_url: str = "",
     user_goal: str = "",
     force_vision_bootstrap: bool = True,
+    initial_overlay_ids: Set[str] = None,
 ) -> Dict[str, Any]:
     """
     Compound Agentic Last-Mile Loop with State Machine.
@@ -1923,6 +2422,8 @@ async def run_compound_last_mile(
 
     # ── Initialize State Machine ──
     state = LastMileState()
+    if initial_overlay_ids:
+        state.last_overlay_ids = set(initial_overlay_ids)
     target_node = _build_last_mile_page_context(current_url)
     target_node_ctx = _render_page_context_for_onecall(target_node)
 
@@ -1930,6 +2431,18 @@ async def run_compound_last_mile(
     state.evidence_hits = initial_evidence_hits
     state.progress_score = float(initial_evidence_hits)
     state.best_progress_score = state.progress_score
+
+    # Build initial page state snapshot
+    initial_snapshot = None
+    if LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED:
+        initial_snapshot = build_page_state_snapshot(nodes, current_url, current_dom_hash)
+        state.last_page_snapshot = initial_snapshot
+        logger.info(
+            f"LAST_MILE_SEMANTIC_INIT "
+            f"loading={initial_snapshot.loading_state} "
+            f"headings={initial_snapshot.heading_fingerprint[:8]}... "
+            f"interactives={initial_snapshot.interactive_fingerprint[:8]}..."
+        )
 
     logger.info(
         f"LAST_MILE_PHASE phase={state.phase.value} "
@@ -1942,6 +2455,37 @@ async def run_compound_last_mile(
         bool(app and hasattr(app.state, "mind_reader") and hasattr(getattr(app.state, "mind_reader", None), "llm") and hasattr(app.state.mind_reader.llm, "generate_with_reasoning")),
         bool(app and hasattr(app.state, "mind_reader") and hasattr(getattr(app.state, "mind_reader", None), "llm") and hasattr(app.state.mind_reader.llm, "generate_with_tools")),
     )
+
+    # Initialize visit graph for this mission
+    if LAST_MILE_VISIT_GRAPH_V1_ENABLED:
+        state.visit_graph = VisitGraphV1(
+            mission_id=getattr(mission, "mission_id", "unknown"),
+            redis_client=getattr(app.state, "redis_client", None) if app else None,
+        )
+
+        # Create initial visit for current page
+        initial_visit = state.visit_graph.record_visit_from_state(
+            url=current_url,
+            page_title=target_node.current_title if target_node else "unknown",
+            page_state=initial_snapshot if LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED else None,
+            site_map_node_id=target_node.current_node_id if target_node else None,
+        )
+
+        # Add initial evidence if available
+        if initial_evidence_hits > 0 and initial_best_excerpt:
+            state.visit_graph.add_evidence(
+                excerpt=initial_best_excerpt[:500],
+                source_label="Initial page scan",
+                confidence=0.6 if initial_evidence_hits >= EVIDENCE_RELEVANCE_THRESHOLD else 0.4,
+                goal_relevance_score=float(initial_evidence_hits),
+            )
+
+        logger.info(
+            f"LAST_MILE_VISIT_GRAPH_INIT "
+            f"mission={getattr(mission, 'mission_id', 'unknown')} "
+            f"visit={initial_visit.visit_id[:8]}... "
+            f"url={current_url[:60]}"
+        )
 
     # ── Read-First Check: If evidence is already strong, push toward completion ──
     evidence_hint = ""
@@ -2071,10 +2615,192 @@ async def run_compound_last_mile(
     last_dom_hash = current_dom_hash
     last_thought = ""
     forbid_scroll_after_blocked_click = False
+    
+    # Track vision usage to avoid redundant API calls in a single turn
+    # This prevents 'Double Vision' if bootstrap already ran.
+    vision_happened_this_turn = bool(getattr(state, "vision_used", False))
 
     for iteration in range(1, COMPOUND_MAX_INTERNAL_ITERATIONS + 1):
         state.iteration = iteration
+
         state.phase = LastMilePhase.READ_EVIDENCE
+
+        # Build current page state and compare
+        page_state_delta = None
+        if LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED and state.last_page_snapshot:
+            current_snapshot = build_page_state_snapshot(nodes, current_url, current_dom_hash)
+            page_state_delta = compare_page_state(state.last_page_snapshot, current_snapshot)
+            state.page_state_history.append(page_state_delta)
+
+            # Update stagnancy based on semantic classification
+            if page_state_delta.loading_changed and LAST_MILE_LOADING_STATE_GUARD_ENABLED:
+                # Page is loading - don't count as stagnancy
+                logger.info(f"LAST_MILE_LOADING_GUARD classification={page_state_delta.classification}")
+                # Reset stagnancy counters during loading
+                state.stall_count = 0
+                state.evidence_miss_streak = 0
+                state.consecutive_loading_states += 1
+            elif should_count_as_stagnant(page_state_delta):
+                # True stagnancy - all fingerprints unchanged
+                state.stall_count += 1
+                state.evidence_miss_streak += 1
+                state.consecutive_loading_states = 0
+                logger.info(f"LAST_MILE_SEMANTIC_STAGNANT stall={state.stall_count}")
+            else:
+                # Real progress - semantic change detected
+                state.stall_count = 0
+                state.evidence_miss_streak = 0
+                state.consecutive_loading_states = 0
+                logger.info(
+                    f"LAST_MILE_SEMANTIC_PROGRESS "
+                    f"classification={page_state_delta.classification} "
+                    f"new_headings={len(page_state_delta.new_headings)} "
+                    f"new_interactives={len(page_state_delta.added_interactive_labels)}"
+                )
+
+            # Update snapshot for next iteration
+            state.last_page_snapshot = current_snapshot
+
+        # Check for escalation needs at start of iteration
+        if LAST_MILE_ESCALATION_CHECKPOINT_ENABLED:
+            escalation = should_escalate(
+                mission=mission,
+                state=state,
+                nodes=nodes,
+                current_url=current_url,
+                iteration=iteration,
+                last_action_result=last_thought,
+                completion_gate_result=None,  # Will be set later
+            )
+
+            if escalation:
+                logger.warning(
+                    f"LAST_MILE_ESCALATION_TRIGGERED "
+                    f"blockage={escalation.blockage_type} "
+                    f"mission={getattr(mission, 'mission_id', 'unknown')} "
+                    f"iteration={iteration}"
+                )
+
+                # Return escalation as terminal action
+                return {
+                    "action": {
+                        "type": "escalate",
+                        "blockage_type": escalation.blockage_type,
+                        "speech": escalation.speech,
+                        "ask": escalation.ask,
+                        "diagnostics": escalation.diagnostics.__dict__,
+                        "resume_context": escalation.resume_context,
+                        "suggested_resolutions": escalation.suggested_resolutions,
+                    },
+                    "thought": f"Escalation triggered: {escalation.blockage_type}",
+                    "iterations": iteration,
+                    "status": "escalated",
+                    "diagnostics": {"last_mile_state": state.to_diagnostic()},
+                }
+
+        # Update visit graph based on page changes
+        if LAST_MILE_VISIT_GRAPH_V1_ENABLED and state.visit_graph:
+            current_visit = state.visit_graph.get_current_visit()
+
+            # Check if we should create a new visit
+            domain_changed = False
+            if current_visit:
+                from urllib.parse import urlparse
+                current_domain = urlparse(current_url).netloc
+                previous_domain = urlparse(current_visit.url).netloc
+                domain_changed = current_domain != previous_domain
+
+            should_new_visit = state.visit_graph.should_create_new_visit(
+                current_url=current_url,
+                page_state_delta=page_state_delta,
+                domain_changed=domain_changed,
+            )
+
+            if should_new_visit:
+                # Mark exit from previous visit
+                if current_visit:
+                    state.visit_graph.mark_exit(f"navigate_to_{current_url[:40]}")
+
+                # Create new visit
+                new_visit = state.visit_graph.record_visit_from_state(
+                    url=current_url,
+                    page_title=target_node.current_title if target_node else "unknown",
+                    page_state=state.last_page_snapshot if LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED else None,
+                    site_map_node_id=target_node.current_node_id if target_node else None,
+                )
+
+                logger.info(
+                    f"LAST_MILE_VISIT_NEW "
+                    f"visit={new_visit.visit_id[:8]}... "
+                    f"parent={new_visit.parent_visit_id[:8] if new_visit.parent_visit_id else 'none'}... "
+                    f"url={current_url[:60]}"
+                )
+
+                # Add cross-domain context if needed
+                if domain_changed and current_visit:
+                    cross_domain_ctx = state.visit_graph.get_cross_domain_context()
+                    if cross_domain_ctx:
+                        messages.append({
+                            "role": "system",
+                            "content": f"**Navigation Context**: {cross_domain_ctx}",
+                        })
+
+            # Update evidence score based on progress
+            if page_state_delta and not should_count_as_stagnant(page_state_delta):
+                # Real progress - update evidence score
+                score_delta = 1.0  # base score for any real change
+                if page_state_delta.content_changed:
+                    score_delta += 2.0  # bonus for content changes
+                if page_state_delta.headings_changed:
+                    score_delta += 1.5  # bonus for structure changes
+                state.visit_graph.update_evidence_score(score_delta)
+
+            # Cache context string for prompts
+            state.visit_graph_context = state.visit_graph.to_context_string()
+
+        # ── Proactive Overlay Detection ──
+        if LAST_MILE_VISION_POLICY_TRIGGER and not vision_happened_this_turn:
+            current_overlay_ids = _detect_overlay_active_ids(nodes)
+            new_overlays = current_overlay_ids - state.last_overlay_ids
+            if new_overlays:
+                logger.info(f"👁️ LAST_MILE_OVERLAY_DETECTED ids={new_overlays} (vision_happened={vision_happened_this_turn})")
+                try:
+                    vision_happened_this_turn = True
+                    _, vision_tool_result, _ = await execute_internal_tool(
+                        tool_name="request_vision",
+                        args={
+                            "reason": (
+                                f"A new overlay (dropdown/popup) was detected: {new_overlays}.\n"
+                                f"Perform a visual scan to identify controls inside the overlay.\n"
+                                f"{mission_ctx}"
+                            ),
+                            "_current_url": current_url,
+                            "_goal_url": goal_url,
+                            "_user_goal": user_goal_text,
+                            "_already_clicked_ids": sorted(excluded_ids),
+                        },
+                        nodes=nodes,
+                        screenshot_b64=screenshot_b64 or None,
+                        app=app,
+                        session_id=session_id,
+                        excluded_ids=excluded_ids,
+                    )
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"**VISION UPDATE (OVERLAY DETECTED: {new_overlays})**\n"
+                            "The system detected a new dropdown or popup. Use this visual scan to identify the contents:\n\n"
+                            f"{vision_tool_result}"
+                        )
+                    })
+                    state.vision_used = True
+                    # Update tracked overlays to avoid re-triggering for same ones
+                    state.last_overlay_ids = current_overlay_ids
+                except Exception as e:
+                    logger.warning(f"⚠️ LAST_MILE_OVERLAY_VISION failed: {e}")
+            elif not current_overlay_ids:
+                # Clear tracked overlays if none are active
+                state.last_overlay_ids = set()
 
         # ── Progress-Aware Hard Stop ──
         if state.should_hard_stop():
@@ -2083,6 +2809,62 @@ async def run_compound_last_mile(
                 f"🛡️ LAST_MILE_PROGRESS_SCORE hard_stop iter={iteration} "
                 f"stall_count={state.stall_count} evidence_miss_streak={state.evidence_miss_streak}"
             )
+
+            # Check for escalation before hard stop
+            if LAST_MILE_ESCALATION_CHECKPOINT_ENABLED:
+                escalation = should_escalate(
+                    mission=mission,
+                    state=state,
+                    nodes=nodes,
+                    current_url=current_url,
+                    iteration=iteration,
+                    last_action_result=last_thought,
+                )
+
+                if escalation:
+                    logger.warning(
+                        f"LAST_MILE_ESCALATION_STAGNANCY "
+                        f"blockage={escalation.blockage_type} "
+                        f"stall_count={state.stall_count}"
+                    )
+                    return {
+                        "action": {
+                            "type": "escalate",
+                            "blockage_type": escalation.blockage_type,
+                            "speech": escalation.speech,
+                            "ask": escalation.ask,
+                            "diagnostics": escalation.diagnostics.__dict__,
+                            "resume_context": escalation.resume_context,
+                            "suggested_resolutions": escalation.suggested_resolutions,
+                        },
+                        "thought": f"Escalation due to stagnancy: {escalation.blockage_type}",
+                        "iterations": iteration,
+                        "status": "escalated",
+                        "diagnostics": {"last_mile_state": state.to_diagnostic()},
+                    }
+
+            # Check if we should suggest backtracking
+            if LAST_MILE_VISIT_GRAPH_V1_ENABLED and state.visit_graph:
+                backtrack_suggestion = state.visit_graph.suggest_backtrack()
+                if backtrack_suggestion:
+                    logger.warning(
+                        f"LAST_MILE_BACKTRACK_SUGGESTION "
+                        f"current_evidence={state.visit_graph.get_current_visit().evidence_score:.1f} "
+                        f"better_visit={backtrack_suggestion.visit_id[:8]}... "
+                        f"better_score={backtrack_suggestion.evidence_score:.1f} "
+                        f"url={backtrack_suggestion.url[:60]}"
+                    )
+                    # Add to messages as hint
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            f"**Backtrack Suggestion**: You have lower evidence on current page "
+                            f"({state.visit_graph.get_current_visit().evidence_score:.1f}) than on "
+                            f"'{backtrack_suggestion.page_title}' ({backtrack_suggestion.evidence_score:.1f}). "
+                            f"Consider navigating back to explore that page more thoroughly."
+                        ),
+                    })
+
             # Try vision once before giving up
             if not state.vision_used and LAST_MILE_VISION_POLICY_TRIGGER:
                 state.vision_used = True
@@ -2116,6 +2898,37 @@ async def run_compound_last_mile(
             content = ""
             valid_normalized_action = None
 
+            # ── Extract vision hints from bootstrap message (for one-call mode) ──
+            vision_hints = ""
+            vision_target_id = None
+            vision_tool = None
+            if force_action_after_vision_bootstrap and iteration == 1:
+                for msg in reversed(messages[:-1]):  # Exclude current tool result
+                    if msg.get("role") == "user" and "Vision Strategic Brief" in str(msg.get("content", "")):
+                        vision_brief_text = str(msg.get("content", ""))
+                        # Extract target_id from vision hints
+                        target_match = re.search(r"Strongest visible control:\s*(?:\([^)]+\)\s*)?([^\s(]+)", vision_brief_text)
+                        if target_match:
+                            vision_target_id = target_match.group(1).strip()
+                        # Extract recommended tool
+                        if "Safest next probe:" in vision_brief_text:
+                            tool_match = re.search(r"Safest next probe:\s*(\w+)", vision_brief_text)
+                            if tool_match:
+                                vision_tool = tool_match.group(1).strip()
+                        # Extract answer visibility
+                        answer_visible_match = re.search(r"Answer visible now:\s*(\w+)", vision_brief_text)
+                        answer_visible = answer_visible_match.group(1).strip() if answer_visible_match else "unknown"
+                        vision_hints = (
+                            f"Vision Strategic Brief:\n"
+                            f"- answer_visible: {answer_visible}\n"
+                            f"- strongest_control: {vision_target_id or 'none'}\n"
+                            f"- recommended_tool: {vision_tool or 'unknown'}\n"
+                            f"- page_mode: documentation\n"
+                        )
+                        # Include the full vision brief for more context
+                        vision_hints += f"\nFull Vision Brief:\n{vision_brief_text[:2000]}\n"
+                        break
+
             # ── ONE-CALL MODE (Preferred) ───────────────────────────────────
             if LAST_MILE_ONECALL_REASONING_ACTION_ENABLED:
                 full_prompt = _build_onecall_runtime_prompt(
@@ -2129,6 +2942,9 @@ async def run_compound_last_mile(
                     readable_text=onecall_readable,
                     evidence_hint=evidence_hint,
                     excluded_ids=excluded_ids,
+                    vision_hints=vision_hints,
+                    page_state_delta=page_state_delta,
+                    visit_context=state.visit_graph_context if state.visit_graph else "",
                 )
                 
                 # ═══════════════════════════════════════════════════════════
@@ -2187,15 +3003,23 @@ async def run_compound_last_mile(
                                     f"LAST_MILE_ONECALL_VALIDATION_FAILED iter={iteration} "
                                     f"code={val_result.code} message={val_result.message[:100]} retryable={val_result.retryable}"
                                 )
-                            
+
                             # Track repeat rejections
-                            current_action_key = f"{decision.action.type}_{decision.action.target_id or ''}_{decision.action.response or ''}"
-                            if current_action_key == state.last_rejected_action:
-                                state.repeat_rejection_count += 1
-                            else:
-                                state.last_rejected_action = current_action_key
-                                state.repeat_rejection_count = 1
-                            
+                            if decision.action:
+                                current_action_key = f"{decision.action.type}_{decision.action.target_id or ''}_{decision.action.response or ''}"
+                                if current_action_key == state.last_rejected_action:
+                                    state.repeat_rejection_count += 1
+                                else:
+                                    state.last_rejected_action = current_action_key
+                                    state.repeat_rejection_count = 1
+                            elif decision.actions:
+                                current_action_key = f"multi_{len(decision.actions)}"
+                                if current_action_key == state.last_rejected_action:
+                                    state.repeat_rejection_count += 1
+                                else:
+                                    state.last_rejected_action = current_action_key
+                                    state.repeat_rejection_count = 1
+
                             # If same action rejected 2+ times, force different action type
                             if state.repeat_rejection_count >= 2:
                                 retry_msg = (
@@ -2208,7 +3032,7 @@ async def run_compound_last_mile(
                                     f"VALIDATION_FAILED: {val_result.code}. {val_result.message}.\n"
                                     "Return corrected JSON ONLY. DO NOT invent IDs. Use IDs from current DOM list."
                                 )
-                            
+
                             # Provide previous action as context
                             if decision.action is not None:
                                 prev_act_data = _safe_dataclass_payload(decision.action)
@@ -2244,6 +3068,76 @@ async def run_compound_last_mile(
                                 )
 
                         if decision and val_result and val_result.is_valid:
+                            # ── Vision-based validation for one-call mode ──
+                            # If vision bootstrap provided specific action suggestions, enforce them
+                            if force_action_after_vision_bootstrap and iteration == 1 and vision_hints:
+                                decision_action_type = decision.action.type if decision.action else ""
+                                # Check if vision says answer is not visible - block complete_mission
+                                if "answer_visible: false" in vision_hints.lower() or "answer visible now: no" in vision_hints.lower():
+                                    if decision_action_type == "complete_mission":
+                                        logger.warning(
+                                            f"LAST_MILE_ONECALL_VISION_GATE blocked complete_mission at iter={iteration}; "
+                                            f"vision bootstrap indicates answer is not visible yet"
+                                        )
+                                        messages.append({
+                                            "role": "user",
+                                            "content": (
+                                                "BLOCKED: Vision bootstrap indicates the answer is NOT visible yet. "
+                                                "You must first execute the vision-recommended action (e.g., read_page_content, click_element) "
+                                                "to gather evidence before calling complete_mission."
+                                            ),
+                                        })
+                                        state.record_action("complete_blocked:answer_not_visible")
+                                        # Continue to next iteration to re-prompt with vision reminder
+                                        continue
+                                # Check if vision suggested a specific target and tool
+                                # NOTE: Only enforce vision suggestion if answer is NOT already visible
+                                # If answer is visible, allow complete_mission even if vision suggests clicking
+                                if vision_target_id and decision_action_type == "complete_mission":
+                                    # Check if vision explicitly requires an action before completion
+                                    # (e.g., "answer visible now: no" or "Safest next probe: click")
+                                    requires_action = (
+                                        "answer visible now: no" in vision_hints.lower() or
+                                        "answer_visible: false" in vision_hints.lower() or
+                                        "safest next probe: click" in vision_hints.lower() or
+                                        "safest next probe: read" in vision_hints.lower()
+                                    )
+                                    if requires_action:
+                                        logger.warning(
+                                            f"LAST_MILE_ONECALL_VISION_GATE blocked complete_mission at iter={iteration}; "
+                                            f"vision suggested '{vision_tool}' for target '{vision_target_id}'"
+                                        )
+                                        messages.append({
+                                            "role": "user",
+                                            "content": (
+                                                f"BLOCKED: Vision bootstrap suggested '{vision_tool}' for target '{vision_target_id}', "
+                                                f"but you proposed complete_mission. Execute the vision-recommended action first, "
+                                                f"then call complete_mission with comprehensive evidence from the updated page."
+                                            ),
+                                        })
+                                        state.record_action("complete_blocked:vision_suggested_different_tool")
+                                        # Continue to next iteration to re-prompt with vision reminder
+                                        continue
+                                elif vision_target_id and decision_action_type == "click_element":
+                                    # Check if the clicked target matches vision
+                                    clicked_target = decision.action.target_id if decision.action else ""
+                                    if clicked_target and clicked_target != vision_target_id:
+                                        logger.warning(
+                                            f"LAST_MILE_ONECALL_VISION_GATE blocked click_element at iter={iteration}; "
+                                            f"vision suggested '{vision_target_id}', got '{clicked_target}'"
+                                        )
+                                        messages.append({
+                                            "role": "user",
+                                            "content": (
+                                                f"BLOCKED: Vision bootstrap suggested '{vision_target_id}', "
+                                                f"but you clicked '{clicked_target}'. "
+                                                f"Execute the vision-recommended action first."
+                                            ),
+                                        })
+                                        state.record_action("click_blocked:vision_target_mismatch")
+                                        # Continue to next iteration to re-prompt with vision reminder
+                                        continue
+
                             valid_normalized_actions = val_result.normalized_actions or []
                             logger.info(
                                 f"LAST_MILE_ONECALL_VALID iter={iteration} "
@@ -2283,9 +3177,13 @@ async def run_compound_last_mile(
                                 )
                                 if f_act:
                                     frontend_actions.append(f_act)
-                                    if fake_name == "click_element" and "target_id" in fake_args:
-                                        excluded_ids.add(str(fake_args["target_id"]))
+                                    resolved_tid = f_act.get("target_id") or ""
+                                    if resolved_tid:
+                                        excluded_ids.add(str(resolved_tid))
                                 elif tool_result_str:
+                                    if fake_name == "request_vision":
+                                        vision_happened_this_turn = True
+                                        state.vision_used = True
                                     observation_results.append(
                                         {
                                             "tool_name": fake_name,
@@ -2293,6 +3191,10 @@ async def run_compound_last_mile(
                                             "is_terminal": is_terminal_tool,
                                         }
                                     )
+                                
+                                if is_terminal_tool:
+                                    logger.info(f"🛑 TERMINATING_PIPELINE: tool='{fake_name}' is terminal")
+                                    break
 
                             if frontend_actions:
                                 is_terminal_action = frontend_actions[-1].get("type") == "answer"
@@ -2361,7 +3263,8 @@ async def run_compound_last_mile(
                 except Exception as e:
                     logger.error(
                         f"LAST_MILE_ONECALL_EXCEPTION iter={iteration} "
-                        f"error={str(e)[:100]} using_constrained_safe_fallback"
+                        f"error={str(e)[:100]} using_constrained_safe_fallback",
+                        exc_info=True
                     )
                     return await _run_onecall_constrained_fallback(
                         iteration=iteration,
@@ -2471,40 +3374,88 @@ async def run_compound_last_mile(
             # ── Post-Vision Bootstrap Execution Gate ──
             # After forced vision bootstrap, first turn should check if vision suggested actions.
             # If vision provided an Action Plan, EXECUTE IT instead of immediately completing.
-            if (
-                force_action_after_vision_bootstrap
-                and iteration == 1
-                and tool_name == "complete_mission"
-            ):
-                # Check if vision provided actionable suggestions that were ignored
+            if force_action_after_vision_bootstrap and iteration == 1:
+                # Extract vision suggestions from the bootstrap message
                 vision_brief_text = ""
+                vision_target_id = None
+                vision_tool = None
                 for msg in reversed(messages[:-1]):  # Exclude current tool result
                     if msg.get("role") == "user" and "Vision Strategic Brief" in str(msg.get("content", "")):
                         vision_brief_text = str(msg.get("content", ""))
+                        # Extract target_id from vision hints
+                        target_match = re.search(r"Strongest visible control:\s*(?:\([^)]+\)\s*)?([^\s(]+)", vision_brief_text)
+                        if target_match:
+                            vision_target_id = target_match.group(1).strip()
+                        # Extract recommended tool
+                        if "Safest next probe:" in vision_brief_text:
+                            tool_match = re.search(r"Safest next probe:\s*(\w+)", vision_brief_text)
+                            if tool_match:
+                                vision_tool = tool_match.group(1).strip()
                         break
-                
-                has_vision_actions = "Vision Action Plan" in vision_brief_text or "Next steps:" in vision_brief_text
-                
-                # Only block completion if vision provided specific clickable actions that were ignored
+
+                # Check if vision provided specific actionable suggestions
+                has_vision_actions = "Vision Action Plan" in vision_brief_text or "Next steps:" in vision_brief_text or vision_target_id
+
+                # If vision provided specific clickable actions, enforce them
                 if has_vision_actions and state.evidence_hits < EVIDENCE_RELEVANCE_THRESHOLD:
-                    logger.warning(
-                        "LAST_MILE_VISION_BOOTSTRAP_GATE blocked complete_mission at iter=1; "
-                        "vision provided action plan that was ignored"
-                    )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": (
-                            "BLOCKED: Vision bootstrap provided specific action suggestions that you ignored. "
-                            "Review the Vision Strategic Brief and execute the suggested actions FIRST, "
-                            "then call complete_mission with comprehensive evidence from the updated page."
-                        ),
-                    })
-                    state.record_action("complete_blocked:vision_actions_ignored")
-                    continue
+                    # Block complete_mission if vision provided actions
+                    if tool_name == "complete_mission":
+                        logger.warning(
+                            "LAST_MILE_VISION_BOOTSTRAP_GATE blocked complete_mission at iter=1; "
+                            "vision provided action plan that was ignored"
+                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                "BLOCKED: Vision bootstrap provided specific action suggestions that you ignored. "
+                                "Review the Vision Strategic Brief and execute the suggested actions FIRST, "
+                                "then call complete_mission with comprehensive evidence from the updated page."
+                            ),
+                        })
+                        state.record_action("complete_blocked:vision_actions_ignored")
+                        continue
+                    # Block click_element if it doesn't match vision target
+                    elif tool_name == "click_element" and vision_target_id and vision_tool != "click_element":
+                        # Vision suggested a different tool, block this click
+                        logger.warning(
+                            f"LAST_MILE_VISION_BOOTSTRAP_GATE blocked click_element at iter=1; "
+                            f"vision suggested '{vision_tool}' for target '{vision_target_id}'"
+                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                f"BLOCKED: Vision bootstrap recommended '{vision_tool}' for target '{vision_target_id}', "
+                                f"not a click. Execute the vision-recommended action first."
+                            ),
+                        })
+                        state.record_action("click_blocked:vision_suggested_different_tool")
+                        continue
+                    # Block click_element if target doesn't match vision
+                    elif tool_name == "click_element" and vision_target_id:
+                        # Check if the clicked target matches vision
+                        clicked_target = tool_args.get("target_id", "")
+                        if clicked_target and clicked_target != vision_target_id:
+                            logger.warning(
+                                f"LAST_MILE_VISION_BOOTSTRAP_GATE blocked click_element at iter=1; "
+                                f"vision suggested '{vision_target_id}', got '{clicked_target}'"
+                            )
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    f"BLOCKED: Vision bootstrap suggested clicking '{vision_target_id}', "
+                                    f"but you clicked '{clicked_target}'. "
+                                    f"Execute the vision-recommended action first."
+                                ),
+                            })
+                            state.record_action("click_blocked:vision_target_mismatch")
+                            continue
+
                 else:
                     # Vision didn't provide actions OR evidence is already strong - allow completion
-                    logger.info("LAST_MILE_VISION_BOOTSTRAP_GATE allowing completion (no vision actions or strong evidence)")
+                    logger.info("LAST_MILE_VISION_BOOTSTRAP_GATE allowing action (no vision actions or strong evidence)")
 
             # ── Read-First Enforcement: Reject clicks when evidence is strong ──
             # This gate should ONLY block clicks, NOT completions
@@ -2679,7 +3630,12 @@ async def run_compound_last_mile(
 
                     # ── Completion Gate: Verify answer has evidence ──
                     answer_text = frontend_action.get("speech", "") or frontend_action.get("text", "")
+                    completion_gate_passed = True
+                    completion_gate_reason = ""
+
                     if status == "success" and len(answer_text.strip()) < 10:
+                        completion_gate_passed = False
+                        completion_gate_reason = "weak_answer"
                         logger.warning(
                             f"LAST_MILE_COMPLETION_GATE weak answer (len={len(answer_text)}), "
                             f"attempting evidence rescue"
@@ -2689,6 +3645,42 @@ async def run_compound_last_mile(
                         if best_rescue and len(best_rescue) > len(answer_text):
                             frontend_action["speech"] = best_rescue[:500]
                             frontend_action["text"] = best_rescue[:500]
+                            completion_gate_passed = True
+
+                    # Check for ambiguity escalation on partial evidence
+                    if LAST_MILE_ESCALATION_CHECKPOINT_ENABLED and not completion_gate_passed:
+                        if state.evidence_hits > 0:
+                            escalation = should_escalate(
+                                mission=mission,
+                                state=state,
+                                nodes=nodes,
+                                current_url=current_url,
+                                iteration=iteration,
+                                last_action_result=last_thought,
+                                completion_gate_result=(completion_gate_passed, completion_gate_reason),
+                            )
+
+                            if escalation and escalation.blockage_type == "ambiguity_wall":
+                                logger.warning(
+                                    f"LAST_MILE_ESCALATION_AMBIGUITY "
+                                    f"reason={completion_gate_reason} "
+                                    f"evidence={state.evidence_hits}"
+                                )
+                                return {
+                                    "action": {
+                                        "type": "escalate",
+                                        "blockage_type": escalation.blockage_type,
+                                        "speech": escalation.speech,
+                                        "ask": escalation.ask,
+                                        "diagnostics": escalation.diagnostics.__dict__,
+                                        "resume_context": escalation.resume_context,
+                                        "suggested_resolutions": escalation.suggested_resolutions,
+                                    },
+                                    "thought": f"Escalation due to ambiguity: {escalation.blockage_type}",
+                                    "iterations": iteration,
+                                    "status": "escalated",
+                                    "diagnostics": {"last_mile_state": state.to_diagnostic()},
+                                }
 
                     return {
                         "action": bundled_action,
@@ -2749,8 +3741,18 @@ async def run_compound_last_mile(
 
         # ── Verify Progress Phase ──
         state.phase = LastMilePhase.VERIFY_PROGRESS
-        new_evidence_hits, _, _ = _score_evidence_relevance(main_goal, nodes)
-        
+        new_evidence_hits, new_best_excerpt, _ = _score_evidence_relevance(main_goal, nodes)
+
+        # Add to visit graph evidence vault
+        if LAST_MILE_VISIT_EVIDENCE_VAULT_ENABLED and state.visit_graph:
+            if new_evidence_hits > state.evidence_hits:
+                state.visit_graph.add_evidence(
+                    excerpt=new_best_excerpt[:500] if new_best_excerpt else "Evidence found",
+                    source_label=f"Iteration {iteration}",
+                    confidence=0.7,
+                    goal_relevance_score=float(new_evidence_hits),
+                )
+
         # Extract action context for stagnancy tracking
         last_action_type = ""
         last_target_id = ""

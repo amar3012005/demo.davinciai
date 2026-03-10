@@ -1712,8 +1712,8 @@ async def analyze_session(request: AnalyzeSessionRequest):
                     solution = unit.get("solution")
                     reliability = unit.get("reliability_score", 0.0)
                     
-                    # Only save high-reliability knowledge
-                    if issue and solution and reliability > 0.6:
+                    # Save all extractive knowledge as requested (low threshold)
+                    if issue and solution and reliability >= 0.0:
                         try:
                             # Generate embedding for the issue
                             vector = app.state.rag_engine.embeddings.embed_query(issue)

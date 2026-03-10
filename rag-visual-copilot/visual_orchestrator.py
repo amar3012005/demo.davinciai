@@ -13,9 +13,29 @@ from llm_providers.groq_provider import GroqProvider
 try:
     from visual_copilot.detection.semantic_detective_service import investigate, DetectiveReport
 except ImportError:
-    # Minimal stub to prevent startup crash in legacy code
-    def investigate(*args, **kwargs): return None
-    class DetectiveReport: pass
+    # Fallback to local DetectiveReport definition if import fails
+    from dataclasses import dataclass, field
+    from typing import Literal
+    
+    @dataclass
+    class DetectiveReport:
+        candidates: List[Any] = field(default_factory=list)
+        best_match: Optional[Any] = None
+        is_ambiguous: bool = False
+        ambiguous_count: int = 0
+        has_obstacle: bool = False
+        obstacle_type: Optional[str] = None
+        dismiss_button_id: Optional[str] = None
+        page_type: str = "unknown"
+        recommended_action: str = "click"
+        confidence: Literal["high", "medium", "low"] = "medium"
+        complexity: str = "simple"
+        recommended_model: str = "8b"
+        routing_reason: str = "Legacy detective report"
+        obstacle_dismiss_id: Optional[str] = None
+        evidence: str = ""
+    
+    def investigate(*args, **kwargs): return DetectiveReport()
 
 # Qdrant imports for HiveMind checks
 try:
@@ -1298,7 +1318,7 @@ class VisualOrchestrator:
         subgoal_desc = subgoal.description if subgoal else goal
         requires_reasoning = getattr(subgoal, 'requires_reasoning', False) if subgoal else False
 
-        report = investigate(
+        report = await investigate(
             goal=session.goal_raw or goal,
             subgoal=subgoal_desc,
             dom_elements=dom_elements,
@@ -1352,7 +1372,13 @@ class VisualOrchestrator:
 
         # Validate target_id exists in candidates or DOM
         if action.get("type") == "click" and action.get("target_id"):
-            valid_ids = {c["id"] for c in report.candidates}
+            # Build valid_ids from candidates (handle both dict and object formats)
+            valid_ids = set()
+            for c in report.candidates:
+                if isinstance(c, dict):
+                    valid_ids.add(c.get("id") or c.get("node_id") or "")
+                else:
+                    valid_ids.add(getattr(c, "node_id", getattr(c, "id", "")) or "")
             valid_ids.add(report.obstacle_dismiss_id or "")
             # Also include all DOM element IDs
             dom_ids = {e.get("id") for e in dom_elements if e.get("id")}
@@ -1360,11 +1386,17 @@ class VisualOrchestrator:
 
             if action["target_id"] not in all_valid:
                 if report.candidates:
+                    # Get top candidate ID (handle both dict and object formats)
+                    top_candidate = report.candidates[0]
+                    if isinstance(top_candidate, dict):
+                        top_id = top_candidate.get("id") or top_candidate.get("node_id") or ""
+                    else:
+                        top_id = getattr(top_candidate, "node_id", getattr(top_candidate, "id", "")) or ""
                     logger.warning(
                         f"🔧 v5.1 target fix: '{action['target_id']}' not in DOM, "
-                        f"substituting top candidate '{report.candidates[0]['id']}'"
+                        f"substituting top candidate '{top_id}'"
                     )
-                    action["target_id"] = report.candidates[0]["id"]
+                    action["target_id"] = top_id
                     result["confidence"] = "medium"
 
         # Ensure required keys exist
@@ -1409,11 +1441,21 @@ class VisualOrchestrator:
 
         if report.recommended_action == "click" and report.candidates:
             best = report.candidates[0]
+            # Handle both dict and object formats for candidates
+            if isinstance(best, dict):
+                target_id = best.get("id") or best.get("node_id") or ""
+                text = best.get("text", "")
+                score = best.get("score") or best.get("hybrid_score") or best.get("final_score", 0)
+            else:
+                # Object format (ScoredCandidate)
+                target_id = getattr(best, "node_id", getattr(best, "id", "")) or ""
+                text = getattr(best, "text", "")
+                score = getattr(best, "hybrid_score", getattr(best, "final_score", getattr(best, "score", 0)))
             return {
-                "action": {"type": "click", "target_id": best["id"], "text": ""},
+                "action": {"type": "click", "target_id": target_id, "text": ""},
                 "confidence": "high",
-                "speech": f"Clicking {best['text'][:25]}.",
-                "reasoning": f"Shortcut: clear winner '{best['text'][:30]}' (score={best['score']})",
+                "speech": f"Clicking {str(text)[:25]}.",
+                "reasoning": f"Shortcut: clear winner '{str(text)[:30]}' (score={score:.2f})",
             }
 
         # Fallback: scroll
@@ -1554,12 +1596,22 @@ class VisualOrchestrator:
         if report.recommended_action == "dismiss" and report.obstacle_dismiss_id:
             return f"OBSTACLE: {report.obstacle_type}\nDISMISS BUTTON: (id: {report.obstacle_dismiss_id})"
 
-        # Default: show candidate list
+        # Default: show candidate list (handle both dict and object formats)
         if report.candidates:
             lines = ["ELEMENTS (pick one):"]
             for i, c in enumerate(report.candidates[:6], 1):
-                active_mark = " [already active]" if "already_active" in c.get("reasons", []) else ""
-                lines.append(f"  {i}. [{c['type']}] {c['text']} (id: {c['id']}){active_mark}")
+                if isinstance(c, dict):
+                    elem_type = c.get("type", c.get("tag", "unknown"))
+                    elem_text = c.get("text", "")
+                    elem_id = c.get("id") or c.get("node_id", "")
+                    reasons = c.get("reasons", [])
+                else:
+                    elem_type = getattr(c, "tag", getattr(c, "type", "unknown"))
+                    elem_text = getattr(c, "text", "")
+                    elem_id = getattr(c, "node_id", getattr(c, "id", ""))
+                    reasons = getattr(c, "reasons", [])
+                active_mark = " [already active]" if "already_active" in reasons else ""
+                lines.append(f"  {i}. [{elem_type}] {elem_text} (id: {elem_id}){active_mark}")
             return "\n".join(lines)
 
         return "NO MATCHING ELEMENTS FOUND. Consider scrolling down."
