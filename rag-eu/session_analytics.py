@@ -128,6 +128,11 @@ class SessionAnalytics:
         }
         
         logger.info(f"Analytics complete for {session_id} in {report['processing_time']}s")
+        if report.get("distilled_knowledge"):
+            logger.info(f"🧠 Reasoning extracted {len(report['distilled_knowledge'])} knowledge units")
+        else:
+            logger.warning(f"⚠️ Reasoning extracted 0 knowledge units for {session_id}")
+            
         return report
 
     async def _generate_brief_context(self, transcript: str, session_summary: Dict[str, Any]) -> str:
@@ -188,7 +193,11 @@ You are the DavinciAI Sentiment Engine. Your goal is to analyze the provided [Tr
    - Did the user ignore the Agent's suggestion? (Signal: Disengagement)
    - Did the user thank the Agent specifically for *solving* the problem? (Signal: Resolution)
 3. **Aspect Separation:** Distinguish between the User's mood vs. the Agent's performance.
-4. **Knowledge Distillation (New):** Identify specific customer questions, objections, preferences, or core requirements that were successfully captured, resolved, or addressed by the Agent. Extract them as standalone knowledge units (Issue/Requirement/Preference vs Solution/Response pairs) for the team's Hive Mind. Use this for ANY domain including creative drafting, branding, and workflows.
+4. **Knowledge Distillation (AGGRESSIVE):** Identify ANY specific customer questions, technical inquiries, branding objections, feature requests, or core requirements that were successfully captured, resolved, or addressed by the Agent. 
+   - Extract them as standalone knowledge units (Issue/Requirement/Preference vs Solution/Response pairs).
+   - EVEN IF the question is general (e.g. "What is Blake?"), if the Agent provided a clear, definitive answer, EXTRACT IT. 
+   - This knowledge will seed the Hive Mind to help future agents answer similar questions.
+   - Look for: Inquiries about product features, branding philosophy, team members (e.g. Amar), or technical setup.
 
 ## OUTPUT SCHEMA (JSON)
 {
@@ -210,10 +219,10 @@ You are the DavinciAI Sentiment Engine. Your goal is to analyze the provided [Tr
   },
   "distilled_knowledge": [
     {
-      "issue": "A concise description of the specific problem, objection, or question",
-      "solution": "The definitive answer, reframing, or steps provided to resolve it",
-      "category": "e.g. technical, sales_objection, pricing, branding_insight",
-      "reliability_score": float (0.0 to 1.0)
+      "issue": "A concise description of the specific problem, objection, or question (e.g. 'What is the Blake AI platform?')",
+      "solution": "The definitive answer or steps provided to resolve it (e.g. 'Blake (BLAIQ) is an EU-hosted AI platform for brand-aligned content.')",
+      "category": "technical | branding | product_info | pricing | person_info",
+      "reliability_score": 0.95
     }
   ]
 }
@@ -222,11 +231,11 @@ Example 1 (Technical):
 Issue: "How do I deploy with Docker?" 
 Solution: "Use 'docker-compose up -d' after building."
 
-Example 2 (Creative/Branding):
-Issue: "What tone should we use for LinkedIn posts about AI?"
-Solution: "A balance of technical efficiency (e.g. 30% speedup) and human impact stories (reclaiming creative time)."
+Example 2 (General Inquiry):
+Issue: "What is Blake?"
+Solution: "Blake is the BLAIQ AI platform for brand-aligned content generation, hosted on ISO-27001 servers in the EU."
 
-Identify any such valuable insights regardless of industry. Return ONLY valid JSON.
+Identify any such valuable insights. Return ONLY valid JSON.
 """
         user_prompt = f"Analyze the following transcript for session {session_id}:\n\n{transcript}"
         
@@ -241,6 +250,8 @@ Identify any such valuable insights regardless of industry. Return ONLY valid JS
                 response_format={"type": "json_object"}
             )
             raw = response if isinstance(response, str) else json.dumps(response)
+            logger.info(f"DEBUG: Reasoning raw response (first 500 chars): {raw[:500]}...")
+            
             raw = self._strip_reasoning_artifacts(raw)
             # Extract JSON object defensively if extra text leaked
             start = raw.find("{")

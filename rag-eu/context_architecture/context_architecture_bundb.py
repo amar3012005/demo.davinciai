@@ -53,27 +53,67 @@ class ContextArchitect:
             .replace(">", "&gt;")
         )
 
-    @staticmethod
-    def _is_english(text: str) -> bool:
+    # English stopwords absent/rare in German prose.
+    # ≥2 hits = message is almost certainly English.
+    _EN_STOPWORDS = frozenset({
+        "the", "this", "that", "these", "those", "with", "have", "has", "had",
+        "are", "were", "was", "been", "being", "from", "they", "them", "their",
+        "there", "here", "what", "when", "where", "which", "who", "will", "would",
+        "could", "should", "about", "more", "some", "your", "you", "our",
+        "my", "me", "it", "its", "and", "but", "for", "not", "can", "please",
+        "want", "need", "tell", "know", "think", "help", "how", "also", "just",
+        "like", "get", "do", "does", "did", "let", "look", "see", "say", "said",
+        "use", "make", "take", "come", "go", "good", "great", "yes",
+        "brand", "branding", "marketing", "agency", "services", "work", "team",
+    })
+
+    # Explicit requests to switch to English.
+    _EN_REQUEST_PHRASES = (
+        "speak english", "in english", "english please", "can you speak english",
+        "talk to me in english", "reply in english", "respond in english",
+        "switch to english", "english only",
+    )
+
+    @classmethod
+    def _is_english(cls, text: str) -> bool:
         """
-        True if text is clearly English.
-        >55% ASCII words AND >2 words. Short greetings don't trigger.
-        German umlauts (ä/ö/ü/ß) are non-ASCII — reliable negative signal.
+        Returns True ONLY when text is clearly English — not merely ASCII.
+
+        Why not ASCII %?
+          German is mostly ASCII too. "auf deutsch sprechen" is 100% ASCII
+          and was being flagged as English — that was the core bug.
+
+        Strategy:
+          1. German-specific chars (ä ö ü ß) → False immediately.
+          2. Explicit English request phrase → True.
+          3. ≥2 English stopwords present → True.
+          4. Otherwise → False. DEFAULT STAYS GERMAN.
         """
-        words = text.strip().split()
-        if len(words) <= 2:
+        if not text or len(text.strip().split()) < 2:
             return False
-        ascii_count = sum(
-            1 for w in words
-            if w.strip(".,!?;:\"'").replace("-", "").replace("'", "").isascii()
-        )
-        return (ascii_count / len(words)) > 0.55
+        t_lower = text.lower().strip()
+        # Hard negative: any German-specific char → definitely not English
+        if any(c in t_lower for c in "äöüß"):
+            return False
+        # Explicit English request → switch
+        if any(phrase in t_lower for phrase in cls._EN_REQUEST_PHRASES):
+            return True
+        # English stopword count
+        words = {w.strip(".,!?;:\"'()[]") for w in t_lower.split()}
+        return len(words & cls._EN_STOPWORDS) >= 2
 
     @classmethod
     def _detect_lang(cls, query: str, history: List[Dict], user_profile: Dict) -> str:
         """
-        Detect and lock language. English once detected stays English.
-        Priority: profile lock → current query → any prior user turn → default DE.
+        DEFAULT IS ALWAYS GERMAN.
+        Switch to English only when user clearly writes or requests English.
+        Once switched, stays English for all subsequent turns.
+
+        Priority:
+          1. user_profile["lang"] == "en"  → locked English
+          2. Current query is English       → switch now
+          3. Any prior user turn English    → already switched, stay English
+          4. Fallback                       → GERMAN
         """
         if user_profile.get("lang") == "en":
             return "en"
@@ -193,11 +233,16 @@ Brand DNA, Marken-Heartbeat, Employer Brand, Arbeitgebermarke, Change Comms, Bra
 Mensch × Maschine, KI-Kollegin, Co-Kreativität, Adaptive Brand Identity, Brand Purpose,
 Positionierung, Tonalität, Zielgruppen-Resonanz, Transformations-DNA
 
-## Language Rules
-DEFAULT: Deutsch. Hold German for the entire conversation.
-SWITCH: User writes a full English message (>2 words) → switch immediately, stay English every turn.
-NO META-COMMENT on switching. Just do it.
-Register: "Sie" for strangers, mirror "du" if user signals it.
+## Language — HARDCODED DEFAULT: DEUTSCH
+ALWAYS respond in German UNLESS the user clearly writes English or explicitly asks for English.
+"auf deutsch sprechen" → they want German → stay German.
+German texts (even without umlauts) → stay German.
+SWITCH to English ONLY when:
+  - User writes a clearly English sentence (contains English words like "the", "this", "I want", etc.)
+  - User explicitly requests: "speak English" / "in English" / "please reply in English"
+Once switched to English: stay English for ALL subsequent turns.
+NO META-COMMENT on any switch — just respond in the correct language.
+Register: "Sie" with strangers, mirror "du" if user signals it.
 
 ## Org Name Rules — No Nagging
 Turn 1 only: "Ich bin TARA von B&B." — once, embedded naturally.
@@ -362,9 +407,16 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
                 kb += f"[{src}] {txt}\n"
 
         if lang == "en":
-            lang_line = "LANGUAGE=EN. Every word English. Zero German. No German sign-off."
+            lang_line = (
+                "LANGUAGE=EN. User has written or requested English. "
+                "Every word of your response must be English. Zero German words."
+            )
         else:
-            lang_line = "LANGUAGE=DE. Respond in German. Switch to full English if user writes English."
+            lang_line = (
+                "LANGUAGE=DE. Respond in German — this is the default and must be followed. "
+                "Do NOT switch to English unless the user clearly writes English words "
+                "or explicitly asks for English. 'auf deutsch' = stay German."
+            )
 
         kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
 
