@@ -368,6 +368,7 @@ class RAGEngine:
         language: str,
         history: List[Dict[str, Any]],
         relevant_docs: List[Dict[str, Any]],
+        case_memories: List[Dict[str, Any]],
         agent_skills: List[Dict[str, Any]],
         agent_rules: List[Dict[str, Any]],
         general_kb: List[Dict[str, Any]],
@@ -409,6 +410,7 @@ class RAGEngine:
             return "\n".join(lines) if lines else "(none)"
 
         docs_block = _format_entries(relevant_docs, 10, "insight")
+        cases_block = _format_entries(case_memories, 10, "case_memory")
         skills_block = _format_entries(agent_skills, 10, "skill")
         rules_block = _format_entries(agent_rules, 10, "rule")
         kb_block = _format_entries(general_kb, 10, "kb")
@@ -433,7 +435,8 @@ class RAGEngine:
             "- If evidence is weak, say that briefly and stop. Do not pad the answer with process advice unless the user asks what to do next.\n"
             f"{normalized_system_prompt}\n\n"
             f"Conversation history:\n{history_block}\n\n"
-            f"Retrieved customer insight memory:\n{docs_block}\n\n"
+            f"Retrieved customer insight memory:\n{cases_block}\n\n"
+            f"Retrieved static docs:\n{docs_block}\n\n"
             f"Retrieved skills:\n{skills_block}\n\n"
             f"Retrieved rules:\n{rules_block}\n\n"
             f"Retrieved knowledge base entries:\n{kb_block}\n\n"
@@ -643,6 +646,9 @@ class RAGEngine:
             v_list = self.embeddings.embed_query(query_english)
             shared_vector = np.array(v_list, dtype=np.float32).reshape(1, -1)
             timing['shared_embedding_ms'] = (time.time() - v_start) * 1000
+        embeddings_unavailable = shared_vector is None or not np.any(shared_vector)
+        if dashboard_mode and embeddings_unavailable:
+            browse_mode = True
         
         # STEP 1: Retrieve Skills & Rules FIRST (Sequential - Priority)
         # Detected pattern
@@ -705,6 +711,7 @@ class RAGEngine:
                         # Post-process results into categories
                         processed = {
                             "hive_mind_text": "",
+                            "case_memories": [],
                             "skills": [],
                             "rules": [],
                             "general_kb": []
@@ -724,6 +731,14 @@ class RAGEngine:
                                 issue = payload.get("issue", r["text"])
                                 solution = payload.get("solution", r["summary"])
                                 hm_entries.append(f"Issue: {issue}\nSolution: {solution}")
+                                processed["case_memories"].append({
+                                    "id": r.get("id"),
+                                    "text": issue,
+                                    "summary": solution,
+                                    "doc_type": dt,
+                                    "score": r["score"],
+                                    "created_at": payload.get("created_at") or payload.get("timestamp"),
+                                })
                             elif dt == "General_KB":
                                 # Format General KB as context chunks
                                 source = payload.get("filename", "Internal Doc")
@@ -738,11 +753,56 @@ class RAGEngine:
                         
                         if hm_entries:
                             processed["hive_mind_text"] = "\n---\n".join(hm_entries)
+
+                        if dashboard_mode and not any([
+                            processed["case_memories"],
+                            processed["skills"],
+                            processed["rules"],
+                            processed["general_kb"],
+                        ]) and not browse_mode:
+                            browse_results = await asyncio.wait_for(
+                                self.qdrant.browse_tenant_memory(
+                                    tenant_id=tenant_id,
+                                    doc_types=target_types,
+                                    limit=unified_limit,
+                                ),
+                                timeout=1.2
+                            )
+                            for r in browse_results:
+                                dt = r.get("doc_type")
+                                payload = r.get("payload", {})
+                                if dt == "Case_Memory":
+                                    issue = payload.get("issue", r["text"])
+                                    solution = payload.get("solution", r["summary"])
+                                    processed["case_memories"].append({
+                                        "id": r.get("id"),
+                                        "text": issue,
+                                        "summary": solution,
+                                        "doc_type": dt,
+                                        "score": r.get("score", 1.0),
+                                        "created_at": payload.get("created_at") or payload.get("timestamp"),
+                                    })
+                                elif dt == "Agent_Skill":
+                                    processed["skills"].append({"id": r.get("id"), "text": r["text"], "topic": payload.get("topic", "general"), "score": r.get("score", 1.0)})
+                                elif dt == "Agent_Rule":
+                                    processed["rules"].append({"id": r.get("id"), "text": r["text"], "topic": payload.get("topic", "general"), "severity": payload.get("severity", "standard"), "score": r.get("score", 1.0)})
+                                elif dt == "General_KB":
+                                    processed["general_kb"].append({
+                                        "id": r.get("id"),
+                                        "text": r["text"],
+                                        "topic": payload.get("topics") or payload.get("doc_type_detail") or "general",
+                                        "doc_type": dt,
+                                        "score": r.get("score", 1.0),
+                                    })
+                            hm_entries = [f"Issue: {entry['text']}\nSolution: {entry.get('summary', '')}" for entry in processed["case_memories"]]
+                            hm_entries += [f"[KB]: {entry['text']}" for entry in processed["general_kb"]]
+                            if hm_entries:
+                                processed["hive_mind_text"] = "\n---\n".join(hm_entries)
                             
                         # Logging
-                        total_chunks = len(hm_entries) + len(processed["skills"]) + len(processed["rules"]) + len(processed.get("general_kb", []))
+                        total_chunks = len(processed["case_memories"]) + len(processed["skills"]) + len(processed["rules"]) + len(processed.get("general_kb", []))
                         if total_chunks > 0:
-                            total_chars = sum(len(e) for e in hm_entries) + sum(len(s["text"]) for s in processed["skills"]) + sum(len(r["text"]) for r in processed["rules"])
+                            total_chars = sum(len(c["text"]) + len(c.get("summary", "")) for c in processed["case_memories"]) + sum(len(s["text"]) for s in processed["skills"]) + sum(len(r["text"]) for r in processed["rules"]) + sum(len(k["text"]) for k in processed.get("general_kb", []))
                             logger.info(f"🧠 HiveMind retrieval: {total_chunks} chunks ({total_chars} chars)")
 
 
@@ -755,7 +815,7 @@ class RAGEngine:
                 else:
                     logger.warning("🧠 Qdrant enabled but embeddings not initialized")
             
-            return {"hive_mind_text": "", "skills": [], "rules": [], "general_kb": []}, 0
+            return {"hive_mind_text": "", "case_memories": [], "skills": [], "rules": [], "general_kb": []}, 0
 
         tasks.append(do_unified_search())
         
@@ -796,6 +856,7 @@ class RAGEngine:
             "original_language": original_language,
             "relevant_docs": relevant_docs,
             "hive_mind_context": hive_mind_context,
+            "case_memories": unified_data.get("case_memories", []),
             "web_results": web_results,
             "agent_skills": skills_rules.get("skills", []),
             "agent_rules": skills_rules.get("rules", []),
@@ -844,6 +905,7 @@ class RAGEngine:
         agent_skills = retrieval_data.get('agent_skills', [])
         agent_rules = retrieval_data.get('agent_rules', [])
         general_kb = retrieval_data.get('general_kb', [])
+        case_memories = retrieval_data.get('case_memories', [])
         timing = retrieval_data['timing']
         fast_path_type = retrieval_data['fast_path_type']
         
@@ -901,6 +963,7 @@ class RAGEngine:
                 language=original_language,
                 history=history_list,
                 relevant_docs=relevant_docs,
+                case_memories=case_memories,
                 agent_skills=agent_skills,
                 agent_rules=agent_rules,
                 general_kb=general_kb,
@@ -1094,7 +1157,7 @@ class RAGEngine:
                 'llm_usage': llm_usage,
                 'raw_chunks': [
                    {"id": d.get("id", "unknown"), "text": d.get("text", ""), "score": d.get("score", 0), "doc_type": d.get("doc_type", "Skill/Rule")} 
-                   for d in (agent_skills + agent_rules + general_kb) if d.get("id")
+                   for d in (case_memories + agent_skills + agent_rules + general_kb) if d.get("id")
                 ] + [
                    {"id": d.get("metadata", {}).get("id", "unknown"), "text": d.get("text", ""), "score": d.get("boosted_similarity", 0), "doc_type": "Static_Doc"}
                    for d in relevant_docs if d.get("metadata", {}).get("id")
