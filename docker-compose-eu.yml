@@ -273,7 +273,7 @@ services:
       TENANT_ID_INTRO: ${TENANT_ID_INTRO}
       DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
-      BUNDB_CARTESIA_PRONUNCIATION_DICT_ID: ${BUNDB_CARTESIA_PRONUNCIATION_DICT_ID:-pdict_aiA2sefpW2w4nXqFjde8pa}
+      bundb_CARTESIA_PRONUNCIATION_DICT_ID: ${bundb_CARTESIA_PRONUNCIATION_DICT_ID:-pdict_aiA2sefpW2w4nXqFjde8pa}
       FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
