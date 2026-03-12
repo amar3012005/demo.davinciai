@@ -25,6 +25,8 @@ TOKEN BUDGET:
 """
 
 import datetime
+import re
+from difflib import SequenceMatcher
 from typing import List, Dict, Optional
 
 _STATIC_PREFIX_CACHE: Optional[str] = None
@@ -406,6 +408,8 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
         else:
             h_lines = "[turn 1]\n"
 
+        entity_memory = cls._build_entity_memory(query, raw_query, history)
+
         kb = ""
         if docs:
             top = sorted(
@@ -443,18 +447,85 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
 
         kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
         hivemind_block = f"<hm>\n{hivemind_kb.strip()}\n</hm>\n" if hivemind_kb.strip() else ""
+        entity_block = f"<entity_memory>\n{entity_memory}\n</entity_memory>\n" if entity_memory else ""
 
         return (
             f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
             f"<h>\n{h_lines.strip()}\n</h>\n"
+            f"{entity_block}"
             f"{kb_block}"
             f"{hivemind_block}"
             f"<q>{cls._escape(query)}</q>\n"
             f"{lang_line}\n"
             f"Use concrete HiveMind memory when present before relying on generic agency knowledge.\n"
+            f"Entity continuity rule: if the user already established a person, company, brand, or project name earlier in the conversation, keep using that canonical name. Treat later near-miss spellings or STT variants as the same entity unless the user clearly corrects the name.\n"
             f"Run checklist. Plain text. 1 question max. Yes-ladder: small yes → big yes.\n"
             f"</ctx>\n"
         )
+
+    @staticmethod
+    def _normalize_entity(entity: str) -> str:
+        text = (entity or "").strip(" .,!?:;\"'()[]{}")
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    @classmethod
+    def _extract_named_entity_signals(cls, text: str) -> List[str]:
+        sample = (text or "").strip()
+        if not sample:
+            return []
+
+        patterns = [
+            r"(?:my|our|meine|meiner|mein)\s+(?:company|brand|agency|business|firm|gallery|studio|firma|marke|agentur)\s+(?:is|called|named|heißt)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+){0,3})",
+            r"(?:i have|ich habe)\s+(?:a|an|eine|einen)?\s*(?:company|brand|agency|business|gallery|studio|firma|marke|agentur)\s+(?:called|named|namens)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+){0,3})",
+            r"^([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+){0,3})\s+(?:is|ist)\s+(?:about|an|a|ein|eine)",
+        ]
+
+        found: List[str] = []
+        for pattern in patterns:
+            for match in re.findall(pattern, sample, flags=re.IGNORECASE):
+                entity = cls._normalize_entity(match)
+                if entity and entity not in found:
+                    found.append(entity)
+        return found
+
+    @classmethod
+    def _build_entity_memory(cls, query: str, raw_query: str, history: List[Dict]) -> str:
+        user_turns = [
+            str(turn.get("content", "")).strip()
+            for turn in history[-8:]
+            if str(turn.get("role", "")).strip() == "user" and str(turn.get("content", "")).strip()
+        ]
+
+        explicit_entities: List[str] = []
+        for turn_text in user_turns:
+            for entity in cls._extract_named_entity_signals(turn_text):
+                if entity not in explicit_entities:
+                    explicit_entities.append(entity)
+
+        if not explicit_entities:
+            return ""
+
+        canonical = explicit_entities[0]
+        variant_candidates: List[str] = []
+        recent_texts = user_turns + [str(query or "").strip(), str(raw_query or "").strip()]
+
+        for text in recent_texts:
+            for entity in cls._extract_named_entity_signals(text):
+                normalized = cls._normalize_entity(entity)
+                if not normalized or normalized == canonical or normalized in variant_candidates:
+                    continue
+                similarity = SequenceMatcher(None, canonical.lower(), normalized.lower()).ratio()
+                if similarity >= 0.45 or canonical.lower().split()[0][:3] == normalized.lower().split()[0][:3]:
+                    variant_candidates.append(normalized)
+
+        lines = [
+            f"canonical_company_or_brand={cls._escape(canonical)}",
+            "If later turns contain a phonetically similar or slightly different company/brand name, assume it refers to the same canonical entity unless the user explicitly says the name changed or corrects it."
+        ]
+        if variant_candidates:
+            lines.append("possible_stt_variants=" + " | ".join(cls._escape(v) for v in variant_candidates[:4]))
+        return "\n".join(lines)
 
     # ══════════════════════════════════════════════════════════════════════════
     # ZONE D — Dynamic skills + rules  (0 tokens when empty)
