@@ -61,6 +61,14 @@ class GroqProvider(LLMProvider):
             # but usually the engine handles the await.
             return self._generate_sync(prompt, max_tokens, temperature, **kwargs)
 
+    @staticmethod
+    def _sanitize_model_kwargs(model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized = dict(kwargs)
+        if not GroqProvider._is_gpt_oss(model):
+            sanitized.pop("reasoning_effort", None)
+            sanitized.pop("include_reasoning", None)
+        return sanitized
+
     async def generate_messages(
         self,
         messages: List[Dict[str, str]],
@@ -81,6 +89,7 @@ class GroqProvider(LLMProvider):
                 extra_args["response_format"] = response_format
                 
             model = kwargs.pop("model", self.model_name)
+            kwargs = self._sanitize_model_kwargs(model, kwargs)
             if self._is_gpt_oss(model):
                 chat_completion = await self._client.chat.completions.create(
                     messages=messages,
@@ -116,6 +125,7 @@ class GroqProvider(LLMProvider):
                 extra_args["response_format"] = response_format
 
             model = kwargs.pop("model", self.model_name)
+            kwargs = self._sanitize_model_kwargs(model, kwargs)
             
             # Intelligent splitting for Zoned XML Architecture
             messages = []
@@ -291,6 +301,7 @@ class GroqProvider(LLMProvider):
         """Internal async generator for streaming."""
         try:
             model = kwargs.pop("model", self.model_name)
+            kwargs = self._sanitize_model_kwargs(model, kwargs)
             
             # Intelligent splitting for Zoned XML Architecture
             # Support both old <system_configuration> and new <zone_a_system_configuration> tags
@@ -344,7 +355,6 @@ class GroqProvider(LLMProvider):
                     reasoning_effort=kwargs.pop("reasoning_effort", "low"),
                     include_reasoning=kwargs.pop("include_reasoning", False),
                     stream=True,
-                    stream_options={"include_usage": True},
                     **kwargs
                 )
             else:
@@ -354,7 +364,6 @@ class GroqProvider(LLMProvider):
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,
-                    stream_options={"include_usage": True},
                     **kwargs
                 )
             
