@@ -266,6 +266,30 @@ class RAGEngine:
         return best_match
 
     @staticmethod
+    def _is_hivemind_browse_query(query: str) -> bool:
+        query_lower = (query or "").strip().lower()
+        patterns = [
+            "what information do you have",
+            "what information do u have",
+            "what do you have",
+            "what do u have",
+            "what is in hivemind",
+            "what's in hivemind",
+            "show me the hivemind",
+            "show me hivemind",
+            "what all happened",
+            "what happened in the last",
+            "what happened last",
+            "last 7 days",
+            "last week",
+            "past week",
+            "recent conversations",
+            "recent insights",
+            "recent memories",
+        ]
+        return any(pattern in query_lower for pattern in patterns)
+
+    @staticmethod
     def _apply_prompt_budget(prompt: str, llm_model_name: str) -> str:
         """Reduce prompt size for latency-sensitive GPT-OSS calls."""
         model = (llm_model_name or "").lower()
@@ -506,6 +530,7 @@ class RAGEngine:
         timing = {}
         dashboard_mode = isinstance(context, dict) and context.get("surface") == "hivemind_dashboard"
         unified_limit = 10 if dashboard_mode else 8
+        browse_mode = dashboard_mode and self._is_hivemind_browse_query(query)
         
         # 1. High-Speed Detection & Translation Layer
         query_english = query
@@ -653,17 +678,27 @@ class RAGEngine:
                         v_raw = shared_vector.flatten().tolist()
                         unified_start = time.time()
                         
-                        # Perform unified search
-                        results = await asyncio.wait_for(
-                            self.qdrant.search_unified_memory(
-                                query_vector=v_raw,
-                                tenant_id=tenant_id,
-                                doc_types=target_types,
-                                limit=unified_limit,
-                                score_threshold=0.2
-                            ),
-                            timeout=1.2 # Allow slightly more time for complex filter
-                        )
+                        # Perform semantic search, or browse latest memories for inventory-style dashboard queries
+                        if browse_mode:
+                            results = await asyncio.wait_for(
+                                self.qdrant.browse_tenant_memory(
+                                    tenant_id=tenant_id,
+                                    doc_types=target_types,
+                                    limit=unified_limit,
+                                ),
+                                timeout=1.2
+                            )
+                        else:
+                            results = await asyncio.wait_for(
+                                self.qdrant.search_unified_memory(
+                                    query_vector=v_raw,
+                                    tenant_id=tenant_id,
+                                    doc_types=target_types,
+                                    limit=unified_limit,
+                                    score_threshold=0.2
+                                ),
+                                timeout=1.2 # Allow slightly more time for complex filter
+                            )
                         
                         search_time = (time.time() - unified_start) * 1000
                         
@@ -859,6 +894,7 @@ class RAGEngine:
         rule_texts = [r.get("text", "") for r in agent_rules if r.get("text")]
 
         if isinstance(context, dict) and context.get("surface") == "hivemind_dashboard":
+            active_llm_model = (getattr(self.config, "hivemind_llm_model", None) or getattr(self.config, "llm_model", "")).strip()
             prompt = self._build_hivemind_dashboard_prompt(
                 query=query,
                 tenant_id=tenant_id,
@@ -871,6 +907,7 @@ class RAGEngine:
                 system_prompt=context.get("system_prompt"),
             )
         else:
+            active_llm_model = str(getattr(self.config, "llm_model", "")).strip()
             architect_cls = self._resolve_context_architect(tenant_id)
             prompt = architect_cls.assemble_prompt(
                 query=query_english,
@@ -882,7 +919,7 @@ class RAGEngine:
                 agent_skills=skill_texts,
                 agent_rules=rule_texts
             )
-        prompt = self._apply_prompt_budget(prompt, str(getattr(self.config, "llm_model", "")))
+        prompt = self._apply_prompt_budget(prompt, active_llm_model)
 
         # 4.5 Generation controls (endpoint-tunable)
         gen_cfg = generation_config or {}
@@ -904,7 +941,7 @@ class RAGEngine:
             logger.debug(f"DEBUG PROMPT: {prompt}")
             
             # Force non-stream for GPT-OSS to avoid empty delta-content behavior.
-            llm_model_name = str(getattr(self.config, "llm_model", "")).lower()
+            llm_model_name = active_llm_model.lower()
             use_stream = (not force_non_stream) and ("gpt-oss" not in llm_model_name)
             result = self.llm.generate(
                 prompt=prompt,
@@ -913,7 +950,8 @@ class RAGEngine:
                 max_tokens=generation_max_tokens,
                 include_reasoning=False,
                 reasoning_effort="low",
-                stop=generation_stop
+                stop=generation_stop,
+                model=active_llm_model,
             )
             llm_usage = {}  # Capture token usage from LLM provider
             
@@ -992,7 +1030,8 @@ class RAGEngine:
                 max_tokens=generation_max_tokens,
                 include_reasoning=False,
                 reasoning_effort="low",
-                stop=generation_stop
+                stop=generation_stop,
+                model=active_llm_model,
             )
             if asyncio.iscoroutine(fallback_result):
                 accumulated = await fallback_result
@@ -1051,6 +1090,7 @@ class RAGEngine:
                 'web_search_used': bool(web_results),
                 'active_skills': len(skill_texts),
                 'active_rules': len(rule_texts),
+                'model': active_llm_model,
                 'llm_usage': llm_usage,
                 'raw_chunks': [
                    {"id": d.get("id", "unknown"), "text": d.get("text", ""), "score": d.get("score", 0), "doc_type": d.get("doc_type", "Skill/Rule")} 

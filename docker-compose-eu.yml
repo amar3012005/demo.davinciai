@@ -46,6 +46,7 @@ services:
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      HIVEMIND_LLM_MODEL: ${HIVEMIND_LLM_MODEL:-llama-3.1-8b-instant}
       ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
       MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
 

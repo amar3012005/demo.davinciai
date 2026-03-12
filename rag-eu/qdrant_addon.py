@@ -778,6 +778,74 @@ class QdrantAddon:
             logger.error(f"Unified search failed: {e}")
             return []
 
+    async def browse_tenant_memory(
+        self,
+        tenant_id: str = "tara",
+        doc_types: Optional[List[str]] = None,
+        limit: int = 10,
+    ) -> List[Dict]:
+        """
+        Browse latest tenant memories without semantic query matching.
+        Useful for HiveMind inventory-style questions such as
+        "what do you have" or "what happened last week".
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            _, async_client, collection_name = self._get_clients_for_tenant(tenant_id)
+            if async_client is None:
+                return []
+
+            must_conditions = [
+                models.FieldCondition(
+                    key="tenant_id",
+                    match=models.MatchValue(value=tenant_id)
+                )
+            ]
+
+            if doc_types:
+                type_conditions = [
+                    models.FieldCondition(
+                        key="doc_type",
+                        match=models.MatchValue(value=dt)
+                    )
+                    for dt in doc_types
+                ]
+                must_conditions.append(models.Filter(should=type_conditions))
+
+            records, _ = await async_client.scroll(
+                collection_name=collection_name,
+                scroll_filter=models.Filter(must=must_conditions),
+                limit=min(max(limit * 3, limit), 100),
+                with_payload=True,
+                with_vectors=False,
+            )
+
+            normalized = []
+            for point in records or []:
+                payload = point.payload or {}
+                normalized.append({
+                    "id": point.id,
+                    "text": read_text(payload),
+                    "summary": read_summary(payload),
+                    "doc_type": read_doc_type(payload),
+                    "score": 1.0,
+                    "payload": payload,
+                    "created_at": read_created_at(payload),
+                })
+
+            normalized.sort(key=lambda item: item.get("created_at") or 0, reverse=True)
+            results = normalized[:limit]
+
+            if results:
+                logger.info(f"🧠 HiveMind browse: {len(results)} latest entries for tenant={tenant_id} types={doc_types or 'all'}")
+
+            return results
+        except Exception as e:
+            logger.error(f"HiveMind browse failed: {e}")
+            return []
+
     # ── Batch upsert for population scripts ─────────────────────────────────
     async def batch_upsert(self, points: List[models.PointStruct], tenant_id: str = "tara") -> int:
         """Upsert a list of PointStruct objects in batches of 50."""

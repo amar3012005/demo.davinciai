@@ -1269,13 +1269,14 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             context_data['language'] = request_data.language
             
         # Process query
+        is_hivemind_dashboard = context_data.get("surface") == "hivemind_dashboard"
         result = await app.state.rag_engine.process_query(
             request_data.query,
             context_data,
             streaming_callback=None,  # Streaming handled separately if needed
             history_context=request_data.history_context,
             tenant_id=effective_tenant_id,
-            force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
+            force_non_stream=(not is_hivemind_dashboard) and ("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
             generation_config={
                 "max_tokens": 1024,
                 "temperature": 0.55,
@@ -1493,6 +1494,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     lang = "german"
                 
                 query_context['language'] = lang
+                is_hivemind_dashboard = query_context.get("surface") == "hivemind_dashboard"
                 
                 # Process query with streaming callback
                 result = await app.state.rag_engine.process_query(
@@ -1501,7 +1503,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     streaming_callback=callback,
                     history_context=request.history_context,
                     tenant_id=effective_tenant_id,
-                    force_non_stream=("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
+                    force_non_stream=(not is_hivemind_dashboard) and ("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
                     generation_config={
                         "max_tokens": 1024,
                         "temperature": 0.6,

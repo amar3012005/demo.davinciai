@@ -60,6 +60,7 @@ class RAGConfig:
     llm_provider: str = "groq"  # "gemini", "openai", "openrouter", "claude", "ollama", "groq"
     llm_api_key: str = ""  # API key for the provider
     llm_model: str = "openai/gpt-oss-20b"  # Model name
+    hivemind_llm_model: Optional[str] = None  # Dedicated model for HiveMind dashboard queries
     analytics_model: str = "qwen/qwen3-32b"  # Reasoning model for analytics
     
     # Provider-specific options (optional)
@@ -290,6 +291,7 @@ class RAGConfig:
                 llm_model = gemini_model or "gemini-2.0-flash-lite"
         
         analytics_model = (os.getenv("DAYTONA_RAG_ANALYTICS_MODEL") or os.getenv("ANALYTICS_MODEL", "qwen/qwen3-32b")).strip()
+        hivemind_llm_model = (os.getenv("HIVEMIND_LLM_MODEL", "") or os.getenv("DAYTONA_RAG_HIVEMIND_LLM_MODEL", "")).strip() or None
         
         def get_env_int(name, default):
             val = os.getenv(name, "").strip()
@@ -316,6 +318,7 @@ class RAGConfig:
             llm_provider=llm_provider,
             llm_api_key=llm_api_key,
             llm_model=llm_model,
+            hivemind_llm_model=hivemind_llm_model,
             analytics_model=analytics_model,
             
             # Backwards compatibility (DEPRECATED)
