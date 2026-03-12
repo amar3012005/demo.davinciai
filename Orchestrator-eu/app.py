@@ -110,6 +110,28 @@ def _merge_proxy_body(
         merged.update(extra)
     return merged
 
+
+def _build_cors_origins() -> list[str]:
+    origins = {
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "https://demo.davinciai.eu",
+        "https://enterprise.davinciai.eu",
+    }
+
+    for env_key in ("PUBLIC_URL", "GLOBAL_CLIENT_URL", "CORS_ALLOW_ORIGINS"):
+        raw = (os.getenv(env_key, "") or "").strip()
+        if not raw:
+            continue
+        for value in raw.split(","):
+            origin = value.strip().rstrip("/")
+            if origin:
+                origins.add(origin)
+
+    return sorted(origins)
+
 class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         metrics["requests_total"] += 1
@@ -461,15 +483,7 @@ app.add_middleware(MetricsMiddleware)
 # Add CORS middleware to allow cross-origin requests from Dashboards
 app.add_middleware(
     CORSMiddleware,
-    # When allow_credentials=True, allow_origins cannot be ["*"]
-    # We use a wildcard regex or list common origins to fix the "Failed to fetch" error.
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "https://demo.davinciai.eu"
-    ] if os.getenv("ENV") != "prod" else ["https://demo.davinciai.eu"],
+    allow_origins=_build_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
