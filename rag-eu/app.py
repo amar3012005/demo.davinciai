@@ -86,7 +86,7 @@ class QueryRequest(BaseModel):
     context: Optional[Dict[str, Any]] = Field(None, description="Context from intent service")
     enable_streaming: Optional[bool] = Field(None, description="Enable streaming response")
     history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history for context-aware responses")
-    language: Optional[str] = Field("english", description="Response language: 'english' or 'german'")
+    language: Optional[str] = Field("german", description="Response language: 'english' or 'german'")
     tenant_id: Optional[str] = Field("tara", description="Tenant/Agent identifier for cache isolation")
     session_id: Optional[str] = Field(None, description="Session identifier from orchestrator")
     user_id: Optional[str] = Field(None, description="User identifier")
@@ -165,7 +165,7 @@ class VisualOrchestrateRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     dom_context: List[Dict[str, Any]] = Field(..., description="List of visible DOM elements")
     history_context: Optional[str] = Field(None, description="Conversation history")
-    language: Optional[str] = Field("english", description="Response language")
+    language: Optional[str] = Field("german", description="Response language")
     tenant_id: Optional[str] = Field("tara", description="Tenant identifier")
     
 class PlanStepRequest(BaseModel):
@@ -208,7 +208,7 @@ class EmbedResponse(BaseModel):
 
 class DynamicExitRequest(BaseModel):
     history_context: str = Field(..., description="Conversation history for context")
-    language: Optional[str] = Field("english", description="Response language")
+    language: Optional[str] = Field("german", description="Response language")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -248,7 +248,7 @@ class FSMRouteRequest(BaseModel):
     user_text: str = Field(..., min_length=1, description="User input text")
     session_id: str = Field(..., description="Session identifier")
     tenant_id: str = Field("tara", description="Tenant identifier")
-    language: str = Field("english", description="Response language")
+    language: str = Field("german", description="Response language")
     fsm_context: FSMContext = Field(..., description="Current FSM state")
     history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history")
 
@@ -1487,7 +1487,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
                 query_context = request.context or {}
                 
                 # Map short language codes to full names
-                lang = request.language or "english"
+                lang = request.language or "german"
                 if lang.lower() in ("en", "eng"):
                     lang = "english"
                 elif lang.lower() in ("de", "deu", "ger"):

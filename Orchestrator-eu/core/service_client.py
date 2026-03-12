@@ -10,6 +10,7 @@ import json
 import logging
 import aiohttp
 import ssl
+import unicodedata
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from dataclasses import dataclass
 import re
@@ -196,6 +197,38 @@ class TTSClient:
         self._min_chunk_size: int = 20  # Minimum chars before sending
         self._max_chunk_size: int = 150  # Maximum chars per chunk
         self._flush_task: Optional[asyncio.Task] = None
+        self._last_stream_language: str = "de"
+        self._last_stream_emotion: str = "helpful"
+        self._last_stream_voice_id: Optional[str] = None
+        self._last_stream_pronunciation_dict_id: Optional[str] = None
+
+    @staticmethod
+    def _normalize_tts_text(text: str) -> str:
+        """Normalize unicode/punctuation that causes character-by-character spelling in TTS."""
+        if not text:
+            return ""
+        normalized = unicodedata.normalize("NFKC", text)
+        replacements = {
+            "\u00a0": " ",   # non-breaking space
+            "\u2007": " ",
+            "\u202f": " ",
+            "\u00ad": "",    # soft hyphen
+            "\u2010": "-",   # hyphen
+            "\u2011": "-",   # non-breaking hyphen
+            "\u2012": "-",
+            "\u2013": "-",
+            "\u2014": "-",
+            "\u2212": "-",
+        }
+        for old, new in replacements.items():
+            normalized = normalized.replace(old, new)
+        # Dot-separated tokens should stay punctuation-like, not be read out literally.
+        # Replacing with a soft sentence break helps TTS pause instead of saying "dot".
+        normalized = re.sub(r"(?<=\w)\.(?=\w)", ", ", normalized)
+        # Avoid clipped acronym-hyphen compounds like "KI-gestützt" getting spelled out.
+        normalized = re.sub(r"\b([A-ZÄÖÜ]{2,})-(?=\w)", r"\1 ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
     
     async def connect(self, session_id: str, retries: int = 3, retry_delay: float = 2.0) -> bool:
         """
@@ -261,6 +294,12 @@ class TTSClient:
                 logger.error("TTS WebSocket not connected and no session_id available")
                 return
         
+        text = self._normalize_tts_text(text)
+        self._last_stream_language = language or self._last_stream_language
+        self._last_stream_emotion = emotion or self._last_stream_emotion
+        self._last_stream_voice_id = voice_id
+        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
+
         # Get voice config for language
         voice_config = self.config.voices.get(language)
         if voice_id is None:
@@ -307,6 +346,12 @@ class TTSClient:
             language: Language code
             emotion: Emotion/voice style
         """
+        text = self._normalize_tts_text(text)
+        self._last_stream_language = language or self._last_stream_language
+        self._last_stream_emotion = emotion or self._last_stream_emotion
+        self._last_stream_voice_id = voice_id
+        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
+
         # Ensure connection exists and is open
         if not self.ws or self.ws.closed:
             if self.session_id:
@@ -425,7 +470,12 @@ class TTSClient:
             if self._flush_task and not self._flush_task.done():
                 self._flush_task.cancel()
             # Get language/emotion from last chunk (or use defaults)
-            await self._flush_chunks("en", "helpful")
+            await self._flush_chunks(
+                self._last_stream_language,
+                self._last_stream_emotion,
+                self._last_stream_voice_id,
+                self._last_stream_pronunciation_dict_id,
+            )
         
         if not self.ws or self.ws.closed:
             if self.session_id:
@@ -479,9 +529,13 @@ class TTSClient:
         
         try:
             while True:
+                current_ws = self.ws
+                if not current_ws or current_ws.closed:
+                    logger.info("TTS WebSocket unavailable during receive loop; stopping audio receive")
+                    break
                 try:
                     msg = await asyncio.wait_for(
-                        self.ws.receive(),
+                        current_ws.receive(),
                         timeout=30.0
                     )
                     
@@ -895,4 +949,3 @@ class IntentClient:
                 "confidence": 0.0,
                 "context": {}
             }
-

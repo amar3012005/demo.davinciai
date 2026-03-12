@@ -1018,6 +1018,55 @@ async def proxy_rag_skill_upsert(request: Request, tenant_id: Optional[str] = No
         logger.error(f"RAG Proxy skill upsert error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+@app.post("/api/v1/upload")
+@app.post("/hivemind/upload")
+async def proxy_rag_upload(request: Request, tenant_id: Optional[str] = None):
+    """Proxy HiveMind document uploads to the RAG ingestion endpoint."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+
+    try:
+        form = await request.form()
+        file = form.get("file")
+        if file is None:
+            return JSONResponse({"error": "Missing file upload"}, status_code=400)
+
+        resolved_tenant_id = _resolve_requested_tenant(
+            request=request,
+            body={"tenant_id": form.get("tenant_id")},
+            explicit_tenant_id=tenant_id,
+        )
+
+        doc_type = str(form.get("doc_type", "General"))
+        topics = str(form.get("topics", ""))
+
+        upload_form = aiohttp.FormData()
+        upload_form.add_field(
+            "file",
+            await file.read(),
+            filename=getattr(file, "filename", "upload.bin"),
+            content_type=getattr(file, "content_type", "application/octet-stream"),
+        )
+        upload_form.add_field("doc_type", doc_type)
+        upload_form.add_field("topics", topics)
+        upload_form.add_field("tenant_id", resolved_tenant_id)
+
+        rag_url = f"{config.services.rag.url}/api/v1/upload"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                rag_url,
+                data=upload_form,
+                timeout=aiohttp.ClientTimeout(total=180),
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy upload error: {e}", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 # ════════════════════════════════════════════════════════════════════════════════
 # VISUAL COPILOT PROXY
 # ════════════════════════════════════════════════════════════════════════════════

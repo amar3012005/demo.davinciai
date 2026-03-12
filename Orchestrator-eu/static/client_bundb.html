@@ -811,9 +811,9 @@
                 <div class="panel-section">
                     <h4 class="section-title">Response Language</h4>
                     <div class="language-toggle">
-                        <span class="lang-label active" id="langEn">EN</span>
+                        <span class="lang-label" id="langEn">EN</span>
                         <div class="toggle-switch" id="languageToggle"></div>
-                        <span class="lang-label" id="langDe">DE</span>
+                        <span class="lang-label active" id="langDe">DE</span>
                     </div>
                 </div>
 
@@ -926,7 +926,7 @@
                 // Mode tracking
                 this.mockMode = false;  // Text-only mode
                 this.sessionActive = false;
-                this.fillerLanguage = 'en';  // 'en' or 'de'
+                this.fillerLanguage = 'de';  // BundB client is German-only
 
                 // Agent response buffer for streaming
                 this.agentResponseBuffer = '';
@@ -1109,7 +1109,7 @@
                             user_id: phone || 'anonymous_user',
                             stt_mode: this.mockMode ? 'text' : 'audio',
                             tts_mode: this.mockMode ? 'text' : 'audio',
-                            language: this.fillerLanguage
+                            language: 'de'
                         }
                     });
                     this.addLog(`Sent session config: mode=voice, tenant=${DEFAULT_TENANT_ID}, agent=${DEFAULT_AGENT_NAME}`, 'info');
@@ -1225,15 +1225,15 @@
             }
 
             toggleLanguage() {
-                this.fillerLanguage = this.fillerLanguage === 'en' ? 'de' : 'en';
+                this.fillerLanguage = 'de';
                 this.updateLanguageUI();
 
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.send({
                         type: 'change_language',
-                        language: this.fillerLanguage
+                        language: 'de'
                     });
-                    this.addLog(`Language set to ${this.fillerLanguage.toUpperCase()}`, 'info');
+                    this.addLog('Language fixed to DE', 'info');
                 }
             }
 
@@ -1544,7 +1544,7 @@
                     const historyContext = this.buildHistoryContext();
 
                     // Map language for RAG
-                    const lang = this.fillerLanguage === 'de' ? 'german' : 'english';
+                    const lang = 'german';
 
                     // Call RAG streaming endpoint directly
                     const response = await fetch('/api/rag/stream_query', {

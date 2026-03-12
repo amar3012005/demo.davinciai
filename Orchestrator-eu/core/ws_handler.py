@@ -117,7 +117,7 @@ class OrchestratorSession:
     # STT final transcript accumulation (for combining multiple FINAL segments)
     accumulated_final_text: str = ""
     final_accumulation_timer: Optional[asyncio.Task] = None
-    final_accumulation_timeout: float = 0.05  # 50ms window to accumulate FINAL segments
+    final_accumulation_timeout: float = 0.35  # Wait a little longer to merge split FINAL segments before processing
     
     # Early transition tracking (for low-latency speech_end handling)
     pending_transcript: bool = False  # True when waiting for final transcript after speech_end
@@ -182,6 +182,9 @@ class OrchestratorSession:
     last_query_text: str = ""
     last_query_language: str = "de"
     barge_in_pending: bool = False  # True = VAD fired during SPEAKING, awaiting STT validation
+    current_response_text: str = ""  # Accumulates current assistant reply so interrupted turns keep context
+    interrupted_response_text: str = ""  # Used to resume TTS if barge-in turns out to be noise
+    interrupted_response_language: str = "de"
 
     # Host-based configuration overrides
     agent_name: str = "agent"
@@ -191,6 +194,7 @@ class OrchestratorSession:
     flow_config: Dict[str, Any] = field(default_factory=dict)
     rag_url: Optional[str] = None
     voice_id_override: Optional[str] = None
+    pronunciation_dict_id_override: Optional[str] = None
 
     # Connection health tracking
     last_pong_time: Optional[float] = None  # Last time browser responded to ping
@@ -523,6 +527,51 @@ class OrchestratorWSHandler:
 
         return fallback_voice_id or os.getenv("DEFAULT_VOICE_ID") or os.getenv("CARTESIA_VOICE_ID")
 
+    def _resolve_tenant_pronunciation_dict_id(
+        self,
+        tenant_id: Optional[str],
+        fallback_pronunciation_dict_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Resolve Cartesia pronunciation dictionary by tenant using env patterns:
+        - <tenant>_cartesia_pronunciation_dict_id
+        - <TENANT>_CARTESIA_PRONUNCIATION_DICT_ID
+        - <tenant>_pronunciation_dict_id
+        - <TENANT>_PRONUNCIATION_DICT_ID
+        """
+        tenant_candidates = []
+        if tenant_id:
+            tenant_candidates.append(tenant_id.strip().lower())
+        if agent_name:
+            clean_name = agent_name.lower().replace(" agent", "").strip()
+            if clean_name and clean_name not in tenant_candidates:
+                tenant_candidates.append(clean_name)
+        if agent_id:
+            clean_id = agent_id.lower().strip()
+            if clean_id and clean_id not in tenant_candidates:
+                tenant_candidates.append(clean_id)
+
+        for tenant in tenant_candidates:
+            safe_tenant = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
+            env_candidates = [
+                f"{safe_tenant}_cartesia_pronunciation_dict_id",
+                f"{safe_tenant.upper()}_CARTESIA_PRONUNCIATION_DICT_ID",
+                f"{safe_tenant}_pronunciation_dict_id",
+                f"{safe_tenant.upper()}_PRONUNCIATION_DICT_ID",
+            ]
+            for env_key in env_candidates:
+                env_val = (os.getenv(env_key, "") or "").strip().strip('"').strip("'")
+                if env_val:
+                    return env_val
+
+        return (
+            (fallback_pronunciation_dict_id or "").strip().strip('"').strip("'")
+            or (os.getenv("CARTESIA_PRONUNCIATION_DICT_ID", "") or "").strip().strip('"').strip("'")
+            or None
+        )
+
     def _resolve_tenant_metadata(self, tenant_id: Optional[str], field: str, fallback: Optional[str] = None) -> Optional[str]:
         """
         Dynamically resolve metadata (agent_name, agent_id, etc.) from environment
@@ -551,6 +600,7 @@ class OrchestratorWSHandler:
                 "agent_name": str(session.agent_name or ""),
                 "agent_id": str(session.agent_id or ""),
                 "voice_id": str(session.voice_id_override or ""),
+                "pronunciation_dict_id": str(session.pronunciation_dict_id_override or ""),
                 "rag_url": str(session.rag_url or ""),
                 "updated_at": str(time.time())
             })
@@ -653,6 +703,12 @@ class OrchestratorWSHandler:
         
         base_voice = query_params.get("voice_id") or host_config["voice_id"]
         session.voice_id_override = self._resolve_tenant_voice_id(session.tenant_id, base_voice, session.agent_name, session.agent_id)
+        session.pronunciation_dict_id_override = self._resolve_tenant_pronunciation_dict_id(
+            session.tenant_id,
+            self.config.agent.pronunciation_dict_id,
+            session.agent_name,
+            session.agent_id,
+        )
         
         if query_params.get("rag_url"):
             logger.info(f"[{session_id}] 🚀 DYNAMIC RAG OVERRIDE: {session.rag_url}")
@@ -663,7 +719,7 @@ class OrchestratorWSHandler:
 
         logger.info(
             f"[{session_id}] 🌐 Final Session Config: tenant={session.tenant_id} "
-            f"RAG={session.rag_url}, Voice={session.voice_id_override}"
+            f"RAG={session.rag_url}, Voice={session.voice_id_override}, PronDict={session.pronunciation_dict_id_override or '-'}"
         )
         await self._persist_session_runtime_config(session)
 
@@ -1539,16 +1595,18 @@ class OrchestratorWSHandler:
                 session.is_mission_active = False
                 session.current_goal = None
 
-            # BARGE-IN DETECTION: Defer interrupt on speech start (wait for STT validation)
+            # BARGE-IN DETECTION: interrupt immediately on real speech start.
+            # Human-like behavior is to stop talking and listen first, then process
+            # the validated transcript as the continuation of the same conversation.
             state_mgr = session.state_manager
             if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
                 session.barge_in_pending = False
                 logger.debug(f"[{session.session_id}] ⏸️ Ignoring SPEECH_START during SPEAKING (BARGIN_FEATURE=false)")
                 return
             if state_mgr.state == State.SPEAKING:
-                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_START) - deferring, waiting for STT validation")
-                session.barge_in_pending = True
-                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
+                logger.info(f"[{session.session_id}] 🛑 Barge-in detected on SPEECH_START - interrupting immediately")
+                session.barge_in_pending = False
+                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "speech_start"})
             elif state_mgr.state == State.THINKING:
                 if session.barge_in_pending:
                     logger.debug(f"[{session.session_id}] 🎤 Speech start during pending barge-in validation - waiting for STT")
@@ -2221,6 +2279,7 @@ class OrchestratorWSHandler:
         logger.debug(f"[{session.session_id}] 🎯 STARTING _stream_response_and_tts for query: '{user_text}'")
         state_mgr = session.state_manager
         response_text = ""
+        session.current_response_text = ""
         output_language = self._get_output_language(language, session)  # Get output language with session override
         transitioned_to_speaking = False
         
@@ -2297,6 +2356,7 @@ class OrchestratorWSHandler:
 
                 # Send non-empty tokens to TTS
                 response_text += token
+                session.current_response_text = response_text
 
                 # Send text chunk to browser (skip if closed)
                 await self._send_json(session.websocket, {
@@ -2316,7 +2376,7 @@ class OrchestratorWSHandler:
                         session.filler_task.cancel()
                         logger.debug(f"[{session.session_id}] ⏸️ Cancelled filler task on first text token")
                 
-                await session.tts_client.stream_chunk(token, output_language, emotion="helpful", voice_id=session.voice_id_override, pronunciation_dict_id=self.config.agent.pronunciation_dict_id)
+                await session.tts_client.stream_chunk(token, output_language, emotion="helpful", voice_id=session.voice_id_override, pronunciation_dict_id=session.pronunciation_dict_id_override)
 
             # Cancel latency fillers since RAG response is complete and TTS is about to start
             if session.filler_task and not session.filler_task.done():
@@ -2374,6 +2434,8 @@ class OrchestratorWSHandler:
                     "language": output_language,
                     "streaming": True
                 })
+                session.current_response_text = ""
+                session.interrupted_response_text = ""
 
             # Receive and forward TTS audio chunks with timeout protection
             chunk_counter = 0
@@ -2587,6 +2649,9 @@ class OrchestratorWSHandler:
         except asyncio.CancelledError:
             logger.info(f"[{session.session_id}] Response streaming cancelled")
             raise
+        finally:
+            if state_mgr.state != State.INTERRUPT:
+                session.current_response_text = ""
 
     async def _handle_session_config(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle session configuration changes (e.g., switching to visual-copilot)"""
@@ -2644,6 +2709,12 @@ class OrchestratorWSHandler:
             session.agent_name,
             session.agent_id
         )
+        session.pronunciation_dict_id_override = self._resolve_tenant_pronunciation_dict_id(
+            session.tenant_id,
+            session.pronunciation_dict_id_override or self.config.agent.pronunciation_dict_id,
+            session.agent_name,
+            session.agent_id,
+        )
         await self._persist_session_runtime_config(session)
 
         if mode in ["voice", "visual-copilot"]:
@@ -2661,6 +2732,7 @@ class OrchestratorWSHandler:
                 "agent_id": session.agent_id,
                 "session_type": session.metadata.get("session_type", "webcall"),
                 "voice_id": session.voice_id_override,
+                "pronunciation_dict_id": session.pronunciation_dict_id_override,
                 "stt_mode": session.stt_mode,
                 "tts_mode": session.tts_mode,
                 "timestamp": time.time()
@@ -3163,7 +3235,7 @@ class OrchestratorWSHandler:
                             await self._broadcast_state(session, State.SPEAKING)
 
                         # Stream text to TTS service (audio results will be picked up by forward_audio task)
-                        await session.tts_client.stream_chunk(content, language=output_language, voice_id=session.voice_id_override, pronunciation_dict_id=self.config.agent.pronunciation_dict_id)
+                        await session.tts_client.stream_chunk(content, language=output_language, voice_id=session.voice_id_override, pronunciation_dict_id=session.pronunciation_dict_id_override)
                 
                 elif msg_type == "action":
                     payload = chunk.get("payload")
@@ -3283,7 +3355,13 @@ class OrchestratorWSHandler:
                     break
             
             # Synthesize text
-            await session.tts_client.synthesize(text, language, emotion="helpful", voice_id=session.voice_id_override)
+            await session.tts_client.synthesize(
+                text,
+                language,
+                emotion="helpful",
+                voice_id=session.voice_id_override,
+                pronunciation_dict_id=session.pronunciation_dict_id_override,
+            )
             
             # Default values (standard for our STT/TTS stack)
             sample_rate = session.tts_sample_rate or 44100
@@ -3865,6 +3943,8 @@ class OrchestratorWSHandler:
             except asyncio.QueueEmpty:
                 break
 
+        self._persist_interrupted_agent_turn(session)
+
         # Best-effort: abort TTS stream generation without flushing buffered text.
         # Using stream_end() here can flush stale chunk buffer from old turn.
         try:
@@ -3919,8 +3999,30 @@ class OrchestratorWSHandler:
         
         await self._broadcast_state(session, State.LISTENING)
 
+    def _persist_interrupted_agent_turn(self, session: OrchestratorSession) -> None:
+        """Persist a partial assistant reply so barge-in keeps conversational continuity."""
+        partial = (session.current_response_text or "").strip()
+        session.interrupted_response_text = partial
+        session.interrupted_response_language = self._get_output_language(session.current_language, session)
+        if not partial or len(partial) < 12:
+            session.current_response_text = ""
+            return
+
+        last_agent_turn = session.history_manager.get_last_agent_turn()
+        if last_agent_turn and last_agent_turn.text.strip() == partial:
+            session.current_response_text = ""
+            return
+
+        session.history_manager.add_agent_turn(partial, metadata={
+            "language": self._get_output_language(session.current_language, session),
+            "streaming": True,
+            "interrupted": True,
+        })
+        logger.info(f"[{session.session_id}] 📝 Saved interrupted assistant turn for barge-in context ({len(partial)} chars)")
+        session.current_response_text = ""
+
     async def _recover_from_noise_interrupt(self, session: OrchestratorSession):
-        """Recover from false/noise barge-in by returning to LISTENING only."""
+        """Recover from false/noise barge-in by resuming the interrupted turn when possible."""
         sid = session.session_id
         state_mgr = session.state_manager
 
@@ -3943,8 +4045,21 @@ class OrchestratorWSHandler:
         if state_mgr.state not in (State.LISTENING, State.IDLE):
             await state_mgr.transition(State.LISTENING, trigger="noise_recovery")
         await self._broadcast_state(session, State.LISTENING)
+        resume_text = (session.interrupted_response_text or "").strip()
+        resume_language = session.interrupted_response_language or self._get_output_language(session.current_language, session)
+        if resume_text and len(resume_text) >= 12 and not session.is_closed:
+            logger.info(f"[{sid}] 🔄 Noise recovery complete - resuming interrupted turn")
+            try:
+                speaking_side_effects = await state_mgr.transition(State.SPEAKING, trigger="noise_resume")
+                await self._execute_side_effects(session, speaking_side_effects, resume_language)
+                await self._broadcast_state(session, State.SPEAKING)
+                await self._stream_tts_to_browser(session, resume_text, resume_language)
+                session.interrupted_response_text = ""
+                return
+            except Exception as e:
+                logger.error(f"[{sid}] ❌ Failed to resume interrupted turn after noise recovery: {e}")
 
-        logger.info(f"[{sid}] 🔄 Noise recovery complete - staying in LISTENING (no replay)")
+        logger.info(f"[{sid}] 🔄 Noise recovery complete - staying in LISTENING")
 
     async def _handle_start_session(self, session: OrchestratorSession, msg: Dict[str, Any] = None):
         """Handle session start with mode configuration and metadata"""

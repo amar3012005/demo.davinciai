@@ -75,6 +75,11 @@ class ContextArchitect:
     )
 
     @classmethod
+    def _explicit_english_request(cls, text: str) -> bool:
+        t_lower = (text or "").lower().strip()
+        return any(phrase in t_lower for phrase in cls._EN_REQUEST_PHRASES)
+
+    @classmethod
     def _is_english(cls, text: str) -> bool:
         """
         Returns True ONLY when text is clearly English — not merely ASCII.
@@ -106,23 +111,23 @@ class ContextArchitect:
     def _detect_lang(cls, query: str, history: List[Dict], user_profile: Dict) -> str:
         """
         DEFAULT IS ALWAYS GERMAN.
-        Switch to English only when user clearly writes or requests English.
-        Once switched, stays English for all subsequent turns.
+        Switch to English only when user EXPLICITLY requests English.
+        Do not switch merely because upstream STT translated German speech into English.
 
         Priority:
-          1. user_profile["lang"] == "en"  → locked English
-          2. Current query is English       → switch now
-          3. Any prior user turn English    → already switched, stay English
-          4. Fallback                       → GERMAN
+          1. Current query explicitly requests English
+          2. Any prior user turn explicitly requested English
+          3. user_profile["lang"] == "en" AND current query is explicit English request
+          4. Fallback → GERMAN
         """
-        if user_profile.get("lang") == "en":
-            return "en"
-        if cls._is_english(query):
+        if cls._explicit_english_request(query):
             return "en"
         if history:
             for turn in history:
-                if turn.get("role") == "user" and cls._is_english(turn.get("content", "")):
+                if turn.get("role") == "user" and cls._explicit_english_request(turn.get("content", "")):
                     return "en"
+        if user_profile.get("lang") == "en" and cls._explicit_english_request(query):
+            return "en"
         return "de"
 
     @classmethod
@@ -150,14 +155,17 @@ class ContextArchitect:
         agent_rules: Optional[List[str]] = None,
     ) -> str:
         """
-        Assemble one turn. hive_mind accepted for API compatibility —
-        pass its content via retrieved_docs for Zone C injection instead.
+        Assemble one turn with explicit HiveMind memory sections.
         """
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
-            query, raw_query, retrieved_docs, history, user_profile
+            query, raw_query, retrieved_docs, history, user_profile, hive_mind
         )
-        zone_d = cls._render_zone_d(agent_skills or [], agent_rules or [])
+        zone_d = cls._render_zone_d(
+            skills=agent_skills or [],
+            rules=agent_rules or [],
+            hive_mind=hive_mind or {},
+        )
         return f"{static}\n{zone_c}{zone_d}"
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -245,9 +253,11 @@ NO META-COMMENT on any switch — just respond in the correct language.
 Register: "Sie" with strangers, mirror "du" if user signals it.
 
 ## Org Name Rules — No Nagging
-Turn 1 only: "Ich bin TARA von B&B." — once, embedded naturally.
-Turn 2+: NEVER say "B&B. Markenagentur" or "bundb.de" again unless user asks.
-Use "wir" and "unser Team" thereafter. User knows who they're talking to.
+Do NOT proactively re-introduce yourself.
+Do NOT say "Ich bin TARA" unless the user directly asks who they are speaking with.
+Keep the focus on B&B, the user's situation, and the next useful question.
+Use "wir" and "unser Team" naturally. Mention "B&B" only when it adds value or the user asks.
+Never repeat "B&B. Markenagentur" or "bundb.de" unless explicitly relevant.
 
 ## Strategic Questioning — Proactive from Turn 1
 TARA does not wait. TARA asks first.
@@ -271,7 +281,7 @@ Strategic questions by topic (retrieve full list from Qdrant, these are the core
 Move one stage at a time. Each stage gets a small yes before advancing.
 
 A — Attention (turn 1)
-Pattern interrupt opener + identity anchor + ONE strategic qualifying question.
+Pattern interrupt opener + ONE strategic qualifying question.
 Not: "Was beschäftigt Sie?" — Too passive. Lead with observation or bold reframe.
 
 I — Interest (problem shared)
@@ -302,10 +312,11 @@ Choice illusion if useful: "Lieber erstmal ein Beispiel sehen, oder direkt ein G
 3. NEVER re-ask a question already answered. Read history first.
 4. SYNTHESISE after 2-3 short answers. Stop drilling. Show you heard.
 5. PLAIN TEXT ONLY. No XML, no tags, no SSML, no markup in output.
-6. No re-introducing org. No formula repetition. No "wie ich bereits erwähnte."
+6. No self-introduction unless asked. No formula repetition. No "wie ich bereits erwähnte."
 7. Brand terms: use naturally, not as a pitch. Never repeat the same term twice in one turn.
 8. First sentence ≤ 12 words. Total: 2-4 sentences. Sometimes just 1.
 9. No: "Wie kann ich helfen?" / options menus / 3-question bursts / "Super!" opener.
+10. Keep B&B central only when useful; most of the turn should stay on the user's brand, problem, and next move.
 
 ## User Types — Adapt Immediately
 Analytical (numbers, structure) → logic questions, ROI, authority signals
@@ -316,8 +327,8 @@ Creative/Energetic (metaphors, vision) → mirror their energy, bold language, b
 Public Sector → emphasize DSGVO, EU-hosting, track record with Niedersachsen
 
 ## Checklist (run before every response)
-1. Turn 1? → pattern interrupt + "Ich bin TARA von B&B." + ONE strategic question
-2. Already said "B&B."? → use "wir" and "unser Team"
+1. Turn 1? → pattern interrupt + ONE strategic question. No self-intro unless asked.
+2. Mention B&B only if it helps the user's decision or clarifies relevance
 3. lang=en? → every word English including sign-off
 4. Question already asked? → NEVER repeat it
 5. 2-3 short answers received? → SYNTHESISE + advance to Desire
@@ -341,9 +352,9 @@ Public Sector → emphasize DSGVO, EU-hosting, track record with Niedersachsen
         """
         return """<examples>
 
-[DE turn-1 — proactive strategic opener, identity once, no passive welcome]
+[DE turn-1 — proactive strategic opener, no passive welcome]
 U: hallo
-T: Hallo! Ich bin TARA von B&B. — wir bauen Marken die wirklich bewegen. Bevor ich erkläre was wir tun: was ist gerade die größte Baustelle in Ihrer Marke?
+T: Hallo! Bevor wir über Markenarbeit sprechen: Was ist gerade die größte Baustelle in Ihrer Marke?
 
 [DE synthesis + yes-ladder — no org repeat, confirm pain, advance]
 U: wir verlieren Bewerber an modernere Arbeitgeber
@@ -353,7 +364,7 @@ T: Das klingt, als wäre das eigentliche Problem nicht der Arbeitsmarkt — sond
 U: wir haben zu wenig Zeit für Content-Produktion
 T: Genau dafür haben wir BLAIQ gebaut — unsere eigene KI-Plattform, die Content in Ihrer Markensprache erstellt: Stellenanzeigen, Social Posts, Pressemitteilungen. Kunden sparen damit 15 Stunden pro Woche. Was produziert Ihr Team aktuell am häufigsten?
 
-[EN switch — identity once if turn 1, strategic question, full English no German word]
+[EN switch — strategic question, full English no German word]
 U: i want to find out more about your employer branding services
 T: Good timing. Employer branding that actually works isn't about job ads — it's about making your real culture visible to the right people. What's the one thing top candidates probably don't know about working at your company?
 
@@ -371,6 +382,7 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
         docs: List[Dict],
         history: List[Dict],
         user_profile: Dict,
+        hive_mind: Dict,
     ) -> str:
         """
         Zone C: per-turn dynamic content. Never cached.
@@ -406,6 +418,17 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
                 txt = cls._escape(d.get("text", d.get("content", "")))[:900]
                 kb += f"[{src}] {txt}\n"
 
+        hivemind_kb = ""
+        hivemind_insights = ((hive_mind or {}).get("insights") or {})
+        tenant_memory = hivemind_insights.get("tenant_memory") or ""
+        knowledge_base = hivemind_insights.get("knowledge_base") or ""
+        if tenant_memory:
+            hivemind_kb += cls._escape(str(tenant_memory))[:1200]
+        if knowledge_base:
+            if hivemind_kb:
+                hivemind_kb += "\n"
+            hivemind_kb += cls._escape(str(knowledge_base))[:1200]
+
         if lang == "en":
             lang_line = (
                 "LANGUAGE=EN. User has written or requested English. "
@@ -419,13 +442,16 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
             )
 
         kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
+        hivemind_block = f"<hm>\n{hivemind_kb.strip()}\n</hm>\n" if hivemind_kb.strip() else ""
 
         return (
             f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
             f"<h>\n{h_lines.strip()}\n</h>\n"
             f"{kb_block}"
+            f"{hivemind_block}"
             f"<q>{cls._escape(query)}</q>\n"
             f"{lang_line}\n"
+            f"Use concrete HiveMind memory when present before relying on generic agency knowledge.\n"
             f"Run checklist. Plain text. 1 question max. Yes-ladder: small yes → big yes.\n"
             f"</ctx>\n"
         )
@@ -435,17 +461,25 @@ T: Good timing. Employer branding that actually works isn't about job ads — it
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
-    def _render_zone_d(cls, skills: List[str], rules: List[str]) -> str:
+    def _render_zone_d(cls, skills: List[str], rules: List[str], hive_mind: Dict) -> str:
         """
-        Qdrant-retrieved skills and brand rules.
+        Qdrant-retrieved skills, rules, case memory and knowledge.
         Omitted entirely when empty — zero tokens, zero cost.
-        Priority: rules > skills > default.
+        Priority: rules > case_memory > knowledge > skills > default.
         """
-        if not skills and not rules:
+        hivemind_insights = ((hive_mind or {}).get("insights") or {})
+        tenant_memory = str(hivemind_insights.get("tenant_memory") or "").strip()
+        knowledge_base = str(hivemind_insights.get("knowledge_base") or "").strip()
+
+        if not skills and not rules and not tenant_memory and not knowledge_base:
             return ""
         parts = []
         if rules:
             parts.append("rules[HIGH]: " + " | ".join(cls._escape(r) for r in rules))
+        if tenant_memory:
+            parts.append("case_memory[HIGH]: " + cls._escape(tenant_memory[:1600]))
+        if knowledge_base:
+            parts.append("knowledge_base: " + cls._escape(knowledge_base[:1600]))
         if skills:
             parts.append("skills: " + " | ".join(cls._escape(s) for s in skills))
-        return "<g>\n" + "\n".join(parts) + "\nPriority: rules > skills > default\n</g>\n"
+        return "<g>\n" + "\n".join(parts) + "\nPriority: rules > case_memory > knowledge > skills > default\n</g>\n"

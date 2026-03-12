@@ -40,11 +40,11 @@ class GroqWhisperConfig:
     base_prompt: str = os.getenv("GROQ_BASE_PROMPT", "")
     
     # VAD settings (local pre-filtering)
-    vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "850"))  # RMS energy threshold
-    min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "250"))
-    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "700"))
-    final_silence_padding_ms: int = int(os.getenv("FINAL_SILENCE_PADDING_MS", "500"))
-    pre_speech_padding_ms: int = int(os.getenv("PRE_SPEECH_PADDING_MS", "500"))
+    vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "720"))  # RMS energy threshold
+    min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "320"))
+    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "950"))
+    final_silence_padding_ms: int = int(os.getenv("FINAL_SILENCE_PADDING_MS", "1150"))
+    pre_speech_padding_ms: int = int(os.getenv("PRE_SPEECH_PADDING_MS", "520"))
     
     # Groq API parameters
     language: Optional[str] = os.getenv("GROQ_LANGUAGE", "")  # ISO-639-1 for faster processing
@@ -85,6 +85,42 @@ class GroqWhisperConfig:
     def transcription_url(self) -> str:
         """Get the transcription endpoint URL"""
         return f"{self.base_url}/audio/transcriptions"
+
+    def build_transcription_prompt(self, extra_prompt: Optional[str] = None, language: Optional[str] = None) -> Optional[str]:
+        """
+        Build a strict no-translation transcription prompt.
+        This reduces Whisper's tendency to normalize non-English speech into English.
+        """
+        lang = (language or self.language or "").strip().lower()
+        parts = []
+        if self.base_prompt:
+            parts.append(self.base_prompt.strip())
+        if lang in {"de", "deu", "ger", "german", "deutsch"}:
+            parts.append(
+                "Transcribe the spoken audio exactly in German using normal German orthography. "
+                "Do not translate, summarize, paraphrase, or normalize it into English. "
+                "Preserve names, brands, German compounds, umlauts (ae/oe/ue where spoken as ä/ö/ü only if clearly necessary), "
+                "and the Eszett (ß) when appropriate. Keep acronyms and product names as spoken. "
+                "Do not spell words letter by letter unless the speaker explicitly spells them."
+            )
+        elif lang in {"en", "eng", "english"}:
+            parts.append(
+                "Transcribe the spoken audio exactly in English. Do not translate, summarize, or paraphrase. "
+                "Preserve names, brands, and phrasing as spoken."
+            )
+        else:
+            parts.append(
+                "Transcribe the spoken audio verbatim in the original spoken language. "
+                "Do not translate, summarize, or paraphrase."
+            )
+        if extra_prompt:
+            parts.append(extra_prompt.strip())
+        prompt = " ".join(part for part in parts if part)
+        return prompt[:1000] if prompt else None
+
+    @staticmethod
+    def is_german_language(language: Optional[str]) -> bool:
+        return (language or "").strip().lower() in {"de", "deu", "ger", "german", "deutsch"}
     
     def __post_init__(self):
         """Validate configuration and handle port parsing"""

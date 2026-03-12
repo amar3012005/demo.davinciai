@@ -254,7 +254,7 @@ class GroqWhisperSession:
                     logger.debug(f"⏸️ [{self.session_id}] Dropping late micro-chunk result after speech end")
                     return
 
-                if result.is_hallucination or result.is_low_quality:
+                if (result.is_hallucination or result.is_low_quality) and not self._is_meaningful_single_word(result.text):
                     logger.info(f"🚫 [{self.session_id}] Filtered micro-chunk hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
                     return
                 
@@ -295,6 +295,10 @@ class GroqWhisperSession:
     
     def _build_context_prompt(self) -> Optional[str]:
         """Build context prompt from recent transcriptions"""
+        if self.config.is_german_language(self.config.language):
+            # Context chaining can reinforce an accidental English normalization across chunks.
+            # For German-first sessions, prefer clean native-language transcription over chain continuity.
+            return None
         if not self.context_window:
             return None
         
@@ -426,8 +430,11 @@ class GroqWhisperSession:
         if len(words) != 1:
             return False
         token = words[0]
-        reject = {"you", "thanks", "thank", "bye", "goodbye", "hallo", "und"}
-        allow_common = {"yes", "no", "ok", "okay", "stop", "wait", "go", "one", "two", "three", "hi", "hello"}
+        reject = {"you", "thanks", "thank", "bye", "goodbye", "und"}
+        allow_common = {
+            "yes", "no", "ok", "okay", "stop", "wait", "go", "one", "two", "three", "hi", "hello",
+            "ja", "nein", "halt", "warte", "weiter", "stopp", "okay", "okey", "hallo", "bitte"
+        }
         if token in reject:
             return False
         return token in allow_common or len(token) >= 2
@@ -460,7 +467,9 @@ class GroqWhisperSession:
                     "is_final": is_final,
                     "request_id": f"{self.session_id}_{int(time.time() * 1000)}",
                     "timestamp": time.time(),
-                    "source": "groq_whisper"
+                    "source": "groq_whisper",
+                    "language": self.config.language or "de",
+                    "language_code": self.config.language or "de",
                 }
             }
             
@@ -494,7 +503,8 @@ class GroqWhisperSession:
                 await self.orchestrator_ws.send_transcript(
                     text=text,
                     is_final=is_final,
-                    language=self.config.language or "en",
+                    language=self.config.language or "de",
+                    language_code=self.config.language or "de",
                     words=words,
                     latency_ms=latency_ms
                 )

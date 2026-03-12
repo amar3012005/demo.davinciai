@@ -24,7 +24,7 @@ languages:
     - "en"
     - "de"
   auto_detect: true
-  stream_out: "auto"  # "en", "de", or "auto" - Controls agent's TTS language and audio file selection
+  stream_out: "de"  # "en", "de", or "auto" - Controls agent's TTS language and audio file selection
                       # "en" or "de": Agent always speaks in specified language regardless of input
                       # "auto": Agent speaks in detected input language
   disable_pregenerated_audio: true # Forces TTS for all dialogues (intro, exit, fillers, etc.)
@@ -241,4 +241,3 @@ fallback_responses:
     tts_error: "Ich habe Schwierigkeiten beim Sprechen, aber ich höre Ihnen noch zu."
     connection_lost: "Wir scheinen die Verbindung verloren zu haben. Bitte versuchen Sie, sich erneut zu verbinden."
     unknown_error: "Ich bin auf einen unerwarteten Fehler gestoßen. Bitte versuchen Sie es erneut oder kontaktieren Sie den Support."
-

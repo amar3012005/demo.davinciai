@@ -326,7 +326,7 @@ class RAGEngine:
         """Build a tenant/org-safe prompt when local retrieval is disabled or sparse."""
         org = (self.config.organization_name or "the organization").strip()
         location = (self.config.organization_location or "").strip()
-        lang = (language or "english").strip().lower()
+        lang = (language or "german").strip().lower()
 
         history_lines = []
         for turn in history[-6:]:
@@ -348,6 +348,7 @@ class RAGEngine:
             f"You are TARA, the AI assistant for {org}"
             f"{f' ({location})' if location else ''}.\n"
             f"Language for this reply: {lang}.\n"
+            f"Mandatory language rule: write the full answer only in {lang}. Do not answer in English unless the user explicitly asks for English.\n"
             "Identity guardrails:\n"
             f"- You must identify ONLY as assistant for {org}.\n"
             "- Never claim to belong to TASK, B&B, or any other organization unless explicitly present in provided context documents.\n"
@@ -375,7 +376,7 @@ class RAGEngine:
         system_prompt: Optional[str],
     ) -> str:
         """Dedicated system prompt for enterprise HiveMind dashboard chats."""
-        lang = (language or "english").strip().lower()
+        lang = (language or "german").strip().lower()
         normalized_system_prompt = (system_prompt or "").strip()
 
         history_lines = []
@@ -418,6 +419,7 @@ class RAGEngine:
         return (
             f"You are HiveMind of {tenant_id}, the enterprise memory engine for this tenant.\n"
             f"Reply language: {lang}.\n"
+            f"Mandatory language rule: write the full answer only in {lang}. Do not answer in English unless the user explicitly asks for English.\n"
             "Identity:\n"
             f"- Identify as HiveMind for {tenant_id}, not as the website voice agent.\n"
             "- You hold conversation-derived customer insights, reusable rules, skills, and knowledge captured for this tenant.\n"
@@ -448,6 +450,64 @@ class RAGEngine:
     def _sanitize_tenant(tenant_id: Optional[str]) -> str:
         tenant = (tenant_id or "default").strip().lower()
         return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
+
+    @staticmethod
+    def _wants_german(language: Optional[str]) -> bool:
+        return (language or "").strip().lower() in {"de", "deu", "ger", "german", "deutsch"}
+
+    @staticmethod
+    def _looks_english(text: str) -> bool:
+        sample = (text or "").strip().lower()
+        if not sample:
+            return False
+        english_markers = [
+            "the ", "this ", "that ", "you ", "your ", "what ", "how ", "why ",
+            "sounds like", "i'm ", "i am ", "here's ", "here is ", "could you",
+            "please", "help", "brand", "goal", "biggest hurdle"
+        ]
+        german_markers = [
+            " der ", " die ", " das ", " und ", " nicht ", " mit ", " für ",
+            " klingt", " sie ", " ihre ", " dein ", " warum ", " wie ", " was "
+        ]
+        english_hits = sum(1 for marker in english_markers if marker in f" {sample} ")
+        german_hits = sum(1 for marker in german_markers if marker in f" {sample} ")
+        return english_hits > 0 and english_hits >= german_hits
+
+    async def _enforce_response_language(self, answer: str, language: Optional[str]) -> str:
+        text = (answer or "").strip()
+        if not text:
+            return text
+        if not self._wants_german(language):
+            return text
+        if not self._looks_english(text):
+            return text
+        if not self.groq_client:
+            logger.warning("German reply requested but Groq translation client is unavailable; returning original answer")
+            return text
+
+        try:
+            loop = asyncio.get_running_loop()
+            translated = await loop.run_in_executor(
+                None,
+                lambda: self.groq_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    temperature=0.1,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Rewrite the assistant answer into natural German. Preserve meaning, keep it concise, and output only the final German answer."
+                        },
+                        {"role": "user", "content": text},
+                    ],
+                )
+            )
+            german_text = translated.choices[0].message.content.strip()
+            if german_text:
+                logger.info("🌐 Rewrote English draft into German to honor requested response language")
+                return german_text
+        except Exception as e:
+            logger.error(f"German response enforcement failed: {e}")
+        return text
 
     def _resolve_context_architect(self, tenant_id: Optional[str]):
         """
@@ -537,7 +597,7 @@ class RAGEngine:
         
         # 1. High-Speed Detection & Translation Layer
         query_english = query
-        original_language = "en"
+        original_language = "german"
         if context and 'language' in context:
             original_language = context['language'].lower()
         
@@ -924,6 +984,18 @@ class RAGEngine:
         hive_mind_state = {"insights": {}, "variables": {}}
         if hive_mind_context:
             hive_mind_state["insights"]["team_solutions"] = str(hive_mind_context)
+        if case_memories:
+            hive_mind_state["insights"]["tenant_memory"] = "\n".join(
+                f"Issue: {str(entry.get('text', '')).strip()} | Solution: {str(entry.get('summary', '')).strip()}"
+                for entry in case_memories[:8]
+                if str(entry.get("text", "")).strip()
+            )
+        if general_kb:
+            hive_mind_state["insights"]["knowledge_base"] = "\n".join(
+                str(entry.get("text", "")).strip()
+                for entry in general_kb[:8]
+                if str(entry.get("text", "")).strip()
+            )
         if web_results:
             hive_mind_state["insights"]["live_web_data"] = str(web_results)
         
@@ -998,6 +1070,7 @@ class RAGEngine:
         gen_start = time.time()
         accumulated = ""
         first_chunk_at = None
+        streamed_live = False
         
         try:
             # Log the full prompt for debugging 0-token issues
@@ -1005,7 +1078,11 @@ class RAGEngine:
             
             # Force non-stream for GPT-OSS to avoid empty delta-content behavior.
             llm_model_name = active_llm_model.lower()
-            use_stream = (not force_non_stream) and ("gpt-oss" not in llm_model_name)
+            use_stream = (
+                (not force_non_stream)
+                and ("gpt-oss" not in llm_model_name)
+                and (not self._wants_german(original_language))
+            )
             result = self.llm.generate(
                 prompt=prompt,
                 stream=use_stream,
@@ -1020,6 +1097,7 @@ class RAGEngine:
             
             # Handle Async Generator (Groq Async Streaming)
             if hasattr(result, '__aiter__'):
+                streamed_live = True
                 async for chunk in result:
                     # Check for usage sentinel (dict with __usage__ key)
                     if isinstance(chunk, dict) and "__usage__" in chunk:
@@ -1032,6 +1110,7 @@ class RAGEngine:
             
             # Handle Sync Generator (Gemini/OpenAI Streaming)
             elif hasattr(result, '__iter__'):
+                streamed_live = True
                 for chunk in result:
                     if isinstance(chunk, dict) and "__usage__" in chunk:
                         llm_usage = chunk["__usage__"]
@@ -1045,20 +1124,17 @@ class RAGEngine:
             elif asyncio.iscoroutine(result):
                 accumulated = await result
                 if first_chunk_at is None: first_chunk_at = time.time()
-                if streaming_callback: streaming_callback(accumulated, False)
             
             # Handle direct string
             else:
                 accumulated = str(result)
                 if first_chunk_at is None: first_chunk_at = time.time()
-                if streaming_callback: streaming_callback(accumulated, False)
             
             # Check for empty response and provide a fallback to prevent TTS errors
             if not accumulated.strip():
                 logger.warning(f"⚠️ LLM returned empty response for query: '{query}'")
                 # Provide a natural fallback response
                 accumulated = "I'm sorry, I couldn't process that. Could you please repeat or rephrase your question?"
-                if streaming_callback: streaming_callback(accumulated, False)
 
             # Non-streaming providers may store usage out-of-band.
             if not llm_usage and hasattr(self.llm, "get_last_usage"):
@@ -1066,8 +1142,6 @@ class RAGEngine:
                     llm_usage = self.llm.get_last_usage() or {}
                 except Exception:
                     llm_usage = {}
-
-            if streaming_callback: streaming_callback("", True)
             
         except Exception as e:
             logger.error(f"Generation failed: {e}")
@@ -1107,8 +1181,6 @@ class RAGEngine:
                 except Exception:
                     llm_usage = {}
                 
-            if streaming_callback: streaming_callback(accumulated, True)
-            
         timing['generation_ms'] = (time.time() - gen_start) * 1000
         if first_chunk_at: timing['ttfc_ms'] = (first_chunk_at - gen_start) * 1000
         
@@ -1118,6 +1190,12 @@ class RAGEngine:
         answer = re.sub(r'</resp>.*', '', answer, flags=re.DOTALL).strip()
         answer = re.sub(r'</turn>.*', '', answer, flags=re.DOTALL).strip()
         answer = re.sub(r'</ctxt>.*', '', answer, flags=re.DOTALL).strip()
+        answer = await self._enforce_response_language(answer, original_language)
+
+        if streaming_callback and not streamed_live:
+            streaming_callback(answer, False)
+        if streaming_callback:
+            streaming_callback("", True)
         
         timing['total_ms'] = (time.time() - start_time) * 1000
         self.query_count += 1
@@ -1244,7 +1322,7 @@ class RAGEngine:
             logger.error(f"Distillation failed: {e}")
             return []
 
-    async def generate_dynamic_exit(self, history: str, language: str = "english") -> str:
+    async def generate_dynamic_exit(self, history: str, language: str = "german") -> str:
         """Generate a dynamic summary and closing query for the session."""
         try:
             # Map shorthand language codes

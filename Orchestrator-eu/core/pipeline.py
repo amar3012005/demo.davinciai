@@ -83,7 +83,7 @@ class ProcessingPipeline:
             
             # Final fallback to default language if detection fails entirely
             if detected_lang is None:
-                detected_lang = "en"  # Safe default
+                detected_lang = "de"
                 logger.warning(f"[{session_id}] ⚠️ Language detection failed, falling back to default: {detected_lang}")
                 
             language = detected_lang
@@ -258,5 +258,4 @@ class ProcessingPipeline:
                 "confidence": 0.0,
                 "error": str(e)
             }
-
 

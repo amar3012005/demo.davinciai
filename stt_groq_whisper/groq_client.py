@@ -189,6 +189,33 @@ class GroqWhisperClient:
         
         buffer.seek(0)
         return buffer.read()
+
+    async def _retry_strict_native_transcription(
+        self,
+        client: httpx.AsyncClient,
+        headers: Dict[str, str],
+        files: Dict[str, Any],
+        base_data: Dict[str, Any],
+        language: Optional[str],
+    ) -> Optional[GroqTranscriptionResult]:
+        retry_data = dict(base_data)
+        retry_data["prompt"] = self.config.build_transcription_prompt(
+            extra_prompt=(
+                "Return the transcript only in the original spoken language. "
+                "Do not translate German speech into English."
+            ),
+            language=language,
+        )
+        response = await client.post(
+            self.config.transcription_url,
+            headers=headers,
+            data=retry_data,
+            files=files,
+        )
+        if response.status_code != 200:
+            logger.warning(f"Strict native-language retry failed with status {response.status_code}: {response.text}")
+            return None
+        return GroqTranscriptionResult(response.json())
     
     async def transcribe(
         self,
@@ -207,7 +234,7 @@ class GroqWhisperClient:
         Returns:
             GroqTranscriptionResult or None on failure
         """
-        if not audio_bytes or len(audio_bytes) < 100:
+        if not audio_bytes or len(audio_bytes) < 48:
             logger.debug("Skipping transcription - audio chunk too small")
             return None
         
@@ -232,10 +259,9 @@ class GroqWhisperClient:
         if language or self.config.language:
             data["language"] = language or self.config.language
         
-        if prompt:
-            # Limit prompt to 224 tokens (~1000 chars) per Groq docs
-            truncated_prompt = prompt[:1000] if len(prompt) > 1000 else prompt
-            data["prompt"] = truncated_prompt
+        prompt_text = self.config.build_transcription_prompt(prompt, language=language)
+        if prompt_text:
+            data["prompt"] = prompt_text
         
         # Add timestamp granularities for word-level timing
         if self.config.include_word_timestamps and self.config.response_format == "verbose_json":
@@ -266,6 +292,21 @@ class GroqWhisperClient:
                 if response.status_code == 200:
                     self.successful_requests += 1
                     result = GroqTranscriptionResult(response.json())
+
+                    expected_language = language or self.config.language
+                    if self.config.is_german_language(expected_language):
+                        result_language = (result.language or "").strip().lower()
+                        if result_language.startswith("en"):
+                            logger.warning("⚠️ Groq reported English language during German session; retrying with stricter native-language prompt")
+                            retried = await self._retry_strict_native_transcription(
+                                client=client,
+                                headers=headers,
+                                files=files,
+                                base_data=data,
+                                language=expected_language,
+                            )
+                            if retried and retried.text:
+                                result = retried
                     
                     if result.text:
                         status = "🚫 HALLUCINATION" if result.is_hallucination else "✅"
