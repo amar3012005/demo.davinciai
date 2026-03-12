@@ -76,7 +76,7 @@ class OrchestratorSession:
 
     # Timeout tracking
     timeout_count: int = 0
-    current_language: str = "en"
+    current_language: str = "de"
 
     # Visual Co-Pilot states
     mode: str = "voice" # "voice" or "visual-copilot"
@@ -180,7 +180,7 @@ class OrchestratorSession:
 
     # Barge-in validation (deferred VAD interrupt)
     last_query_text: str = ""
-    last_query_language: str = "en"
+    last_query_language: str = "de"
     barge_in_pending: bool = False  # True = VAD fired during SPEAKING, awaiting STT validation
 
     # Host-based configuration overrides
@@ -448,6 +448,9 @@ class OrchestratorWSHandler:
         # Priority: Use CARTESIA_VOICE_ID env var, then config.yaml, then hardcoded fallback
         default_voice = os.getenv("CARTESIA_VOICE_ID")
         
+        preferred_default_lang = (self.config.languages.default or "de").lower()
+        if not default_voice and self.config.services.tts.voices.get(preferred_default_lang):
+            default_voice = self.config.services.tts.voices[preferred_default_lang].voice_id
         if not default_voice and self.config.services.tts.voices.get("en"):
             default_voice = self.config.services.tts.voices["en"].voice_id
             
@@ -1267,9 +1270,9 @@ class OrchestratorWSHandler:
             if len(text) > 5:
                 detected_lang = detect_language(text, self.config.languages.supported)
 
-        # If still nothing, fallback to session default or english
+        # If still nothing, fallback to session default or configured default language
         if not detected_lang:
-            detected_lang = session.current_language or "en"
+            detected_lang = session.current_language or self.config.languages.default
             
         session.current_language = detected_lang
         session.state_manager.context.current_language = detected_lang

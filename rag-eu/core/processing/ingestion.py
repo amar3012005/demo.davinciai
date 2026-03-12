@@ -4,9 +4,8 @@ import os
 import shutil
 import uuid
 import logging
-from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 
 from fastapi import UploadFile
 from qdrant_client import QdrantClient
@@ -16,11 +15,23 @@ from qdrant_client.http import models
 try:
     from core.processing.doc_processor import DocumentProcessor
     from core.processing.semantic_chunker import DocumentChunker
+    from models.hivemind_schema import (
+        general_kb_payload,
+        website_map_payload,
+        agent_skill_payload,
+        agent_rule_payload,
+    )
 except ImportError:
     import sys
     sys.path.append(str(Path(__file__).parent.parent.parent))
     from core.processing.doc_processor import DocumentProcessor
     from core.processing.semantic_chunker import DocumentChunker
+    from models.hivemind_schema import (
+        general_kb_payload,
+        website_map_payload,
+        agent_skill_payload,
+        agent_rule_payload,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +42,7 @@ COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "tara_case_memory")
 EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniLM-L12-v2"
 
 class IngestionService:
-    def __init__(self, upload_dir: str = "/tmp/uploads", embeddings: Any = None):
+    def __init__(self, upload_dir: str = "/tmp/uploads", embeddings: Any = None, qdrant_backend: Any = None):
         self.upload_dir = Path(upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         
@@ -48,6 +59,7 @@ class IngestionService:
         
         self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
         self.collection_name = COLLECTION_NAME
+        self.qdrant_backend = qdrant_backend
         
         logger.info(f"IngestionService initialized. Target collection: {COLLECTION_NAME}")
 
@@ -62,35 +74,101 @@ class IngestionService:
                 vectors_config=models.VectorParams(size=dimension, distance=models.Distance.COSINE)
             )
 
+    @staticmethod
+    def _normalize_upload_type(doc_type: str) -> str:
+        raw = (doc_type or "General").strip()
+        upper = raw.upper().replace(" ", "_")
+        aliases = {
+            "GENERAL": "GENERAL_KB",
+            "GENERAL_KB": "GENERAL_KB",
+            "INTERNAL_KB": "GENERAL_KB",
+            "KB": "GENERAL_KB",
+            "AGENT_SKILL": "AGENT_SKILL",
+            "SKILL": "AGENT_SKILL",
+            "AGENT_RULE": "AGENT_RULE",
+            "RULE": "AGENT_RULE",
+            "WEBSITE_MAP": "WEBSITE_MAP",
+            "SITEMAP": "WEBSITE_MAP",
+        }
+        return aliases.get(upper, "GENERAL_KB")
+
+    async def _resolve_qdrant_target(self, tenant_id: str, dimension: int):
+        """
+        Resolve the correct Qdrant client and collection for the given tenant.
+        Falls back to the default collection when tenant-aware backend is unavailable.
+        """
+        if self.qdrant_backend and getattr(self.qdrant_backend, "enabled", False):
+            sync_client, _, collection_name = self.qdrant_backend._get_clients_for_tenant(tenant_id)  # pylint: disable=protected-access
+            if not sync_client or not collection_name:
+                raise ValueError(f"Tenant Qdrant target unavailable for tenant={tenant_id}")
+            self.qdrant_backend._ensure_collection_for(sync_client, collection_name)  # pylint: disable=protected-access
+            return sync_client, collection_name
+
+        await self._ensure_collection_exists(dimension)
+        return self.client, self.collection_name
+
+    @staticmethod
+    def _build_payload(
+        normalized_type: str,
+        *,
+        text: str,
+        tenant_id: str,
+        filename: str,
+        original_doc_type: str,
+        topic: str,
+        chunk_index: int,
+        doc_id: str,
+    ) -> Dict[str, Any]:
+        if normalized_type == "AGENT_SKILL":
+            return agent_skill_payload(
+                text=text,
+                topic=topic or "general",
+                tenant_id=tenant_id,
+            )
+        if normalized_type == "AGENT_RULE":
+            return agent_rule_payload(
+                text=text,
+                topic=topic or "general",
+                tenant_id=tenant_id,
+                severity="standard",
+            )
+        if normalized_type == "WEBSITE_MAP":
+            return website_map_payload(
+                url=filename,
+                concept=text,
+                domain="all",
+                tenant_id=tenant_id,
+            )
+        return general_kb_payload(
+            text=text,
+            filename=filename,
+            doc_type_detail=original_doc_type or "General",
+            tenant_id=tenant_id,
+            chunk_index=chunk_index,
+            doc_id=doc_id,
+            topics=topic,
+        )
+
     async def ingest_file(self, file: UploadFile, doc_type: str = "General", topics: str = "", tenant_id: str = "tara") -> Dict[str, Any]:
         """
         Process an uploaded file and ingest into Qdrant using Universal Schema.
         """
-        # Import schema factories
-        from .models.hivemind_schema import general_kb_payload, website_map_payload, agent_skill_payload
-        
         file_id = str(uuid.uuid4())
         filename = file.filename
         file_path = self.upload_dir / f"{file_id}_{filename}"
+        normalized_type = self._normalize_upload_type(doc_type)
         
-        logger.info(f"Receiving file: {filename} (ID: {file_id}) | Type: {doc_type} | Tenant: {tenant_id}")
+        logger.info(
+            f"Receiving file: {filename} (ID: {file_id}) | Type: {doc_type} "
+            f"(normalized={normalized_type}) | Tenant: {tenant_id}"
+        )
         
         try:
             # 1. Save uploaded file to temp path
             with open(file_path, "wb") as f:
                 shutil.copyfileobj(file.file, f)
             
-            # 2. Handle different doc_types
-            # Normalize doc_type
-            type_upper = doc_type.upper()
-            
-            # Special case: Website Map (JSON/CSV)
-            if type_upper == "WEBSITE_MAP" and filename.endswith(('.json', '.csv')):
-                # TODO: Implement structured parsing for maps
-                # For now, we'll treat it as a document but use the sitemap label
-                pass
-
-            # 3. Extract Text (for all document types)
+            # 2. Extract Text (for all document types)
             logger.info("Extracting text...")
             doc_data = self.processor.process_single_file(str(file_path))
             
@@ -114,33 +192,24 @@ class IngestionService:
             if len(embeddings) == 0:
                 raise ValueError("Embedding generation failed")
                 
-            # Ensure collection exists
             dimension = embeddings.shape[1]
-            await self._ensure_collection_exists(dimension)
+            target_client, collection_name = await self._resolve_qdrant_target(tenant_id, dimension)
             
             # 6. Prepare Points with Universal Schema
             points = []
             for i, chunk in enumerate(chunks):
                 vector = embeddings[i].tolist()
                 
-                # Determine factory based on doc_type
-                if type_upper == "AGENT_SKILL":
-                    payload = agent_skill_payload(
-                        text=chunk["text"],
-                        topic=topics or "general",
-                        tenant_id=tenant_id
-                    )
-                else:
-                    # Default to General KB
-                    payload = general_kb_payload(
-                        text=chunk["text"],
-                        filename=filename,
-                        doc_type_detail=doc_type,
-                        tenant_id=tenant_id,
-                        chunk_index=i,
-                        doc_id=doc_data["doc_id"],
-                        topics=topics,
-                    )
+                payload = self._build_payload(
+                    normalized_type,
+                    text=chunk["text"],
+                    tenant_id=tenant_id,
+                    filename=filename,
+                    original_doc_type=doc_type,
+                    topic=topics,
+                    chunk_index=i,
+                    doc_id=doc_data["doc_id"],
+                )
                 
                 # Merge extra chunk metadata
                 for k, v in chunk.get("metadata", {}).items():
@@ -157,12 +226,10 @@ class IngestionService:
                     payload=payload
                 ))
             
-            logger.info(f"Upserting {len(points)} points to Qdrant...")
+            logger.info(f"Upserting {len(points)} points to Qdrant collection {collection_name}...")
 
-            
-            # 6. Upsert
-            self.client.upsert(
-                collection_name=self.collection_name,
+            target_client.upsert(
+                collection_name=collection_name,
                 points=points
             )
             
@@ -176,7 +243,9 @@ class IngestionService:
                 "doc_id": doc_data["doc_id"],
                 "filename": filename,
                 "chunks_ingested": len(points),
-                "collection": self.collection_name
+                "collection": collection_name,
+                "tenant_id": tenant_id,
+                "doc_type": normalized_type,
             }
             
         except Exception as e:

@@ -95,7 +95,7 @@ class ServicesConfig:
 @dataclass
 class LanguageConfig:
     """Language configuration"""
-    default: str = "en"
+    default: str = "de"
     supported: List[str] = field(default_factory=lambda: ["en", "de"])
     auto_detect: bool = True
     stream_out: str = "auto"  # "en", "de", or "auto" - Controls agent's TTS language and audio file selection
@@ -271,7 +271,7 @@ class ConfigLoader:
                 logger.warning(f"Invalid stream_out value '{stream_out}', defaulting to 'auto'")
                 stream_out = "auto"
             config.languages = LanguageConfig(
-                default=os.getenv("DEFAULT_LANGUAGE", lang_data.get("default", "en")),
+                default=os.getenv("DEFAULT_LANGUAGE", lang_data.get("default", "de")),
                 supported=[lang.strip() for lang in supported_langs.split(",")],
                 auto_detect=os.getenv("AUTO_DETECT_LANGUAGE", str(lang_data.get("auto_detect", True))).lower() == "true",
                 stream_out=stream_out,

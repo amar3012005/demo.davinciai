@@ -32,7 +32,7 @@ from daytona_agent.services.shared.redis_client import get_redis_client, close_r
 from daytona_agent.services.rag.config import RAGConfig
 from daytona_agent.services.rag.rag_engine import RAGEngine
 from .models.hivemind_schema import (
-    agent_skill_payload, agent_rule_payload,
+    agent_skill_payload, agent_rule_payload, general_kb_payload,
     read_text, read_summary, read_doc_type, read_created_at,
     SCHEMA_VERSION,
 )
@@ -268,7 +268,7 @@ class FSMRouteResponse(BaseModel):
 
 class SkillRuleCreateRequest(BaseModel):
     text: str = Field(..., min_length=5, description="Skill or rule description text")
-    type: str = Field(..., description="'agent_skill' or 'agent_rule'")
+    type: str = Field(..., description="'agent_skill', 'agent_rule', or 'general_kb'")
     topic: str = Field("general", description="Topic category (e.g. debugging, identity, format)")
     severity: Optional[str] = Field(None, description="For rules: 'critical' or 'standard'")
     tenant_id: str = Field("tara", description="Tenant identifier")
@@ -368,7 +368,10 @@ async def lifespan(app: FastAPI):
                 global ingestion_service
                 # SHARE EMBEDDINGS to avoid double loading memory spike
                 shared_embeddings = rag_engine.embeddings if rag_engine else None
-                ingestion_service = IngestionService(embeddings=shared_embeddings)
+                ingestion_service = IngestionService(
+                    embeddings=shared_embeddings,
+                    qdrant_backend=(rag_engine.qdrant if rag_engine else None),
+                )
                 app.state.ingestion_service = ingestion_service
                 logger.info(" ✅ Ingestion Service initialized (with shared embeddings)")
             except Exception as e:
@@ -968,7 +971,7 @@ async def embed_text(request_data: EmbedRequest):
 @app.post("/api/v1/skills", response_model=SkillRuleItem)
 async def create_skill_or_rule(request: SkillRuleCreateRequest):
     """
-    Upsert a single agent skill or rule into Qdrant HiveMind.
+    Upsert a single agent skill, rule, or general knowledge item into Qdrant HiveMind.
     Uses Universal Payload Schema.
     """
     if not app.state.rag_engine or not app.state.rag_engine.embeddings:
@@ -976,15 +979,18 @@ async def create_skill_or_rule(request: SkillRuleCreateRequest):
     if not app.state.rag_engine.qdrant or not app.state.rag_engine.qdrant.enabled:
         raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
 
-    if request.type not in ("agent_skill", "agent_rule"):
-        raise HTTPException(status_code=400, detail="type must be 'agent_skill' or 'agent_rule'")
+    if request.type not in ("agent_skill", "agent_rule", "general_kb"):
+        raise HTTPException(status_code=400, detail="type must be 'agent_skill', 'agent_rule', or 'general_kb'")
 
     try:
-        import uuid as _uuid
         from qdrant_client.http import models as _models
 
         # Embed the text
         vector = app.state.rag_engine.embeddings.embed_query(request.text)
+        sync_client, _, collection_name = app.state.rag_engine.qdrant._get_clients_for_tenant(request.tenant_id)  # pylint: disable=protected-access
+        if not sync_client or not collection_name:
+            raise HTTPException(status_code=503, detail="Tenant Qdrant collection not available")
+        app.state.rag_engine.qdrant._ensure_collection_for(sync_client, collection_name)  # pylint: disable=protected-access
 
         # Build payload via factory
         if request.type == "agent_skill":
@@ -993,19 +999,26 @@ async def create_skill_or_rule(request: SkillRuleCreateRequest):
                 topic=request.topic,
                 tenant_id=request.tenant_id,
             )
-        else:
+        elif request.type == "agent_rule":
             payload = agent_rule_payload(
                 text=request.text,
                 topic=request.topic,
                 severity=request.severity or "standard",
                 tenant_id=request.tenant_id,
             )
+        else:
+            payload = general_kb_payload(
+                text=request.text,
+                tenant_id=request.tenant_id,
+                doc_type_detail=request.topic or "General",
+                topics=request.topic or "general",
+            )
 
         point_id = payload.pop("uuid")
         timestamp = payload["created_at"]
 
-        await app.state.rag_engine.qdrant.client.upsert(
-            collection_name=app.state.rag_engine.qdrant.collection_name,
+        sync_client.upsert(
+            collection_name=collection_name,
             points=[
                 _models.PointStruct(
                     id=point_id,
@@ -1015,8 +1028,8 @@ async def create_skill_or_rule(request: SkillRuleCreateRequest):
             ],
         )
 
-        label = "Skill" if request.type == "agent_skill" else "Rule"
-        logger.info(f"🎯 {label} created: [{request.topic}] {request.text[:60]}...")
+        label = "Skill" if request.type == "agent_skill" else "Rule" if request.type == "agent_rule" else "Knowledge"
+        logger.info(f"🎯 {label} created in {collection_name}: [{request.topic}] {request.text[:60]}...")
 
         return SkillRuleItem(
             id=point_id,
@@ -1041,11 +1054,12 @@ async def list_skills_and_rules(tenant_id: str = "tara"):
         raise HTTPException(status_code=503, detail="Qdrant HiveMind not available")
 
     try:
-        from qdrant_client import QdrantClient
         from qdrant_client.http import models as _models
 
         qdrant = app.state.rag_engine.qdrant
-        sync_client = QdrantClient(url=qdrant.url, api_key=qdrant.api_key, check_compatibility=False)
+        sync_client, _, collection_name = qdrant._get_clients_for_tenant(tenant_id)  # pylint: disable=protected-access
+        if not sync_client or not collection_name:
+            raise HTTPException(status_code=503, detail="Tenant Qdrant collection not available")
 
         skills = []
         rules = []
@@ -1053,7 +1067,7 @@ async def list_skills_and_rules(tenant_id: str = "tara"):
         for item_type in ("agent_skill", "agent_rule"):
             # Match BOTH new schema doc_type AND legacy type field
             result = sync_client.scroll(
-                collection_name=qdrant.collection_name,
+                collection_name=collection_name,
                 scroll_filter=_models.Filter(
                     must=[
                         _models.FieldCondition(key="tenant_id", match=_models.MatchValue(value=tenant_id)),
@@ -1084,7 +1098,7 @@ async def list_skills_and_rules(tenant_id: str = "tara"):
                 else:
                     rules.append(item)
 
-        logger.info(f"🎯 Listed skills/rules: {len(skills)} skills, {len(rules)} rules")
+        logger.info(f"🎯 Listed skills/rules from {collection_name}: {len(skills)} skills, {len(rules)} rules")
         return SkillRuleListResponse(skills=skills, rules=rules, total=len(skills) + len(rules))
 
     except Exception as e:
@@ -1103,12 +1117,16 @@ async def delete_skill_or_rule(point_id: str, tenant_id: str = "tara"):
     try:
         from qdrant_client.http import models as _models
 
-        await app.state.rag_engine.qdrant.client.delete(
-            collection_name=app.state.rag_engine.qdrant.collection_name,
+        sync_client, _, collection_name = app.state.rag_engine.qdrant._get_clients_for_tenant(tenant_id)  # pylint: disable=protected-access
+        if not sync_client or not collection_name:
+            raise HTTPException(status_code=503, detail="Tenant Qdrant collection not available")
+
+        sync_client.delete(
+            collection_name=collection_name,
             points_selector=_models.PointIdsList(points=[point_id]),
         )
 
-        logger.info(f"🗑️ Deleted skill/rule: {point_id}")
+        logger.info(f"🗑️ Deleted skill/rule from {collection_name}: {point_id}")
         return {"status": "deleted", "id": point_id}
 
     except Exception as e:
@@ -1131,11 +1149,12 @@ async def upload_document(
         raise HTTPException(status_code=503, detail="Ingestion service not initialized")
     
     try:
+        effective_tenant_id = _resolve_effective_tenant_id(tenant_id, default="tara")
         result = await app.state.ingestion_service.ingest_file(
             file=file,
             doc_type=doc_type,
             topics=topics,
-            tenant_id=tenant_id
+            tenant_id=effective_tenant_id
         )
         return result
     except Exception as e:

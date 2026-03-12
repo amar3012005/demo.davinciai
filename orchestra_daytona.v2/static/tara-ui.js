@@ -763,6 +763,12 @@
                 widget.orbContainer.style.transform = '';
             }
 
+            // Screen-wide blue glow overlay for active states
+            if (widget.screenOverlay) {
+                const isActive = ['listening', 'talking', 'executing'].includes(displayState);
+                widget.screenOverlay.classList.toggle('active', isActive);
+            }
+
             // VAD mic lock
             if (widget.vad) {
                 const shouldLock = (displayState !== 'listening' && displayState !== 'talking');

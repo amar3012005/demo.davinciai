@@ -68,7 +68,7 @@ class ConversationContext:
     state: str = "idle"
     turn_number: int = 0
     last_activity_time: Optional[float] = None
-    current_language: str = "en"
+    current_language: str = "de"
     
     def __post_init__(self):
         if self.last_activity_time is None:
@@ -113,7 +113,7 @@ class StateManager:
                     logger.info(f"[{self.session_id}] ✅ Loaded session from Redis")
                     self.context.state = existing.get("state", "idle")
                     self.context.turn_number = int(existing.get("turn_number", 0))
-                    self.context.current_language = existing.get("current_language", "en")
+                    self.context.current_language = existing.get("current_language", "de")
                     if existing.get("last_activity_time"):
                         self.context.last_activity_time = float(existing.get("last_activity_time", time.time()))
                     try:
@@ -194,6 +194,5 @@ class StateManager:
             await self.redis.expire(redis_key, 3600)  # 1 hour TTL
         except Exception as e:
             logger.warning(f"[{self.session_id}] ⚠️ Redis save failed: {e}")
-
 
 

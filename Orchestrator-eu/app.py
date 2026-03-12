@@ -17,6 +17,7 @@ import json
 import ssl
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, WebSocket, Query
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse, StreamingResponse, HTMLResponse
@@ -25,6 +26,7 @@ import redis.asyncio as redis
 import os
 from kubernetes import client, config as k8s_config
 from kubernetes.client.rest import ApiException
+from fastapi.middleware.cors import CORSMiddleware
 
 from config_loader import load_config, OrchestratorConfig
 from dialogue.manager import MultiLangDialogueManager
@@ -65,6 +67,48 @@ metrics: Dict[str, Any] = {
     "active_sessions": 0,
     "start_time": time.time()
 }
+
+
+def _sanitize_tenant_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    tenant = str(value).strip().lower()
+    if not tenant:
+        return None
+    tenant = tenant.split("/")[0]
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant) or None
+
+
+def _resolve_requested_tenant(
+    request: Optional[Request] = None,
+    body: Optional[Dict[str, Any]] = None,
+    explicit_tenant_id: Optional[str] = None,
+) -> str:
+    candidates = [
+        explicit_tenant_id,
+        (request.query_params.get("tenant_id") if request else None),
+        (body.get("tenant_id") if body else None),
+        (config.agent.tenant_id if config else None),
+        (config.organization.tenant_id if config else None),
+        "tenant",
+    ]
+    for candidate in candidates:
+        tenant = _sanitize_tenant_id(candidate)
+        if tenant:
+            return tenant
+    return "tenant"
+
+
+def _merge_proxy_body(
+    body: Optional[Dict[str, Any]],
+    tenant_id: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    merged = dict(body or {})
+    merged["tenant_id"] = tenant_id
+    if extra:
+        merged.update(extra)
+    return merged
 
 class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -414,6 +458,23 @@ app = FastAPI(
 # Add metrics middleware
 app.add_middleware(MetricsMiddleware)
 
+# Add CORS middleware to allow cross-origin requests from Dashboards
+app.add_middleware(
+    CORSMiddleware,
+    # When allow_credentials=True, allow_origins cannot be ["*"]
+    # We use a wildcard regex or list common origins to fix the "Failed to fetch" error.
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "https://demo.davinciai.eu"
+    ] if os.getenv("ENV") != "prod" else ["https://demo.davinciai.eu"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Mount static files to serve tara-widget.js
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
@@ -759,6 +820,7 @@ async def get_config():
 from fastapi.responses import StreamingResponse
 
 @app.post("/api/rag/stream_query")
+@app.post("/hivemind/stream")
 async def proxy_rag_stream_query(request: Request):
     """
     Proxy endpoint for direct RAG access (mock mode).
@@ -770,6 +832,8 @@ async def proxy_rag_stream_query(request: Request):
     try:
         # Get request body
         body = await request.json()
+        resolved_tenant_id = _resolve_requested_tenant(request=request, body=body)
+        body = _merge_proxy_body(body, resolved_tenant_id)
         
         # Add conversation context tracking
         logger.info(f"📤 RAG Proxy: Forwarding query to {config.services.rag.url}")
@@ -807,6 +871,7 @@ async def proxy_rag_stream_query(request: Request):
 
 
 @app.get("/hive-mind")
+@app.get("/hivemind")
 async def serve_hive_mind_dashboard():
     """Proxy the dashboard HTML natively from the RAG service."""
     if not config:
@@ -825,12 +890,25 @@ async def serve_hive_mind_dashboard():
 
 
 @app.post("/api/v1/query")
+@app.post("/hivemind/query")
 async def proxy_rag_query(request: Request):
     """Proxy manual LLM queries for the Hive Mind Dashboard."""
     if not config:
         return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
     try:
         body = await request.json()
+        resolved_tenant_id = _resolve_requested_tenant(request=request, body=body)
+        body = _merge_proxy_body(
+            body,
+            resolved_tenant_id,
+            extra={
+                "context": {
+                    **(body.get("context") or {}),
+                    "surface": "hivemind_dashboard",
+                    "tenant_id": resolved_tenant_id,
+                }
+            },
+        )
         rag_url = f"{config.services.rag.url}/api/v1/query"
         async with aiohttp.ClientSession() as session:
             async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
@@ -844,12 +922,15 @@ async def proxy_rag_query(request: Request):
 
 
 @app.post("/api/v1/retrieve")
+@app.post("/hivemind/retrieve")
 async def proxy_rag_retrieve(request: Request):
     """Proxy manual retrieve tests for the Hive Mind Dashboard."""
     if not config:
         return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
     try:
         body = await request.json()
+        resolved_tenant_id = _resolve_requested_tenant(request=request, body=body)
+        body = _merge_proxy_body(body, resolved_tenant_id)
         rag_url = f"{config.services.rag.url}/api/v1/retrieve"
         async with aiohttp.ClientSession() as session:
             async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
@@ -863,12 +944,13 @@ async def proxy_rag_retrieve(request: Request):
 
 
 @app.delete("/api/v1/skills/{point_id}")
-async def proxy_rag_skill_delete(point_id: str, tenant_id: Optional[str] = None):
+@app.delete("/hivemind/skills/{point_id}")
+async def proxy_rag_skill_delete(point_id: str, request: Request, tenant_id: Optional[str] = None):
     """Proxy skill/rule deletions from the visualizer."""
     if not config:
         return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
     try:
-        resolved_tenant_id = tenant_id or config.agent.tenant_id or config.organization.tenant_id or "tenant"
+        resolved_tenant_id = _resolve_requested_tenant(request=request, explicit_tenant_id=tenant_id)
         rag_url = f"{config.services.rag.url}/api/v1/skills/{point_id}?tenant_id={resolved_tenant_id}"
         async with aiohttp.ClientSession() as session:
             async with session.delete(rag_url, timeout=aiohttp.ClientTimeout(total=20)) as response:
@@ -881,14 +963,36 @@ async def proxy_rag_skill_delete(point_id: str, tenant_id: Optional[str] = None)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/v1/skills")
+@app.get("/hivemind/skills")
+async def proxy_rag_skill_list(request: Request, tenant_id: Optional[str] = None):
+    """Proxy skill/rule listing for the HiveMind dashboard."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        resolved_tenant_id = _resolve_requested_tenant(request=request, explicit_tenant_id=tenant_id)
+        rag_url = f"{config.services.rag.url}/api/v1/skills?tenant_id={resolved_tenant_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(rag_url, timeout=aiohttp.ClientTimeout(total=20)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy skill list error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/v1/skills")
+@app.post("/hivemind/skills")
 async def proxy_rag_skill_upsert(request: Request, tenant_id: Optional[str] = None):
     """Proxy skill/rule upserts from the visualizer."""
     if not config:
         return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
     try:
         body = await request.json()
-        resolved_tenant_id = tenant_id or body.get("tenant_id") or config.agent.tenant_id or "tenant"
+        resolved_tenant_id = _resolve_requested_tenant(request=request, body=body, explicit_tenant_id=tenant_id)
+        body = _merge_proxy_body(body, resolved_tenant_id)
         rag_url = f"{config.services.rag.url}/api/v1/skills?tenant_id={resolved_tenant_id}"
         async with aiohttp.ClientSession() as session:
             async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -959,6 +1063,7 @@ async def proxy_save_readme(request: Request):
 
 
 @app.get("/api/v1/hive-mind/{endpoint:path}")
+@app.get("/hivemind/{endpoint:path}")
 async def proxy_rag_hive_mind_api(endpoint: str, request: Request):
     """Proxy visualization and insight analytics endpoints."""
     if not config:
@@ -977,6 +1082,7 @@ async def proxy_rag_hive_mind_api(endpoint: str, request: Request):
 
 
 @app.websocket("/ws/hive-mind")
+@app.websocket("/hivemind/ws")
 async def proxy_hive_mind_ws(websocket: WebSocket):
     """Securely bridge live websocket events between the public dashboard and the RAG container natively."""
     if not config:
@@ -988,7 +1094,6 @@ async def proxy_hive_mind_ws(websocket: WebSocket):
     
     # Forward query parameters (A7: preserve tenant_id)
     if websocket.query_params:
-        from urllib.parse import urlencode
         rag_ws_url += "?" + urlencode(websocket.query_params)
         
     try:

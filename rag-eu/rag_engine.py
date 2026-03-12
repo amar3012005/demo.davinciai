@@ -338,6 +338,82 @@ class RAGEngine:
         )
 
     @staticmethod
+    def _build_hivemind_dashboard_prompt(
+        query: str,
+        tenant_id: str,
+        language: str,
+        history: List[Dict[str, Any]],
+        relevant_docs: List[Dict[str, Any]],
+        agent_skills: List[Dict[str, Any]],
+        agent_rules: List[Dict[str, Any]],
+        general_kb: List[Dict[str, Any]],
+        system_prompt: Optional[str],
+    ) -> str:
+        """Dedicated system prompt for enterprise HiveMind dashboard chats."""
+        lang = (language or "english").strip().lower()
+        normalized_system_prompt = (system_prompt or "").strip()
+
+        history_lines = []
+        for turn in history[-8:]:
+            role = str(turn.get("role", "user")).strip()
+            content = str(turn.get("content", "")).strip()
+            if content:
+                history_lines.append(f"{role}: {content[:500]}")
+        history_block = "\n".join(history_lines) if history_lines else "(none)"
+
+        def _format_entries(entries: List[Dict[str, Any]], limit: int, label: str) -> str:
+            lines = []
+            for entry in entries[:limit]:
+                text = str(entry.get("text", "")).strip()
+                score = entry.get("score")
+                meta = []
+                if entry.get("topic"):
+                    meta.append(f"topic={entry.get('topic')}")
+                if entry.get("doc_type"):
+                    meta.append(f"type={entry.get('doc_type')}")
+                if score is not None:
+                    try:
+                        meta.append(f"score={float(score):.2f}")
+                    except (TypeError, ValueError):
+                        pass
+                prefix = f"- [{label}"
+                if meta:
+                    prefix += " | " + ", ".join(meta)
+                prefix += "] "
+                if text:
+                    lines.append(prefix + text[:500])
+            return "\n".join(lines) if lines else "(none)"
+
+        docs_block = _format_entries(relevant_docs, 8, "insight")
+        skills_block = _format_entries(agent_skills, 8, "skill")
+        rules_block = _format_entries(agent_rules, 8, "rule")
+        kb_block = _format_entries(general_kb, 8, "kb")
+
+        return (
+            f"You are HiveMind of {tenant_id}, the enterprise memory engine for this tenant.\n"
+            f"Reply language: {lang}.\n"
+            "Identity:\n"
+            f"- Identify as HiveMind for {tenant_id}, not as the website voice agent.\n"
+            "- You hold conversation-derived customer insights, reusable rules, skills, and knowledge captured for this tenant.\n"
+            "- Your job is to help internal teams inspect what customers said, what patterns emerged, and what new memory should be saved.\n"
+            "Operating rules:\n"
+            "- Prioritize real customer insights collected by TARA during conversations: pains, objections, intent, desires, concerns, wording patterns, blockers, and trends.\n"
+            "- If evidence is weak, say it is weak.\n"
+            "- Do not invent sources or confidence.\n"
+            "- When the user proposes a new skill, rule, or knowledge item, rewrite it into a clean reusable entry suitable for saving into HiveMind.\n"
+            "- Keep answers concise, operational, and enterprise-facing.\n"
+            "- When useful, format into sections: Customer insights, Recommended additions to HiveMind, and Suggested next actions.\n"
+            f"{normalized_system_prompt}\n\n"
+            f"Conversation history:\n{history_block}\n\n"
+            f"Retrieved customer insight memory:\n{docs_block}\n\n"
+            f"Retrieved skills:\n{skills_block}\n\n"
+            f"Retrieved rules:\n{rules_block}\n\n"
+            f"Retrieved knowledge base entries:\n{kb_block}\n\n"
+            f"User query: {query}\n"
+            "Answer:"
+        )
+
+    @staticmethod
     def _sanitize_tenant(tenant_id: Optional[str]) -> str:
         tenant = (tenant_id or "default").strip().lower()
         return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
@@ -747,6 +823,13 @@ class RAGEngine:
             "language": original_language,
             "session_type": "technical_support"
         }
+        if isinstance(context, dict):
+            if context.get("surface"):
+                user_profile["surface"] = str(context.get("surface"))
+            if context.get("dashboard_mode"):
+                user_profile["dashboard_mode"] = str(context.get("dashboard_mode"))
+            if context.get("tenant_id"):
+                user_profile["tenant_id"] = str(context.get("tenant_id"))
 
         # Build history list
         history_list = []
@@ -763,17 +846,30 @@ class RAGEngine:
         skill_texts = [s.get("text", "") for s in agent_skills if s.get("text")]
         rule_texts = [r.get("text", "") for r in agent_rules if r.get("text")]
 
-        architect_cls = self._resolve_context_architect(tenant_id)
-        prompt = architect_cls.assemble_prompt(
-            query=query_english,
-            raw_query=query,
-            retrieved_docs=relevant_docs,
-            history=history_list,
-            hive_mind=hive_mind_state,
-            user_profile=user_profile,
-            agent_skills=skill_texts,
-            agent_rules=rule_texts
-        )
+        if isinstance(context, dict) and context.get("surface") == "hivemind_dashboard":
+            prompt = self._build_hivemind_dashboard_prompt(
+                query=query,
+                tenant_id=tenant_id,
+                language=original_language,
+                history=history_list,
+                relevant_docs=relevant_docs,
+                agent_skills=agent_skills,
+                agent_rules=agent_rules,
+                general_kb=general_kb,
+                system_prompt=context.get("system_prompt"),
+            )
+        else:
+            architect_cls = self._resolve_context_architect(tenant_id)
+            prompt = architect_cls.assemble_prompt(
+                query=query_english,
+                raw_query=query,
+                retrieved_docs=relevant_docs,
+                history=history_list,
+                hive_mind=hive_mind_state,
+                user_profile=user_profile,
+                agent_skills=skill_texts,
+                agent_rules=rule_texts
+            )
         prompt = self._apply_prompt_budget(prompt, str(getattr(self.config, "llm_model", "")))
 
         # 4.5 Generation controls (endpoint-tunable)
