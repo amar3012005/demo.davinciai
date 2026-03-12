@@ -991,6 +991,7 @@ async def create_skill_or_rule(request: SkillRuleCreateRequest):
         if not sync_client or not collection_name:
             raise HTTPException(status_code=503, detail="Tenant Qdrant collection not available")
         app.state.rag_engine.qdrant._ensure_collection_for(sync_client, collection_name)  # pylint: disable=protected-access
+        vector_name = app.state.rag_engine.qdrant._get_vector_name_for_collection(sync_client, collection_name)  # pylint: disable=protected-access
 
         # Build payload via factory
         if request.type == "agent_skill":
@@ -1017,16 +1018,51 @@ async def create_skill_or_rule(request: SkillRuleCreateRequest):
         point_id = payload.pop("uuid")
         timestamp = payload["created_at"]
 
-        sync_client.upsert(
-            collection_name=collection_name,
-            points=[
-                _models.PointStruct(
-                    id=point_id,
-                    vector=vector,
-                    payload=payload,
-                )
-            ],
+        point_payload = _models.PointStruct(
+            id=point_id,
+            vector={vector_name: vector} if vector_name else vector,
+            payload=payload,
         )
+        try:
+            sync_client.upsert(
+                collection_name=collection_name,
+                points=[point_payload],
+            )
+        except Exception as upsert_error:
+            error_text = str(upsert_error)
+            if "Not existing vector name error" not in error_text:
+                raise
+
+            cache_key = f"{id(sync_client)}:{collection_name}"
+            app.state.rag_engine.qdrant._vector_name_cache.pop(cache_key, None)  # pylint: disable=protected-access
+            refreshed_vector_name = app.state.rag_engine.qdrant._get_vector_name_for_collection(sync_client, collection_name)  # pylint: disable=protected-access
+
+            logger.warning(
+                "Vector name mismatch for collection %s (tenant=%s, vector_name=%s, refreshed=%s). Retrying alternate vector format.",
+                collection_name,
+                request.tenant_id,
+                vector_name,
+                refreshed_vector_name,
+            )
+
+            if refreshed_vector_name and refreshed_vector_name != vector_name:
+                retry_vector = {refreshed_vector_name: vector}
+            elif vector_name:
+                retry_vector = vector
+            elif refreshed_vector_name:
+                retry_vector = {refreshed_vector_name: vector}
+            else:
+                raise
+
+            fallback_point = _models.PointStruct(
+                id=point_id,
+                vector=retry_vector,
+                payload=payload,
+            )
+            sync_client.upsert(
+                collection_name=collection_name,
+                points=[fallback_point],
+            )
 
         label = "Skill" if request.type == "agent_skill" else "Rule" if request.type == "agent_rule" else "Knowledge"
         logger.info(f"🎯 {label} created in {collection_name}: [{request.topic}] {request.text[:60]}...")

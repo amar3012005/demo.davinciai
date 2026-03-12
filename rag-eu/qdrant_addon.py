@@ -135,7 +135,46 @@ class QdrantAddon:
             info = sync_client.get_collection(collection_name)
             vectors_cfg = getattr(getattr(info, "config", None), "params", None)
             vectors = getattr(vectors_cfg, "vectors", None)
-            vector_name = next(iter(vectors.keys())) if isinstance(vectors, dict) and vectors else None
+
+            vector_name = None
+            if isinstance(vectors, dict) and vectors:
+                for key in vectors.keys():
+                    if str(key).strip():
+                        vector_name = str(key).strip()
+                        break
+            elif vectors is not None:
+                dumped = None
+                if hasattr(vectors, "model_dump"):
+                    dumped = vectors.model_dump()
+                elif hasattr(vectors, "dict"):
+                    dumped = vectors.dict()
+                elif hasattr(vectors, "__dict__"):
+                    dumped = dict(vars(vectors))
+
+                if isinstance(dumped, dict) and dumped:
+                    for key in dumped.keys():
+                        if key in {"size", "distance", "on_disk", "datatype", "hnsw_config", "quantization_config"}:
+                            continue
+                        if str(key).strip():
+                            vector_name = str(key).strip()
+                            break
+
+            if not vector_name:
+                try:
+                    collection_payload = info.model_dump() if hasattr(info, "model_dump") else {}
+                    params = ((collection_payload.get("config") or {}).get("params") or {})
+                    dumped_vectors = params.get("vectors")
+                    if isinstance(dumped_vectors, dict):
+                        for key, value in dumped_vectors.items():
+                            if key in {"size", "distance", "on_disk", "datatype", "hnsw_config", "quantization_config"}:
+                                continue
+                            if isinstance(value, dict) or value is not None:
+                                if str(key).strip():
+                                    vector_name = str(key).strip()
+                                    break
+                except Exception:
+                    pass
+
             self._vector_name_cache[cache_key] = vector_name
             return vector_name
         except Exception:

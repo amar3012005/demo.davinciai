@@ -384,10 +384,10 @@ class RAGEngine:
                     lines.append(prefix + text[:500])
             return "\n".join(lines) if lines else "(none)"
 
-        docs_block = _format_entries(relevant_docs, 8, "insight")
-        skills_block = _format_entries(agent_skills, 8, "skill")
-        rules_block = _format_entries(agent_rules, 8, "rule")
-        kb_block = _format_entries(general_kb, 8, "kb")
+        docs_block = _format_entries(relevant_docs, 10, "insight")
+        skills_block = _format_entries(agent_skills, 10, "skill")
+        rules_block = _format_entries(agent_rules, 10, "rule")
+        kb_block = _format_entries(general_kb, 10, "kb")
 
         return (
             f"You are HiveMind of {tenant_id}, the enterprise memory engine for this tenant.\n"
@@ -398,11 +398,15 @@ class RAGEngine:
             "- Your job is to help internal teams inspect what customers said, what patterns emerged, and what new memory should be saved.\n"
             "Operating rules:\n"
             "- Prioritize real customer insights collected by TARA during conversations: pains, objections, intent, desires, concerns, wording patterns, blockers, and trends.\n"
-            "- If evidence is weak, say it is weak.\n"
+            "- Answer the user's question directly in 2-6 sentences first. Do not default to headings, dashboards, or management-summary sections.\n"
+            "- Ground every answer in the retrieved HiveMind items below. Mention the actual signals you found, not generic advice.\n"
+            "- When the user asks for a time window like 'last week' or 'last 7 days', summarize only matching retrieved memories if timestamps exist. If no recent memories were retrieved, say that plainly in one sentence.\n"
+            "- After the direct answer, include a short 'HiveMind retrievals:' list with up to 5 concrete bullets only when retrievals exist.\n"
+            "- Do not output generic sections such as 'Business Implications', 'Customer Insights (Current State)', or 'Recommended Next Steps' unless the user explicitly asks for a report.\n"
             "- Do not invent sources or confidence.\n"
             "- When the user proposes a new skill, rule, or knowledge item, rewrite it into a clean reusable entry suitable for saving into HiveMind.\n"
             "- Keep answers concise, operational, and enterprise-facing.\n"
-            "- When useful, format into sections: Customer insights, Recommended additions to HiveMind, and Suggested next actions.\n"
+            "- If evidence is weak, say that briefly and stop. Do not pad the answer with process advice unless the user asks what to do next.\n"
             f"{normalized_system_prompt}\n\n"
             f"Conversation history:\n{history_block}\n\n"
             f"Retrieved customer insight memory:\n{docs_block}\n\n"
@@ -500,6 +504,8 @@ class RAGEngine:
         """
         start_time = time.time()
         timing = {}
+        dashboard_mode = isinstance(context, dict) and context.get("surface") == "hivemind_dashboard"
+        unified_limit = 10 if dashboard_mode else 8
         
         # 1. High-Speed Detection & Translation Layer
         query_english = query
@@ -653,7 +659,7 @@ class RAGEngine:
                                 query_vector=v_raw,
                                 tenant_id=tenant_id,
                                 doc_types=target_types,
-                                limit=8, # Slightly higher limit to get mix of types
+                                limit=unified_limit,
                                 score_threshold=0.2
                             ),
                             timeout=1.2 # Allow slightly more time for complex filter
@@ -688,6 +694,12 @@ class RAGEngine:
                                 source = payload.get("filename", "Internal Doc")
                                 text = r["text"]
                                 hm_entries.append(f"[{source}]: {text}")
+                                processed["general_kb"].append({
+                                    "text": r["text"],
+                                    "topic": payload.get("topics") or payload.get("doc_type_detail") or "general",
+                                    "doc_type": dt,
+                                    "score": r["score"],
+                                })
                         
                         if hm_entries:
                             processed["hive_mind_text"] = "\n---\n".join(hm_entries)
