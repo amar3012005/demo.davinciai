@@ -473,6 +473,29 @@ class RAGEngine:
         german_hits = sum(1 for marker in german_markers if marker in f" {sample} ")
         return english_hits > 0 and english_hits >= german_hits
 
+    @staticmethod
+    def _cap_answer_sentences(answer: str, max_sentences: int = 3, max_chars: int = 420) -> str:
+        text = (answer or "").strip()
+        if not text:
+            return text
+
+        parts = re.split(r'(?<=[.!?])\s+', text)
+        kept = []
+        for part in parts:
+            cleaned = (part or "").strip()
+            if not cleaned:
+                continue
+            kept.append(cleaned)
+            if len(kept) >= max_sentences:
+                break
+
+        capped = " ".join(kept).strip()
+        if len(capped) > max_chars:
+            capped = capped[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:")
+            if capped and capped[-1] not in ".!?":
+                capped += "."
+        return capped or text
+
     async def _enforce_response_language(self, answer: str, language: Optional[str]) -> str:
         text = (answer or "").strip()
         if not text:
@@ -1059,7 +1082,7 @@ class RAGEngine:
         # 4.5 Generation controls (endpoint-tunable)
         gen_cfg = generation_config or {}
         generation_temperature = float(gen_cfg.get("temperature", 0.65))
-        generation_max_tokens = int(gen_cfg.get("max_tokens", 320))
+        generation_max_tokens = int(gen_cfg.get("max_tokens", 220))
         generation_stop = gen_cfg.get("stop")
         if isinstance(generation_stop, str):
             generation_stop = [generation_stop]
@@ -1191,6 +1214,7 @@ class RAGEngine:
         answer = re.sub(r'</turn>.*', '', answer, flags=re.DOTALL).strip()
         answer = re.sub(r'</ctxt>.*', '', answer, flags=re.DOTALL).strip()
         answer = await self._enforce_response_language(answer, original_language)
+        answer = self._cap_answer_sentences(answer, max_sentences=3, max_chars=420)
 
         if streaming_callback and not streamed_live:
             streaming_callback(answer, False)

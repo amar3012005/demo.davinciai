@@ -443,6 +443,31 @@ class OrchestratorWSHandler:
         
         return None
 
+    @staticmethod
+    def _is_interrupt_only_utterance(text: str) -> bool:
+        """
+        Detect short control utterances that mean "stop talking now" rather than
+        "answer a new semantic question".
+        """
+        normalized = " ".join((text or "").strip().lower().split())
+        if not normalized:
+            return False
+
+        direct_matches = {
+            "stop", "stop it", "no stop", "no, stop", "enough", "that's enough",
+            "quiet", "be quiet", "halt", "stopp", "hör auf", "hoer auf",
+            "aufhören", "aufhoeren", "bitte stopp", "bitte stop", "ruhe",
+        }
+        if normalized in direct_matches:
+            return True
+
+        stop_markers = [
+            "stop talking", "stop now", "please stop", "just stop",
+            "hör auf zu reden", "bitte hör auf", "bitte hoer auf",
+            "sei still", "stop that",
+        ]
+        return any(marker in normalized for marker in stop_markers)
+
     def _resolve_host_config(self, host: str) -> Dict[str, Any]:
         """
         Resolve RAG URL and Voice ID based on the incoming Host header.
@@ -1848,6 +1873,13 @@ class OrchestratorWSHandler:
         # Determine output language based on stream_out setting (with session override check)
         output_language = self._get_output_language(language, session)
         logger.debug(f"[{session.session_id}] 🌐 Input language: {language}, Output language: {output_language}")
+
+        if self._is_interrupt_only_utterance(text):
+            logger.info(f"[{session.session_id}] 🛑 Interrupt-only utterance detected: '{text}' - staying silent and returning to LISTENING")
+            session.current_response_text = ""
+            session.interrupted_response_text = ""
+            session.interrupted_response_language = output_language
+            return
         
         # Check for exit keywords (use detected language for keyword matching)
         if self.dialogue_manager.check_exit_keywords(text, language):
@@ -3962,11 +3994,12 @@ class OrchestratorWSHandler:
             except asyncio.QueueEmpty:
                 break
         
-        # Notify browser
-        await self._send_json(session.websocket, {
-            "type": "playback_stop",
-            "timestamp": time.time()
-        }, session)
+        # Notify browser with all supported stop/clear signals.
+        for msg_type in ("playback_stop", "interrupt", "clear"):
+            await self._send_json(session.websocket, {
+                "type": msg_type,
+                "timestamp": time.time()
+            }, session)
         
         # Transition to INTERRUPT (with side effects: cancel_tts, cancel_filler)
         if state_mgr.state == State.SPEAKING:

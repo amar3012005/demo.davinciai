@@ -1278,7 +1278,7 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             tenant_id=effective_tenant_id,
             force_non_stream=(not is_hivemind_dashboard) and ("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
             generation_config={
-                "max_tokens": 1024,
+                "max_tokens": 220,
                 "temperature": 0.55,
                 "stop": ["</resp>", "</turn>", "</ctxt>"]
             }
@@ -1505,7 +1505,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     tenant_id=effective_tenant_id,
                     force_non_stream=(not is_hivemind_dashboard) and ("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
                     generation_config={
-                        "max_tokens": 1024,
+                        "max_tokens": 220,
                         "temperature": 0.6,
                         "stop": ["</resp>", "</turn>", "</ctxt>"]
                     }
