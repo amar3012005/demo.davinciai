@@ -139,6 +139,9 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
     const playbackStartTimeRef = useRef(null);
     const audioStreamCompleteRef = useRef(false);
     const audioConfigRef = useRef({ format: 'pcm_f32le', sampleRate: 44100 });
+    const currentPlaybackTurnIdRef = useRef(null);
+    const minAcceptedPlaybackTurnIdRef = useRef(0);
+    const activeSourcesRef = useRef(new Set());
     const outputGainRef = useRef(null);
     const telephonyHighpassRef = useRef(null);
     const telephonyLowpassRef = useRef(null);
@@ -195,6 +198,22 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
         return { gain: outputGainRef.current, highpass: telephonyHighpassRef.current, lowpass: telephonyLowpassRef.current };
     }, []);
 
+    const stopPlayback = useCallback(() => {
+        if (Number.isFinite(currentPlaybackTurnIdRef.current)) {
+            minAcceptedPlaybackTurnIdRef.current = Math.max(minAcceptedPlaybackTurnIdRef.current, currentPlaybackTurnIdRef.current + 1);
+        }
+        for (const source of activeSourcesRef.current) {
+            try { source.onended = null; source.stop(); } catch (_) { }
+        }
+        activeSourcesRef.current.clear();
+        binaryQueueRef.current = [];
+        currentPlaybackTurnIdRef.current = null;
+        audioStreamCompleteRef.current = false;
+        playbackStartTimeRef.current = null;
+        if (audioCtxRef.current) lastPlaybackTimeRef.current = audioCtxRef.current.currentTime;
+        setAgentIsSpeaking(false);
+    }, []);
+
     const playAudioChunk = useCallback((data, forceInt16 = false) => {
         let f32; const fmt = audioConfigRef.current.format; const sr = audioConfigRef.current.sampleRate;
         if (data instanceof ArrayBuffer) {
@@ -214,7 +233,10 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
             if (selectedCallMode === 'telephony') { s.connect(chain.highpass); chain.highpass.connect(chain.lowpass); chain.lowpass.connect(chain.gain); chain.gain.connect(audioCtxRef.current.destination); }
             else { s.connect(chain.gain); chain.gain.connect(audioCtxRef.current.destination); }
             const now = audioCtxRef.current.currentTime; let at = lastPlaybackTimeRef.current; if (at < now) at = now;
-            s.start(at); lastPlaybackTimeRef.current = at + buf.duration; s.onended = () => checkPlaybackComplete();
+            if (!playbackStartTimeRef.current) playbackStartTimeRef.current = Date.now();
+            activeSourcesRef.current.add(s);
+            s.onended = () => { activeSourcesRef.current.delete(s); checkPlaybackComplete(); };
+            s.start(at); lastPlaybackTimeRef.current = at + buf.duration;
         }
     }, [checkPlaybackComplete, ensureOutputChain, selectedCallMode]);
 
@@ -223,14 +245,14 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
             if (wsRef.current.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: 'interrupt', timestamp: Date.now() / 1000 }));
             wsRef.current.close(); wsRef.current = null;
         }
-        binaryQueueRef.current = [];
+        stopPlayback();
         if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
         outputGainRef.current = null; telephonyHighpassRef.current = null; telephonyLowpassRef.current = null;
         if (callTimerRef.current) clearInterval(callTimerRef.current); callTimerRef.current = null;
         if (micStream) micStream.getTracks().forEach(t => t.stop());
         setIsCallActive(false); setConnectionStatus(null); setAgentIsSpeaking(false);
         wsConnectedRef.current = false; setAgentState('idle'); setMicStream(null); setCallDuration(0);
-    }, [micStream]);
+    }, [micStream, stopPlayback]);
 
     const startCall = async () => {
         try {
@@ -290,14 +312,28 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
                     setConnectionStatus('connected'); setIsCallActive(true);
                     if (!callTimerRef.current) callTimerRef.current = setInterval(() => setCallDuration(x => x + 1), 1000);
                 }
+            }
+
+            if (d.type === 'state_update' && (d.state === 'thinking' || d.state === 'interrupt' || d.state === 'listening')) {
+                stopPlayback();
             } else if (d.type === 'audio_chunk') {
+                const turnId = Number(d.playback_turn_id);
+                if (Number.isFinite(turnId)) {
+                    if (turnId < minAcceptedPlaybackTurnIdRef.current) {
+                        if (d.binary_sent && binaryQueueRef.current.length > 0) binaryQueueRef.current.shift();
+                        return;
+                    }
+                    currentPlaybackTurnIdRef.current = turnId;
+                }
                 if (d.sample_rate) audioConfigRef.current.sampleRate = d.sample_rate;
                 setAgentIsSpeaking(true); audioStreamCompleteRef.current = false;
                 if (d.binary_sent && binaryQueueRef.current.length > 0) { const c = binaryQueueRef.current.shift(); if (c) playAudioChunk(c, audioConfigRef.current.format === 'pcm_s16le'); }
                 else { const a = d.data || d.audio; if (a) playAudioChunk(a); }
                 if (d.is_final) { audioStreamCompleteRef.current = true; checkPlaybackComplete(); }
             } else if (d.type === 'audio_complete' || d.is_final) { audioStreamCompleteRef.current = true; checkPlaybackComplete(); }
-            else if (d.type === 'interrupt' || d.type === 'clear') { setAgentIsSpeaking(false); lastPlaybackTimeRef.current = audioCtxRef.current?.currentTime || 0; playbackStartTimeRef.current = null; }
+            else if (d.type === 'interrupt' || d.type === 'clear' || d.type === 'playback_stop') {
+                stopPlayback();
+            }
             else if (d.type === 'ping' && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() / 1000 }));
         };
         ws.onclose = () => endCall(); ws.onerror = () => endCall();

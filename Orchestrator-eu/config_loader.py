@@ -371,9 +371,6 @@ class ConfigLoader:
                 "IGNORE_STT_WHILE_SPEAKING",
                 str(session_data.get("ignore_stt_while_speaking", True))
             ).lower() == "true"
-            # Safety: when barge-in is disabled, always ignore STT while speaking.
-            if not bargin_feature:
-                ignore_stt_while_speaking = True
 
             config.session = SessionConfig(
                 timeout_seconds=float(os.getenv("SESSION_TIMEOUT_SECONDS", session_data.get("timeout_seconds", 10.0))),

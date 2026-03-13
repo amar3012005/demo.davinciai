@@ -246,11 +246,20 @@ class OrchestratorWSHandler:
         self.redis_client = redis_client
         self.sessions: Dict[str, OrchestratorSession] = {}
         
-        logger.info(f"✅ OrchestratorWSHandler initialized (Stream Out: {self.config.languages.stream_out})")
+        logger.info(
+            "✅ OrchestratorWSHandler initialized "
+            f"(Stream Out: {self.config.languages.stream_out}, "
+            f"BargeIn: {self.config.session.bargin_feature}, "
+            f"IgnoreSTTWhileSpeaking: {self.config.session.ignore_stt_while_speaking})"
+        )
 
     def _is_bargin_enabled(self) -> bool:
         """Feature gate for barge-in behavior."""
         return bool(getattr(self.config.session, "bargin_feature", False))
+
+    def _should_ignore_stt_while_speaking(self) -> bool:
+        """Feature gate for suppressing inbound user audio/STT while agent audio is active."""
+        return bool(getattr(self.config.session, "ignore_stt_while_speaking", True))
 
     async def shutdown(self):
         """
@@ -1059,8 +1068,11 @@ class OrchestratorWSHandler:
             return
         
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
-            logger.debug(f"[{session.session_id}] ⏸️ Ignoring audio chunk during SPEAKING (BARGIN_FEATURE=false)")
+        if state_mgr.state == State.SPEAKING and self._should_ignore_stt_while_speaking() and not session.barge_in_pending:
+            logger.debug(
+                f"[{session.session_id}] ⏸️ Ignoring audio chunk during SPEAKING "
+                f"(IGNORE_STT_WHILE_SPEAKING={self._should_ignore_stt_while_speaking()})"
+            )
             return
         
         session.last_activity = time.time()
@@ -1094,8 +1106,11 @@ class OrchestratorWSHandler:
     async def _handle_binary_audio(self, session: OrchestratorSession, audio_bytes: bytes):
         """Handle raw binary audio data - ALWAYS forward to STT regardless of state"""
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
-            logger.debug(f"[{session.session_id}] ⏸️ Ignoring binary audio during SPEAKING (BARGIN_FEATURE=false)")
+        if state_mgr.state == State.SPEAKING and self._should_ignore_stt_while_speaking() and not session.barge_in_pending:
+            logger.debug(
+                f"[{session.session_id}] ⏸️ Ignoring binary audio during SPEAKING "
+                f"(IGNORE_STT_WHILE_SPEAKING={self._should_ignore_stt_while_speaking()})"
+            )
             return
         
         session.last_activity = time.time()
@@ -1311,8 +1326,11 @@ class OrchestratorWSHandler:
         if session.is_closed:
             return
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
-            logger.debug(f"[{session.session_id}] ⏸️ Ignoring STT result during SPEAKING (BARGIN_FEATURE=false)")
+        if state_mgr.state == State.SPEAKING and self._should_ignore_stt_while_speaking() and not session.barge_in_pending:
+            logger.debug(
+                f"[{session.session_id}] ⏸️ Ignoring STT result during SPEAKING "
+                f"(IGNORE_STT_WHILE_SPEAKING={self._should_ignore_stt_while_speaking()})"
+            )
             return
 
         text = data.get("text", "")
@@ -1371,7 +1389,7 @@ class OrchestratorWSHandler:
             }
         
         # VALIDATED BARGE-IN: Check STT transcript to confirm real speech before interrupting
-        if state_mgr.state == State.SPEAKING or session.barge_in_pending:
+        if session.barge_in_pending or (state_mgr.state == State.SPEAKING and self._is_bargin_enabled()):
             stripped = text.strip().rstrip(".!?,")
             no_speech_prob = data.get("no_speech_prob")
 
@@ -1844,6 +1862,13 @@ class OrchestratorWSHandler:
         history_context = session.history_manager.get_context_window(max_turns=5)
         logger.debug(f"[{session.session_id}] 📜 History context ({len(history_context)} chars): {history_context[:100]}{'...' if len(history_context) > 100 else ''}")
 
+        if self._is_interrupt_only_utterance(text):
+            logger.info(f"[{session.session_id}] 🛑 Interrupt-only utterance detected: '{text}' - staying silent and returning to LISTENING")
+            session.current_response_text = ""
+            session.interrupted_response_text = ""
+            session.interrupted_response_language = self._get_output_language(language, session)
+            return
+
         # Add user turn to conversation history
         session.history_manager.add_user_turn(text, metadata={"language": language})
 
@@ -1873,13 +1898,6 @@ class OrchestratorWSHandler:
         # Determine output language based on stream_out setting (with session override check)
         output_language = self._get_output_language(language, session)
         logger.debug(f"[{session.session_id}] 🌐 Input language: {language}, Output language: {output_language}")
-
-        if self._is_interrupt_only_utterance(text):
-            logger.info(f"[{session.session_id}] 🛑 Interrupt-only utterance detected: '{text}' - staying silent and returning to LISTENING")
-            session.current_response_text = ""
-            session.interrupted_response_text = ""
-            session.interrupted_response_language = output_language
-            return
         
         # Check for exit keywords (use detected language for keyword matching)
         if self.dialogue_manager.check_exit_keywords(text, language):

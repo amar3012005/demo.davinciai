@@ -268,8 +268,8 @@ services:
       STREAM_OUT: ${STREAM_OUT:-de}
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
-      BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
-      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-true}
+      BARGIN_FEATURE: ${BARGIN_FEATURE:-true}
+      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-false}
       TENANT_ID_INTRO: ${TENANT_ID_INTRO}
       DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}

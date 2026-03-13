@@ -912,6 +912,7 @@
                 this.activeSources = new Set();  // Track all scheduled audio sources for cleanup
                 this.playbackStartTime = null;
                 this.currentPlaybackTurnId = null;
+                this.minAcceptedPlaybackTurnId = 0;
                 this.audioStreamComplete = false;  // Track when server finished sending audio
                 this.playbackFallbackTimer = null;  // Fallback timer for audio_complete timeout
                 this.chunkCount = 0;
@@ -1266,8 +1267,8 @@
                     case 'state_update':
                         this.state = data.state;
                         this.updateStateDisplay(data.state);
-                        // Stop old audio when new turn starts (prevents overlapping voices)
-                        if (data.state === 'thinking' || data.state === 'interrupt') {
+                        // Stop old audio when new turn starts or state transitions (prevents overlapping voices)
+                        if (data.state === 'thinking' || data.state === 'interrupt' || data.state === 'listening') {
                             this.stopAudioPlayback();
                         }
                         // Auto-start microphone when transitioning to LISTENING (if not in mock mode)
@@ -1321,7 +1322,15 @@
 
                     case 'audio_chunk':
                         if (data.playback_turn_id !== undefined && data.playback_turn_id !== null) {
-                            this.currentPlaybackTurnId = data.playback_turn_id;
+                            const turnId = Number(data.playback_turn_id);
+                            if (Number.isFinite(turnId)) {
+                                if (turnId < this.minAcceptedPlaybackTurnId) {
+                                    if (data.binary_sent && this.binaryQueue.length > 0) this.binaryQueue.shift();
+                                    this.addLog(`Dropped stale audio chunk for turn ${turnId}`, 'warning');
+                                    break;
+                                }
+                                this.currentPlaybackTurnId = turnId;
+                            }
                         }
                         if (data.is_final) {
                             this.addLog('Audio stream complete from server', 'info');
@@ -1359,6 +1368,12 @@
                         this.audioStreamComplete = true;
                         // Check if we can finalize now
                         this.checkPlaybackComplete();
+                        break;
+
+                    case 'interrupt':
+                    case 'clear':
+                    case 'playback_stop':
+                        this.stopAudioPlayback();
                         break;
 
                     case 'language_changed':
@@ -1809,6 +1824,9 @@
 
             stopAudioPlayback() {
                 this.isPlayingAudio = false;
+                if (Number.isFinite(this.currentPlaybackTurnId)) {
+                    this.minAcceptedPlaybackTurnId = Math.max(this.minAcceptedPlaybackTurnId, this.currentPlaybackTurnId + 1);
+                }
                 // Stop ALL scheduled audio sources (prevents overlapping voices)
                 for (const src of this.activeSources) {
                     try { src.stop(); } catch (e) { }
@@ -1821,6 +1839,7 @@
                 this.nextPlayTime = 0;
                 this.binaryQueue.length = 0;  // Drain stale binary frames
                 this.audioStreamComplete = false;
+                this.playbackStartTime = null;
                 this.currentPlaybackTurnId = null;
             }
 
