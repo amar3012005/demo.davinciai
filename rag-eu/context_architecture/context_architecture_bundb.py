@@ -61,7 +61,7 @@ def tts_safe(text: str) -> str:
     1. Expand acronyms that get read letter-by-letter.
     2. Strip markdown symbols that break TTS rhythm.
     3. Preserve protected words exactly.
-    Called by the caller layer — not inside the prompt itself.
+    Calleded by the caller layer — not inside the prompt itself.
     """
     if not text:
         return text
