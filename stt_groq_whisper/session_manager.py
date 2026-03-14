@@ -254,7 +254,9 @@ class GroqWhisperSession:
                     logger.debug(f"⏸️ [{self.session_id}] Dropping late micro-chunk result after speech end")
                     return
 
-                if (result.is_hallucination or result.is_low_quality) and not self._is_meaningful_single_word(result.text):
+                # Filter prompt hallucination, regular hallucinations, and low-quality results
+                is_hallucination = self._is_prompt_hallucination(result.text) or result.is_hallucination or result.is_low_quality
+                if is_hallucination and not self._is_meaningful_single_word(result.text):
                     logger.info(f"🚫 [{self.session_id}] Filtered micro-chunk hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
                     return
                 
@@ -439,10 +441,44 @@ class GroqWhisperSession:
             return False
         return token in allow_common or len(token) >= 2
 
+    def _is_prompt_hallucination(self, text: str) -> bool:
+        """
+        Check if transcription contains the prompt itself.
+        This happens when Groq receives silence/noise and returns the prompt as transcription.
+        """
+        if not text or not self.config.base_prompt:
+            return False
+
+        # Build the full prompt that would be sent to Groq
+        full_prompt = self.config.build_transcription_prompt(language=self.config.language)
+        if not full_prompt:
+            return False
+
+        text_normalized = text.strip().lower()
+        prompt_normalized = full_prompt.strip().lower()
+
+        # Check if transcription starts with or contains significant portions of the prompt
+        # Check first 50 chars match (prompt usually starts with "Transcribe...")
+        if len(text_normalized) >= 50 and len(prompt_normalized) >= 50:
+            if text_normalized[:50] == prompt_normalized[:50]:
+                return True
+
+        # Check if prompt is contained in transcription (full prompt leak)
+        if prompt_normalized in text_normalized:
+            return True
+
+        return False
+
     def _should_filter_full_result(self, result: GroqTranscriptionResult, final_text: str) -> bool:
         """Apply stricter noise filtering without dropping meaningful single-word inputs."""
         if self._is_meaningful_single_word(final_text):
             return False
+
+        # CRITICAL: Filter prompt hallucination - when Groq returns the prompt itself as transcription
+        if self._is_prompt_hallucination(final_text):
+            logger.warning(f"🚫 [{self.session_id}] Prompt hallucination detected: '{final_text[:80]}...'")
+            return True
+
         return result.is_hallucination or result.is_low_quality
     
     async def _emit_transcript(

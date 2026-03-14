@@ -121,6 +121,8 @@ services:
       FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-600}
       GROQ_LANGUAGE: ${GROQ_LANGUAGE:-de}
       GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate.}
+      GROQ_API_TIMEOUT: ${GROQ_API_TIMEOUT:-30.0}
+      GROQ_MAX_RETRIES: ${GROQ_MAX_RETRIES:-2}
 
       STT_GROQ_HOST: 0.0.0.0
       STT_GROQ_PORT: 4002
@@ -286,6 +288,7 @@ services:
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
       BARGIN_FEATURE: ${BARGIN_FEATURE:-true}
+      GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate.}
       TENANT_ID_INTRO: ${TENANT_ID_INTRO}
       DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
