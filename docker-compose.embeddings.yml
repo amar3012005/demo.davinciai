@@ -1,20 +1,23 @@
 services:
   # ═══════════════════════════════════════════════════════════
-  # Standalone Embeddings Service (Internal port 4006)
+  # Standalone Embeddings Service (Internal port 4006 → External 8001 with SSL)
   # ═══════════════════════════════════════════════════════════
   embeddings-eu:
     build:
       context: ./bindings-eu/embeddings-eu
       dockerfile: Dockerfile
-    command: >
-      uvicorn app:app --host 0.0.0.0 --port 4006
+    command: "uvicorn app:app --host 0.0.0.0 --port 4006 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
+    ports:
+      - "8001:4006"
+    volumes:
+      - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
+      - hf_cache_standalone_eu:/root/.cache/huggingface
     environment:
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-all-MiniLM-L6-v2}
       PORT: "4006"
       HF_HOME: "/root/.cache/huggingface"
       COOLIFY_CONTAINER_NAME: embeddings-eu
-    volumes:
-      - hf_cache_standalone_eu:/root/.cache/huggingface
     networks:
       coolify: null
       eu-stack: null
@@ -25,11 +28,6 @@ services:
       - coolify.name=embeddings-eu
       - coolify.service.subType=application
       - coolify.service.subName=embeddings
-      - traefik.enable=true
-      - traefik.http.routers.embeddings-eu.entryPoints=https
-      - traefik.http.routers.embeddings-eu.rule=Host(`demo.davinciai.eu`) && PathPrefix(`/embed`)
-      - traefik.http.routers.embeddings-eu.tls=true
-      - traefik.http.services.embeddings-eu.loadbalancer.server.port=4006
     env_file:
       - .env.eu
 

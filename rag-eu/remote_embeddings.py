@@ -17,13 +17,16 @@ class RemoteEmbeddings:
             sentences = [sentences]
             
         try:
-            with httpx.Client(timeout=10.0) as client:
+            # Internal HTTPS with SSL verification disabled (matches STT_SKIP_SSL_VERIFY pattern)
+            with httpx.Client(timeout=10.0, follow_redirects=True, verify=False) as client:
                 response = client.post(self.endpoint_url, json={"sentences": sentences})
                 response.raise_for_status()
                 data = response.json()
                 embeddings_list = data.get("embeddings", [])
                 return np.array(embeddings_list)
+        except httpx.ConnectError as e:
+            logger.warning(f"Embeddings service unreachable ({self.endpoint_url}): {e}")
+            return np.zeros((len(sentences), 384))
         except Exception as e:
             logger.error(f"Failed to get remote embeddings: {e}")
-            # return zero vector as fallback to avoid crashing (same length as MiniLM, usually 384)
             return np.zeros((len(sentences), 384))
