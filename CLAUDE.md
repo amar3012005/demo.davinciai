@@ -8,7 +8,7 @@ TARA is a **dual-stream AI Visual Co-Pilot** for "Expressive Co-Browsing". She n
 
 **Core Philosophy**: TARA is not a silent robot - she narrates, then acts.
 
-## Service Architecture
+## Service Architectur
 
 | Service | Directory | Port (internal:external) | Function |
 |---------|-----------|--------------------------|----------|

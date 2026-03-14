@@ -1,6 +1,11 @@
 # Coolify-compatible TARA EU Service
 # Domain: demo.davinciai.eu | Orchestrator WSS exposed on port 8030
-# Config synced from docker-compose.local-eu.yml + Coolify patterns
+#
+# ┌─────────────────────────────────────────────────────────────┐
+# │ IMPORTANT: No ${VAR:-default} patterns used here.           │
+# │ All config comes from Coolify's env var UI or .env.eu.      │
+# │ This prevents Coolify from locking variables.               │
+# └─────────────────────────────────────────────────────────────┘
 
 services:
   # ═══════════════════════════════════════════════════════════
@@ -25,10 +30,6 @@ services:
       - coolify.name=redis-eu
       - coolify.service.subType=database
       - coolify.service.subName=redis
-    environment:
-      COOLIFY_CONTAINER_NAME: redis-eu
-    env_file:
-      - .env.eu
 
   # ═══════════════════════════════════════════════════════════
   # RAG Service (Internal port 4001)
@@ -42,39 +43,17 @@ services:
     volumes:
       - rag_eu_index:/app/index
     environment:
-      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
-      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
-      HIVEMIND_LLM_MODEL: ${HIVEMIND_LLM_MODEL:-llama-3.1-8b-instant}
-      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
-      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
-
+      # Internal service URLs (hardcoded — never change per-env)
       REDIS_URL: redis://redis-eu:6379/0
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      COOLIFY_CONTAINER_NAME: rag-eu
 
-      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
-      ORGANIZATION_LOCATION: ${ORGANIZATION_LOCATION:-Global}
-      TENANT_ID: ${TENANT_ID:-tara}
-
-      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY}
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
-      ENABLE_HIVE_MIND: ${ENABLE_HIVE_MIND:-true}
-      ENABLE_LOCAL_RETRIEVAL: ${ENABLE_LOCAL_RETRIEVAL:-false}
-      ENABLE_INGESTION_SERVICE: ${ENABLE_INGESTION_SERVICE:-false}
-      USE_ULTIMATE_TARA: ${USE_ULTIMATE_TARA:-false}
-      HIVEMIND_IN_VISUAL_COPILOT: ${HIVEMIND_IN_VISUAL_COPILOT:-true}
-
+      # Feature flags (hardcoded for production stability)
       USE_NEW_DETECTIVE: "false"
       USE_MISSION_BRAIN: "false"
       USE_LIVE_GRAPH: "false"
       USE_HIVE_INTERFACE: "false"
-
       DAYTONA_RAG_ENABLE_CACHE: "false"
       DAYTONA_RAG_CACHE_TTL: "0"
-
-      EMBEDDINGS_SERVICE_URL: ${EMBEDDINGS_SERVICE_URL:-https://demo.davinciai.eu:8001/embed}
-      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
-      COOLIFY_CONTAINER_NAME: rag-eu
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -104,30 +83,13 @@ services:
       sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; uvicorn app:app --host 0.0.0.0 --port 4002'
     environment:
       PYTHONUNBUFFERED: 1
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
-      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3}
-      ENABLE_MICRO_CHUNKING: ${ENABLE_MICRO_CHUNKING:-false}
-      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-120}
-      OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-60}
-      CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-3}
-      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-850}
-      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-500}
-      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-1200}
-      PRE_SPEECH_PADDING_MS: ${PRE_SPEECH_PADDING_MS:-500}
-      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-500}
-      GROQ_LANGUAGE: ${GROQ_LANGUAGE:-en}
-      GROQ_API_TIMEOUT: ${GROQ_API_TIMEOUT:-30.0}
-      GROQ_MAX_RETRIES: ${GROQ_MAX_RETRIES:-2}
-      GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-}
-
+      # Internal service URLs (hardcoded)
       STT_GROQ_HOST: 0.0.0.0
       STT_GROQ_PORT: 4002
-
       ORCHESTRATOR_WS_URL: "wss://orchestrator-eu:4004/ws"
       STT_SKIP_SSL_VERIFY: "true"
       ORCHESTRATOR_SKIP_SSL_VERIFY: "true"
-
       COOLIFY_CONTAINER_NAME: stt-eu
     healthcheck:
       test:
@@ -161,24 +123,9 @@ services:
       dockerfile: Dockerfile
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
     environment:
-      # TTS Cartesia Configuration - Optimized for German pronunciation
-      CARTESIA_API_KEY: ${CARTESIA_API_KEY}
-      # German-native voice ID (improves pronunciation of German text, umlauts, compounds)
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-694f9389-aac1-45b6-b726-9d9369183238}
-      CARTESIA_LANGUAGE: ${CARTESIA_LANGUAGE:-de}  # Default language for German TTS
-      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
-      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
-      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}  # Multilingual model
-      # Speed: 0.9 improves German compound word clarity (range: 0.5-2.0)
-      CARTESIA_SPEED: ${CARTESIA_SPEED:-0.9}
-      # Tenant-specific pronunciation dictionary for brand names (e.g., BLAIQ, DaVinci)
-      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-}
-
+      # Internal service config (hardcoded)
       TTS_CARTESIA_HOST: 0.0.0.0
       TTS_CARTESIA_PORT: 4003
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      CONNECTION_POOL_SIZE: ${CONNECTION_POOL_SIZE:-5}
-
       COOLIFY_CONTAINER_NAME: tts-eu
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:4003/health" ]
@@ -208,19 +155,8 @@ services:
     command: >
       sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn app:app --host 0.0.0.0 --port 4005'
     environment:
-      GROQ_API_KEY: ${LLM_API_KEY}
-      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
-      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
-      MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
-
+      # Internal service config (hardcoded)
       REDIS_URL: redis://redis-eu:6379/0
-
-      QDRANT_URL: ${QDRANT_URL:-https://878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY}
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-tara_eu_hive}
-
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      TENANT_ID: ${TENANT_ID:-tara}
       PORT: "4005"
       COOLIFY_CONTAINER_NAME: visual-copilot-eu
     restart: unless-stopped
@@ -252,50 +188,20 @@ services:
       - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
       - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
     environment:
+      # Internal service URLs (hardcoded — never change per-env)
       REDIS_URL: redis://redis-eu:6379/0
-
-      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Davinci AI}
-      ORGANIZATION_FULL_NAME: ${ORGANIZATION_FULL_NAME:-Davinci AI}
-      AGENT_NAME: ${AGENT_NAME:-Tara}
-      AGENT_ID: ${AGENT_ID:-tara}
-      TENANT_ID: ${TENANT_ID:-tara}
-
       RAG_SERVICE_URL: http://rag-eu:4001
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
       VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu:4005
 
+      # Production URLs (hardcoded for this deployment)
       PUBLIC_URL: "https://demo.davinciai.eu:8030"
-      # Tenant-agnostic websocket base endpoint.
-      # Clients must pass tenant dynamically at runtime:
-      # wss://demo.davinciai.eu:8030/ws?tenant_id=<tenant_id>
       ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8030/ws"
       WIDGET_WS_URL: "wss://demo.davinciai.eu:8030/ws"
 
-      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-de}
-      STREAM_OUT: ${STREAM_OUT:-auto}
-      SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
-      ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
-      BARGIN_FEATURE: ${BARGIN_FEATURE:-true}
-      TENANT_ID_INTRO: ${TENANT_ID_INTRO:-davinci}
-      DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
-      DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
-      BUNDB_CARTESIA_PRONUNCIATION_DICT_ID: ${BUNDB_CARTESIA_PRONUNCIATION_DICT_ID:-pdict_aiA2sefpW2w4nXqFjde8pa}
-      FSM_APPOINTMENT_URL: ${FSM_APPOINTMENT_URL:-}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-
-      DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
-      AGENT_HOST_SUFFIX: ${AGENT_HOST_SUFFIX:-}
-      GLOBAL_CLIENT_URL: ${GLOBAL_CLIENT_URL:-https://enterprise.davinciai.eu}
-      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-https://enterprise.davinciai.eu,https://demo.davinciai.eu}
-      FORCE_GLOBAL_DOMAIN: ${FORCE_GLOBAL_DOMAIN:-false}
+      # Feature flags (hardcoded for production stability)
       USE_ULTIMATE_TARA: "false"
-
-      # FSM Appointment Booking (Schema-Driven)
-      FSM_APPOINTMENT_SCHEMA_JSON: ${FSM_APPOINTMENT_SCHEMA_JSON:-}
-      FSM_ALLOW_RAG_DETOUR: ${FSM_ALLOW_RAG_DETOUR:-true}
-      FSM_MAX_DETOURS_PER_FIELD: ${FSM_MAX_DETOURS_PER_FIELD:-2}
-      FSM_MAX_RETRIES: ${FSM_MAX_RETRIES:-3}
 
       COOLIFY_CONTAINER_NAME: orchestrator-eu
     networks:

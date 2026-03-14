@@ -7,10 +7,18 @@ dist/
 build/
 *.egg
 
-# Environment
+# Environment (secrets — never commit)
 .env
+.env.eu
+.env-eu
 .env.production
+.env.coolify
+.env.local
 *.env.backup
+
+# Coolify exports (contain secrets)
+**/\[Coolify\]*.html
+**/\[Coolify\]*_files/
 
 # IDE
 .vscode/
@@ -37,5 +45,3 @@ env/
 # Caches
 .cache/
 *.resolved
-.env.eu
-.env-eu
