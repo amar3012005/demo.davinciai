@@ -22,7 +22,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,11 @@ from pydantic import BaseModel
 
 from config import CartesiaConfig
 from cartesia_manager import CartesiaManager
+
+# Import rate limiter
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
 
 # Configure logging
 logging.basicConfig(
@@ -134,12 +139,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# Rate limiting middleware - 100 requests/minute per IP
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+    default_requests=100,
+    default_window=60,
+    exempt_paths=["/health", "/metrics", "/", "/client"]
+)
+
+# CORS middleware - RESTRICTED to known origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "https://demo.davinciai.eu,https://enterprise.davinciai.eu").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -296,6 +310,12 @@ async def synthesize(request: SynthesizeRequest):
 # WebSocket Streaming Endpoint
 # =============================================================================
 
+# Global WebSocket rate limiter
+ws_rate_limiter = WebSocketRateLimiter(
+    max_connections_per_ip=10,
+    max_messages_per_minute=60
+)
+
 @app.websocket("/api/v1/stream")
 async def websocket_stream(
     websocket: WebSocket,
@@ -303,7 +323,7 @@ async def websocket_stream(
 ):
     """
     WebSocket endpoint for real-time TTS streaming.
-    
+
     Protocol:
     - Client sends: {"type": "prewarm"} - Optional warmup
     - Client sends: {"type": "synthesize", "text": "...", "voice": "...", "language": "..."}
@@ -312,8 +332,15 @@ async def websocket_stream(
     - Server sends: {"type": "audio", "data": "<base64>", "sample_rate": 24000}
     - Server sends: {"type": "complete"}
     """
+    # Rate limit: Check connection limit per IP
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_rate_limiter.can_connect(client_ip):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Connection limit exceeded")
+        logger.warning(f"WebSocket connection rejected for {client_ip}: too many connections")
+        return
+
     await websocket.accept()
-    
+
     # Generate session ID if not provided
     session_id = session_id or f"ws_{uuid.uuid4().hex[:16]}"
     tenant_id = os.getenv("TENANT_ID", "tenant")
@@ -407,6 +434,15 @@ async def websocket_stream(
             try:
                 # Receive message with timeout
                 raw_message = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+
+                # Rate limit: Check message rate per session
+                if not await ws_rate_limiter.check_message_rate(session_id):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Message rate limit exceeded. Max 60 messages per minute."
+                    })
+                    continue
+
                 message = json.loads(raw_message)
                 msg_type = message.get("type")
                 
@@ -570,7 +606,10 @@ async def websocket_stream(
             await sender_task
         except asyncio.CancelledError:
             pass
-        
+
+        # Rate limit: Decrement connection count
+        ws_rate_limiter.disconnect(client_ip)
+
         # Remove session
         if session_id in active_sessions:
             del active_sessions[session_id]

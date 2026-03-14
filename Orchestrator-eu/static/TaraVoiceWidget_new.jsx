@@ -343,6 +343,7 @@ const TaraVoiceWidget = ({ config: propConfig }) => {
                 const turnId = Number(d.playback_turn_id);
                 if (Number.isFinite(turnId)) {
                     if (turnId < minAcceptedPlaybackTurnIdRef.current) {
+                        console.log(`[TARA] 🚫 Rejected stale audio chunk: turn ${turnId} < min ${minAcceptedPlaybackTurnIdRef.current}`);
                         if (d.binary_sent && binaryQueueRef.current.length > 0) binaryQueueRef.current.shift();
                         return;
                     }

@@ -33,6 +33,11 @@ from dialogue.manager import MultiLangDialogueManager
 from core.pipeline import ProcessingPipeline
 from core.ws_handler import OrchestratorWSHandler
 
+# Import rate limiter
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
+
 # Metrics imports
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
@@ -477,8 +482,23 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Global WebSocket rate limiter - 20 connections per IP, 120 messages/minute
+ws_rate_limiter = WebSocketRateLimiter(
+    max_connections_per_ip=20,
+    max_messages_per_minute=120
+)
+
 # Add metrics middleware
 app.add_middleware(MetricsMiddleware)
+
+# Add rate limiting middleware - 200 requests/minute per IP
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+    default_requests=200,
+    default_window=60,
+    exempt_paths=["/health", "/metrics", "/", "/api/health", "/version"]
+)
 
 # Add CORS middleware to allow cross-origin requests from Dashboards
 app.add_middleware(
@@ -1240,10 +1260,17 @@ async def proxy_rag_hive_mind_api(endpoint: str, request: Request):
 @app.websocket("/hivemind/ws")
 async def proxy_hive_mind_ws(websocket: WebSocket):
     """Securely bridge live websocket events between the public dashboard and the RAG container natively."""
+    # Rate limit: Check connection limit per IP
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_rate_limiter.can_connect(client_ip):
+        await websocket.close(code=1013, reason="Connection limit exceeded")
+        logger.warning(f"HiveMind connection rejected for {client_ip}: too many connections")
+        return
+
     if not config:
         await websocket.close(code=1013, reason="Configuration not loaded")
         return
-        
+
     await websocket.accept()
     rag_ws_url = config.services.rag.url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/hive-mind"
     
@@ -1287,6 +1314,9 @@ async def proxy_hive_mind_ws(websocket: WebSocket):
             await websocket.close(code=1011, reason="Upstream unavailable")
         except:
             pass
+    finally:
+        # Rate limit: Decrement connection count
+        ws_rate_limiter.disconnect(client_ip)
 
 
 @app.get("/client")
@@ -1428,22 +1458,33 @@ async def stream_pod_logs(pod: str = Query("orchestrator", description="Pod name
 async def websocket_endpoint(websocket: WebSocket, session_id: Optional[str] = Query(None)):
     """
     Unified WebSocket endpoint for Orchestra-daytona
-    
+
     Handles:
     - Audio input (microphone chunks)
     - Audio output (TTS streaming)
     - State synchronization
     - Interrupt handling
-    
+
     Args:
         websocket: WebSocket connection
         session_id: Optional session ID (auto-generated if not provided)
     """
+    # Rate limit: Check connection limit per IP
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_rate_limiter.can_connect(client_ip):
+        await websocket.close(code=1013, reason="Connection limit exceeded")
+        logger.warning(f"WebSocket connection rejected for {client_ip}: too many connections")
+        return
+
     if not ws_handler:
         await websocket.close(code=1013, reason="WebSocket handler not initialized")
         return
-    
-    await ws_handler.handle_connection(websocket, session_id)
+
+    try:
+        await ws_handler.handle_connection(websocket, session_id)
+    finally:
+        # Rate limit: Decrement connection count
+        ws_rate_limiter.disconnect(client_ip)
 
 
 @app.websocket("/stream")
@@ -1458,11 +1499,22 @@ async def audio_stream_endpoint(websocket: WebSocket, session_id: Optional[str] 
         websocket: WebSocket connection
         session_id: Required session ID (must match an existing session)
     """
+    # Rate limit: Check connection limit per IP
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_rate_limiter.can_connect(client_ip):
+        await websocket.close(code=1013, reason="Connection limit exceeded")
+        logger.warning(f"Audio stream connection rejected for {client_ip}: too many connections")
+        return
+
     if not ws_handler:
         await websocket.close(code=1013, reason="WebSocket handler not initialized")
         return
 
-    await ws_handler.handle_audio_stream(websocket, session_id)
+    try:
+        await ws_handler.handle_audio_stream(websocket, session_id)
+    finally:
+        # Rate limit: Decrement connection count
+        ws_rate_limiter.disconnect(client_ip)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1512,6 +1564,13 @@ async def handle_phone_audio(websocket: WebSocket, call_sid: str):
     This WebSocket receives G.711 audio from Twilio and connects it to your
     existing orchestrator pipeline (STT → RAG → TTS).
     """
+    # Rate limit: Check connection limit per IP (separate limit for phone calls)
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_rate_limiter.can_connect(client_ip):
+        await websocket.close(code=1013, reason="Connection limit exceeded")
+        logger.warning(f"Phone audio connection rejected for {client_ip}: too many connections")
+        return
+
     await websocket.accept()
 
     if not ws_handler:
@@ -1536,6 +1595,8 @@ async def handle_phone_audio(websocket: WebSocket, call_sid: str):
     except Exception as e:
         logger.error(f"Phone audio handler error for {call_sid}: {e}")
     finally:
+        # Rate limit: Decrement connection count
+        ws_rate_limiter.disconnect(client_ip)
         await websocket.close()
 
 

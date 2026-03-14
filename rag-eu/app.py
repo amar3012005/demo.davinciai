@@ -38,6 +38,10 @@ from .models.hivemind_schema import (
 )
 from daytona_agent.services.rag.index_builder import IndexBuilder
 
+# Import rate limiter
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -548,13 +552,28 @@ app = FastAPI(
     root_path=root_path
 )
 
+# Global WebSocket rate limiter - 15 connections per IP
+ws_rate_limiter = WebSocketRateLimiter(
+    max_connections_per_ip=15,
+    max_messages_per_minute=120
+)
+
 # Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "https://demo.davinciai.eu,https://enterprise.davinciai.eu").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
+)
+
+# Rate limiting middleware - 150 requests/minute per IP
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+    default_requests=150,
+    default_window=60,
+    exempt_paths=["/health", "/metrics", "/", "/version", "/api/v1/health"]
 )
 # app.add_middleware(GZipMiddleware, minimum_size=1000) # Disabled to prevent blank page issues
 
@@ -2434,10 +2453,17 @@ async def broadcast_hive_mind_update(message: Dict[str, Any]):
 @app.websocket("/ws/hive-mind")
 async def hive_mind_websocket(websocket: WebSocket):
     """WebSocket for real-time Hive Mind visualization updates."""
+    # Rate limit: Check connection limit per IP
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_rate_limiter.can_connect(client_ip):
+        await websocket.close(code=1013, reason="Connection limit exceeded")
+        logger.warning(f"HiveMind connection rejected for {client_ip}: too many connections")
+        return
+
     await websocket.accept()
     hive_mind_connections.append(websocket)
     logger.info(f"🔌 Hive Mind Visualizer connected. Total: {len(hive_mind_connections)}")
-    
+
     try:
         while True:
             # Keep connection alive, wait for client messages (if any)
@@ -2448,6 +2474,9 @@ async def hive_mind_websocket(websocket: WebSocket):
         if websocket in hive_mind_connections:
             hive_mind_connections.remove(websocket)
         logger.info(f"🔌 Hive Mind Visualizer disconnected. Remaining: {len(hive_mind_connections)}")
+    finally:
+        # Rate limit: Decrement connection count
+        ws_rate_limiter.disconnect(client_ip)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         if websocket in hive_mind_connections:

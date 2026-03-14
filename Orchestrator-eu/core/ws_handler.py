@@ -187,6 +187,7 @@ class OrchestratorSession:
     interrupted_response_language: str = "de"
     interruption_transcripts: List[str] = field(default_factory=list)  # Collected transcripts during interruption
     interruption_type: Optional[str] = None  # Classified interruption type from LLM
+    interrupt_count: int = 0  # Track interruptions per session for debugging
 
     # Host-based configuration overrides
     agent_name: str = "agent"
@@ -592,8 +593,10 @@ class OrchestratorWSHandler:
             safe_tenant = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in tenant)
             env_candidates = [
                 f"{safe_tenant}_cartesia_pronunciation_dict_id",
+                f"{safe_tenant}_CARTESIA_PRONUNCIATION_DICT_ID",
                 f"{safe_tenant.upper()}_CARTESIA_PRONUNCIATION_DICT_ID",
                 f"{safe_tenant}_pronunciation_dict_id",
+                f"{safe_tenant}_PRONUNCIATION_DICT_ID",
                 f"{safe_tenant.upper()}_PRONUNCIATION_DICT_ID",
             ]
             for env_key in env_candidates:
@@ -3994,7 +3997,11 @@ class OrchestratorWSHandler:
     async def _handle_interrupt(self, session: OrchestratorSession, msg: Dict[str, Any]):
         """Handle user interrupt"""
         state_mgr = session.state_manager
-        
+
+        # Track interrupt count for debugging
+        session.interrupt_count += 1
+        logger.info(f"[{session.session_id}] 🛑 Interrupt #{session.interrupt_count} received")
+
         # Cancel latency filler task if running (prevents interrupt errors)
         if session.filler_task and not session.filler_task.done():
             session.filler_task.cancel()
@@ -4003,13 +4010,13 @@ class OrchestratorWSHandler:
             except asyncio.CancelledError:
                 pass
             logger.debug(f"[{session.session_id}] ⏸️ Cancelled latency filler due to interrupt")
-        
+
         # Cancel ongoing tasks
         if session.tts_task and not session.tts_task.done():
             session.tts_task.cancel()
         if session.pipeline_task and not session.pipeline_task.done():
             session.pipeline_task.cancel()
-        
+
         # CRITICAL: Always cancel audio playback timer on interrupt
         if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
             session.audio_playback_server_timer.cancel()
@@ -4023,6 +4030,11 @@ class OrchestratorWSHandler:
             except asyncio.QueueEmpty:
                 break
 
+        # CRITICAL: Clear foreground audio buffer to prevent stale audio leakage
+        if session.fg_buffer:
+            session.fg_buffer.clear()
+            logger.debug(f"[{session.session_id}] 🗑️ Cleared foreground audio buffer on interrupt")
+
         self._persist_interrupted_agent_turn(session)
 
         # Best-effort: abort TTS stream generation without flushing buffered text.
@@ -4030,7 +4042,7 @@ class OrchestratorWSHandler:
         try:
             if session.tts_client and session.tts_client.ws and not session.tts_client.ws.closed:
                 await session.tts_client.abort_stream()
-                logger.info(f"[{session.session_id}] 🛑 Aborted active TTS stream due to interrupt")
+                logger.info(f"[{session.session_id}] 🛑 Aborted active TTS stream due to interrupt (interrupt #{session.interrupt_count})")
         except Exception:
             # Non-fatal; local cancellation + queue flush already handles interruption.
             pass
@@ -4449,8 +4461,15 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
             logger.error(f"[{session.session_id}] ❌ Failed to serve asset {asset_name}: {e}")
 
     async def _handle_end_session(self, session: OrchestratorSession, language: str = None):
-        """Handle session end"""
-        detected_language = language or session.current_language or self.config.languages.default
+        """Handle session end - sends exit summary in German by default for BUNDB tenant"""
+
+        # BUNDB-specific: Always use German for end-session summary
+        if session.tenant_id and str(session.tenant_id).lower() == "bundb":
+            detected_language = "de"
+            logger.info(f"[{session.session_id}] 🇩🇪 BUNDB session ending - using German for exit summary")
+        else:
+            detected_language = language or session.current_language or self.config.languages.default
+
         # Determine output language based on stream_out setting
         output_language = self._get_output_language(detected_language)
         

@@ -31,6 +31,10 @@ from daytona_agent.services.rag.config import RAGConfig
 from daytona_agent.services.rag.rag_engine import RAGEngine
 from daytona_agent.services.rag.index_builder import IndexBuilder
 
+# Import rate limiter
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -232,10 +236,19 @@ app = FastAPI(
 # Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "https://demo.davinciai.eu,https://enterprise.davinciai.eu").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
+)
+
+# Rate limiting middleware - 150 requests/minute per IP
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+    default_requests=150,
+    default_window=60,
+    exempt_paths=["/health", "/metrics", "/", "/version", "/api/v1/health"]
 )
 # app.add_middleware(GZipMiddleware, minimum_size=1000) # Disabled to prevent blank page issues
 
