@@ -164,24 +164,35 @@ services:
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
     environment:
       CARTESIA_API_KEY: ${CARTESIA_API_KEY}
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-f786b574-daa5-4673-aa0c-cbe3e8534c02}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-b9de4a89-2257-424b-94c2-db18ba68c81a}  # German-capable voice
+      CARTESIA_LANGUAGE: ${CARTESIA_LANGUAGE:-de}  # Default language for German TTS
       CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
       CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
-      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}  # Multilingual model
 
       TTS_CARTESIA_HOST: 0.0.0.0
       TTS_CARTESIA_PORT: 4003
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CONNECTION_POOL_SIZE: ${CONNECTION_POOL_SIZE:-5}
 
       COOLIFY_CONTAINER_NAME: tts-eu
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:4003/health" ]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
+      start_period: 10s
     networks:
       eu-stack: null
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
     labels:
       - coolify.managed=true
       - coolify.type=service

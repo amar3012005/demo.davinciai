@@ -35,7 +35,7 @@ class CartesiaConfig:
     container: str = "raw"  # raw or mp3
     
     # Voice settings
-    language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "en").strip())
+    language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "de").strip())  # Default to German for EU deployment
     
     # Connection pool settings (for robustness)
     pool_size: int = field(default_factory=lambda: int(os.getenv("CONNECTION_POOL_SIZE", "3")))
@@ -62,15 +62,15 @@ class CartesiaConfig:
             )
         
         if not self.voice_id:
-            logger.warning("CARTESIA_VOICE_ID not set, using default voice")
-            # Default to a commonly available voice
-            self.voice_id = "a0e99841-438c-4a64-b679-ae501e7d6091"  # Default English voice
+            logger.warning("CARTESIA_VOICE_ID not set, using default German voice")
+            # Default to a German-capable voice (Sonic-3 multilingual)
+            self.voice_id = "b9de4a89-2257-424b-94c2-db18ba68c81a"  # German-capable voice
         
         # Validate model
-        valid_models = ["sonic-english", "sonic-multilingual", "sonic-2", "sonic-3"]
+        valid_models = ["sonic-english", "sonic-multilingual", "sonic-2", "sonic-3", "sonic-4"]
         if self.model not in valid_models:
-            logger.warning(f"Unknown model '{self.model}', using 'sonic-english'")
-            self.model = "sonic-english"
+            logger.warning(f"Unknown model '{self.model}', using 'sonic-3' for multilingual support")
+            self.model = "sonic-3"
         
         # Validate output format
         valid_formats = ["pcm_s16le", "pcm_f32le", "pcm_mulaw", "pcm_alaw"]
@@ -90,8 +90,9 @@ class CartesiaConfig:
         # Log configuration
         masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
         logger.info(f"🔑 Cartesia API key configured: {masked_key}")
-        logger.info(f"🎤 Model: {self.model}")
+        logger.info(f"🎤 Model: {self.model} ({'multilingual' if 'multilingual' in self.model.lower() or 'sonic-3' in self.model.lower() or 'sonic-4' in self.model.lower() else 'english-only'})")
         logger.info(f"🔊 Voice ID: {self.voice_id}")
+        logger.info(f"🌐 Language: {self.language} (for multilingual models)")
         logger.info(f"📊 Sample rate: {self.sample_rate}Hz")
         logger.info(f"🔄 Connection pool size: {self.pool_size}")
     

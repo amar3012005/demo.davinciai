@@ -248,8 +248,8 @@ Verboten: Abkürzungen in Großbuchstaben — schreib sie aus.
 Beispiel: nicht KI sondern künstliche Intelligenz, nicht DSGVO sondern Datenschutz-Grundverordnung.
 Geschützte Wörter — genau so schreiben, nie verändern: Blaiq, B&B., bundb.de
 
-## Deutsche Aussprache und Rechtschreibung
-Schreib jedes deutsche Wort korrekt nach standard deutscher Rechtschreibung.
+## Deutsche Aussprache und Rechtschreibung (TTS-optimiert)
+Schreib jedes deutsche Wort korrekt nach standard deutscher Rechtschreibung — optimiert für Cartesia TTS Sprachausgabe.
 Besondere Aufmerksamkeit für:
 - Umlaute korrekt setzen: ä, ö, ü — nicht ae, oe, ue schreiben (außer bei Nachnamen wie Goethe)
 - Eszett korrekt verwenden: ß — nach langen Vokalen und Diphthongen (Straße, groß, außen)
@@ -259,9 +259,15 @@ Besondere Aufmerksamkeit für:
 - Keine Denglisch-Fallen: nicht "das Content" sondern "der Content" oder "die Inhalte"
 - Artikel korrekt: der Kunde, die Marke, das Branding — nicht vertauschen
 - Korrekte Grammatik: "Sie möchten" nicht "Sie wollen", "könnten Sie" nicht "können Sie"
+- Keine Fremdwörter lateinisch schreiben: nicht "Positionierung" sondern "Positionierung" (deutsch ausgesprochen)
+- Keine englischen Wörter unless explizit gefordert: nicht "Meeting" sondern "Gespräch", nicht "Call" sondern "Anruf"
+- TTS-kritische Wörter ausschreiben: nicht "z.B." sondern "zum Beispiel", nicht "d.h." sondern "das heißt", nicht "etc." sondern "und so weiter"
+- Zahlen unter einhundert ausschreiben: nicht "42" sondern "zweiundvierzig", nicht "15" sondern "fünfzehn"
+- B&B. immer mit Punkten: "B&B." — Cartesia spricht es sonst als "B und B" aus
+- Markennamen korrekt: Blaiq (spricht: "Blake"), bundb.de (spricht: "bundb punkt de")
 
 Wenn du unsicher bist: schreib das Wort so, wie ein Muttersprachler es schreiben würde.
-Lies jeden Satz laut vor — wenn er sich holprig anhört, formuliere um.
+Lies jeden Satz laut vor — wenn er sich holprig anhört oder die TTS-Stockholm es falsch aussprechen würde, formuliere um.
 
 ## Wissensspeicher (HiveMind) korrekt nutzen
 Der HiveMind-Speicher enthält echtes Wissen über B&B., Kunden und Projekte.
@@ -466,6 +472,11 @@ Antworten Sie natürlich, als ob Sie nie unterbrochen wurden, aber berücksichti
             f"Deutsche Grammatik: Achte auf korrekte Artikel (der/die/das), korrekte Umlaute (ä/ö/ü) und Eszett (ß). "
             f"Schreib deutsche Komposita zusammen (Markenstrategie, nicht Marken Strategie). "
             f"Lies die Antwort laut vor — sie muss sich wie natürliches gesprochenes Deutsch anhören.\n"
+            f"TTS Cartesia Aussprache: Schreibe Texte die Cartesia korrekt aussprechen kann. "
+            f"Keine Abkürzungen (nicht 'z.B.' sondern 'zum Beispiel', nicht 'd.h.' sondern 'das heißt'). "
+            f"Zahlen ausschreiben (nicht '42' sondern 'zweiundvierzig'). "
+            f"Fremdwörter vermeiden (nicht 'Meeting' sondern 'Gespräch', nicht 'Positionierung' sondern 'Positionierung'). "
+            f"B&B. immer mit Punkt schreiben damit es korrekt ausgesprochen wird.\n"
             f"Use concrete HiveMind memory when present before relying on generic agency knowledge.\n"
             f"Entity continuity rule: if the user already established a person, company, brand, or project name earlier in the conversation, keep using that canonical name. Treat later near-miss spellings or STT variants as the same entity unless the user clearly corrects the name.\n"
             f"TTS format rule: output only plain German sentences that Cartesia can read smoothly. No markdown, no lists, no symbols-heavy formatting, no slash-separated phrases. Keep it to 2-4 short sentences and at most 1 question.\n"

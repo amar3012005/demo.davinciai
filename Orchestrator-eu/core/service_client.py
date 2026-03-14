@@ -216,9 +216,10 @@ class TTSClient:
             "\u2010": "-",   # hyphen
             "\u2011": "-",   # non-breaking hyphen
             "\u2012": "-",
-            "\u2013": "-",
-            "\u2014": "-",
-            "\u2212": "-",
+            "\u2013": "-",   # en dash
+            "\u2014": "-",   # em dash
+            "\u2015": "-",   # horizontal bar
+            "\u2212": "-",   # minus sign
         }
         for old, new in replacements.items():
             normalized = normalized.replace(old, new)
@@ -227,6 +228,19 @@ class TTSClient:
         normalized = re.sub(r"(?<=\w)\.(?=\w)", ", ", normalized)
         # Avoid clipped acronym-hyphen compounds like "KI-gestützt" getting spelled out.
         normalized = re.sub(r"\b([A-ZÄÖÜ]{2,})-(?=\w)", r"\1 ", normalized)
+        # German-specific: Replace slashes with "oder" for better TTS pronunciation
+        normalized = re.sub(r"\s*/\s*", " oder ", normalized)
+        # German-specific: Handle common abbreviations that TTS might mispronounce
+        abbreviation_replacements = {
+            r"\bz\.B\.": "zum Beispiel",
+            r"\bd\.h\.": "das heißt",
+            r"\bu\.a\.": "und andere",
+            r"\betc\.": "und so weiter",
+            r"\busw\.": "und so weiter",
+            r"\bbspw\.": "beispielsweise",
+        }
+        for pattern, replacement in abbreviation_replacements.items():
+            normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return normalized
     
