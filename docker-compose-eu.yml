@@ -120,7 +120,7 @@ services:
       PRE_SPEECH_PADDING_MS: 600
       FINAL_SILENCE_PADDING_MS: 600
       GROQ_LANGUAGE: ${GROQ_LANGUAGE:-de}
-      GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate.}
+      GROQ_BASE_PROMPT: ""
       GROQ_API_TIMEOUT: ${GROQ_API_TIMEOUT:-30.0}
       GROQ_MAX_RETRIES: ${GROQ_MAX_RETRIES:-2}
 
