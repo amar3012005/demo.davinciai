@@ -153,8 +153,16 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
         if (audioCtxRef.current.currentTime >= lastPlaybackTimeRef.current - 0.1) {
             setAgentIsSpeaking(false);
             if (audioStreamCompleteRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ type: 'playback_done', duration_ms: playbackStartTimeRef.current ? Date.now() - playbackStartTimeRef.current : 0, timestamp: Date.now() / 1000 }));
-                playbackStartTimeRef.current = null; audioStreamCompleteRef.current = false;
+                const duration = playbackStartTimeRef.current ? Date.now() - playbackStartTimeRef.current : 0;
+                wsRef.current.send(JSON.stringify({
+                    type: 'playback_done',
+                    duration_ms: duration,
+                    playback_turn_id: currentPlaybackTurnIdRef.current,
+                    timestamp: Date.now() / 1000
+                }));
+                playbackStartTimeRef.current = null;
+                audioStreamCompleteRef.current = false;
+                currentPlaybackTurnIdRef.current = null;
             }
         }
     }, []);
@@ -210,8 +218,15 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
             try { chain.gain.disconnect(); chain.highpass.disconnect(); chain.lowpass.disconnect(); s.disconnect(); } catch (_) { }
             if (selectedCallMode === 'telephony') { s.connect(chain.highpass); chain.highpass.connect(chain.lowpass); chain.lowpass.connect(chain.gain); chain.gain.connect(audioCtxRef.current.destination); }
             else { s.connect(chain.gain); chain.gain.connect(audioCtxRef.current.destination); }
-            const now = audioCtxRef.current.currentTime; let at = lastPlaybackTimeRef.current; if (at < now) at = now;
-            if (!playbackStartTimeRef.current) playbackStartTimeRef.current = Date.now();
+            const now = audioCtxRef.current.currentTime;
+            let at = lastPlaybackTimeRef.current;
+            // Initial buffer offset (50ms) for first chunk — prevents glitchy start
+            if (!playbackStartTimeRef.current) {
+                playbackStartTimeRef.current = Date.now();
+                at = now + 0.05;
+            }
+            // Drift correction: jump to current time if falling behind
+            if (at < now) at = now;
             activeSourcesRef.current.add(s);
             s.onended = () => { activeSourcesRef.current.delete(s); checkPlaybackComplete(); };
             s.start(at); lastPlaybackTimeRef.current = at + buf.duration;
@@ -235,7 +250,7 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
 
     const startCall = async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
             setMicStream(stream); startVoiceCall(stream);
         } catch (err) { console.error("Mic failed:", err); alert("Please enable microphone access"); }
     };
