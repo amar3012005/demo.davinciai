@@ -1395,52 +1395,52 @@ class OrchestratorWSHandler:
                 "user_text": text
             }
         
-        # VALIDATED BARGE-IN: Check STT transcript to confirm real speech before interrupting
+        # VALIDATED BARGE-IN: Use LLM to determine if interruption is genuine
         if session.barge_in_pending or (state_mgr.state == State.SPEAKING and self._is_bargin_enabled()):
             stripped = text.strip().rstrip(".!?,")
             no_speech_prob = data.get("no_speech_prob")
 
-            # Filter out filler words / noise artifacts that STT commonly produces
-            NOISE_PHRASES = {
-                "mm-hmm", "mmhmm", "mm hmm", "uh-huh", "uh huh", "uhuh",
-                "hmm", "hm", "um", "uh", "ah", "oh", "mhm", "mm",
-                "yeah", "yep", "yup", "ok", "okay", "right",
-                "bye", "bye-bye", "goodbye",
-                "thank you", "thanks",
-            }
-            is_filler = stripped.lower() in NOISE_PHRASES
-
-            # Valid barge-in: meaningful FINAL text (low-noise) that is not filler.
-            # Keep this permissive enough for short but valid utterances like "stop", "wait", "no".
-            is_valid = (
-                not is_filler
-                and len(stripped) >= 3
-                and is_final
-                and (no_speech_prob is None or no_speech_prob < 0.7)
+            # Quick pre-filter: Only reject obvious non-speech (high confidence noise)
+            # Let LLM make the final verdict on everything else
+            is_obvious_noise = (
+                not stripped  # Empty text
+                or (no_speech_prob is not None and no_speech_prob > 0.85)  # Very high no-speech probability
             )
 
-            if is_valid:
-                logger.info(f"[{session.session_id}] 🛑 VALID barge-in ({'FINAL' if is_final else 'Fragment'}): '{text}' (nsp={no_speech_prob})")
-                session.barge_in_pending = False
+            if is_obvious_noise:
+                logger.info(f"[{session.session_id}] 🚫 Obvious noise rejected: '{stripped}' (nsp={no_speech_prob})")
+                return  # Drop noise transcript entirely
 
-                # Collect interruption transcript for LLM validation
-                if not session.interruption_transcripts:
-                    session.interruption_transcripts = []
-                session.interruption_transcripts.append(text)
+            # Collect transcript for LLM validation
+            if not session.interruption_transcripts:
+                session.interruption_transcripts = []
+            session.interruption_transcripts.append(text)
+
+            # Validated by LLM - proceed with interrupt
+            logger.info(f"[{session.session_id}] 🛑 Barge-in transcript collected: '{text}' (nsp={no_speech_prob}) - sending to LLM verdict")
+            session.barge_in_pending = False
+
+            # Call LLM to validate if this is a genuine interruption (blocking for accuracy)
+            llm_verdict = await self._validate_bargein_with_llm(session, text, interrupted_text=session.interrupted_response_text)
+
+            if llm_verdict.get("is_genuine", False):
+                interruption_type = llm_verdict.get("interruption_type", "addon")
+                confidence = llm_verdict.get("confidence", 0.5)
+                logger.info(f"[{session.session_id}] ✅ LLM verdict: GENUINE interruption (type={interruption_type}, confidence={confidence:.2f})")
 
                 await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_validated"})
 
-                # Call LLM to classify interruption type (async, non-blocking)
-                if session.interrupted_response_text and session.interruption_transcripts:
-                    asyncio.create_task(self._classify_interruption(session))
+                # Store classification for RAG context
+                session.interruption_type = interruption_type
 
-                # After interrupt, continue to process the final transcript in LISTENING state
-                # but return here if it was a fragment to avoid duplicate processing later
                 if not is_final:
-                    return
+                    return  # Wait for final transcript
             else:
-                logger.info(f"[{session.session_id}] 🚫 Noise barge-in rejected: '{stripped}' (nsp={no_speech_prob})")
-                return  # Drop noise transcript entirely (both partial and final)
+                confidence = llm_verdict.get("confidence", 0.5)
+                logger.info(f"[{session.session_id}] 🚫 LLM verdict: NOISE (confidence={confidence:.2f}) - resuming playback")
+                session.interruption_transcripts.clear()  # Clear collected transcripts
+                await self._recover_from_noise_interrupt(session)
+                return  # Drop noise transcript
 
         # Store partial transcript for early processing
         if not is_final:
@@ -1656,18 +1656,41 @@ class OrchestratorWSHandler:
                 session.is_mission_active = False
                 session.current_goal = None
 
-            # BARGE-IN DETECTION: interrupt immediately on real speech start.
-            # Human-like behavior is to stop talking and listen first, then process
-            # the validated transcript as the continuation of the same conversation.
+            # BARGE-IN DETECTION: DEFERRED - wait for STT transcript validation
+            # Previously: immediate interrupt on SPEECH_START caused false positives from ambient noise
+            # Now: set barge_in_pending and wait for validated STT transcript (same as SPEECH_END)
             state_mgr = session.state_manager
             if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled():
                 session.barge_in_pending = False
                 logger.debug(f"[{session.session_id}] ⏸️ Ignoring SPEECH_START during SPEAKING (BARGIN_FEATURE=false)")
                 return
+
             if state_mgr.state == State.SPEAKING:
-                logger.info(f"[{session.session_id}] 🛑 Barge-in detected on SPEECH_START - interrupting immediately")
-                session.barge_in_pending = False
-                await self._handle_interrupt(session, {"type": "interrupt", "trigger": "speech_start"})
+                # DEFERRED BARGE-IN: Don't hard-interrupt on VAD alone - wait for STT validation
+                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_START) - deferring, waiting for STT validation")
+                session.barge_in_pending = True
+                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
+
+                # Start a timeout: if no valid STT transcript arrives, recover from noise
+                output_language = self._get_output_language(session.current_language, session)
+
+                async def barge_in_validation_timeout():
+                    try:
+                        await asyncio.sleep(5.0)
+                        if session.barge_in_pending and not session.is_closed and state_mgr.state == State.SPEAKING:
+                            session.barge_in_pending = False
+                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after SPEECH_START barge-in, returning to LISTENING")
+                            await self._recover_from_noise_interrupt(session)
+                        else:
+                            session.barge_in_pending = False
+                    except asyncio.CancelledError:
+                        pass  # STT transcript arrived and validated/rejected
+
+                # Cancel any existing timeout, start new one
+                if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                    session.transcript_timeout_task.cancel()
+                session.transcript_timeout_task = asyncio.create_task(barge_in_validation_timeout())
+                return  # Stay in SPEAKING — don't interrupt yet
             elif state_mgr.state == State.THINKING:
                 if session.barge_in_pending:
                     logger.debug(f"[{session.session_id}] 🎤 Speech start during pending barge-in validation - waiting for STT")
@@ -4114,57 +4137,36 @@ class OrchestratorWSHandler:
         logger.info(f"[{session.session_id}] 📝 Saved interrupted assistant turn for barge-in context ({len(partial)} chars)")
         session.current_response_text = ""
 
-    async def _classify_interruption(self, session: OrchestratorSession) -> None:
-        """
-        Classify interruption type using LLM and store result for RAG context.
-        Called asynchronously after barge-in is validated.
-        """
-        interrupted_text = session.interrupted_response_text or ""
-        interruption_transcripts = session.interruption_transcripts or []
-
-        result = await self._validate_interruption_with_llm(
-            session, interrupted_text, interruption_transcripts
-        )
-
-        # Store classification for RAG context
-        session.interruption_type = result.get("interruption_type", "addon")
-        logger.info(f"[{session.session_id}] 🏷️ Interruption classified: {session.interruption_type} (confidence: {result.get('confidence', 0.5):.2f})")
-
-    async def _validate_interruption_with_llm(
+    async def _validate_bargein_with_llm(
         self,
         session: OrchestratorSession,
-        interrupted_text: str,
-        interruption_transcripts: List[str],
+        interruption_transcript: str,
+        interrupted_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Use LLM to classify interruption type for smarter barge-in handling.
+        Use LLM to validate if a barge-in is genuine speech or noise.
+        This is called synchronously (blocking) for the initial barge-in verdict.
 
         Args:
             session: Orchestrator session
-            interrupted_text: The assistant's response that was interrupted
-            interruption_transcripts: List of user transcripts during interruption
+            interruption_transcript: The user's interruption text
+            interrupted_text: The assistant's response that was interrupted (optional)
 
         Returns:
             Dict with 'is_genuine' (bool), 'interruption_type' (str), 'confidence' (float)
-            interruption_type can be: 'addon', 'topic_change', 'clarification', 'noise'
         """
-        if not interrupted_text or not interruption_transcripts:
-            return {"is_genuine": True, "interruption_type": "unknown", "confidence": 0.5}
-
-        interruption_text = " ".join(interruption_transcripts)
-
         # Use Groq API for fast classification (<100ms)
         groq_api_key = os.getenv("GROQ_API_KEY") or os.getenv("LLM_API_KEY")
         if not groq_api_key:
-            logger.warning(f"[{session.session_id}] No GROQ_API_KEY for interruption validation, using rule-based fallback")
+            logger.warning(f"[{session.session_id}] No GROQ_API_KEY for barge-in validation, using rule-based fallback")
             return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
 
         # Use JSON encoding to prevent prompt injection via special characters
         import json
-        interrupted_text_json = json.dumps(interrupted_text)
-        interruption_text_json = json.dumps(interruption_text)
+        interrupted_text_json = json.dumps(interrupted_text or "")
+        interruption_text_json = json.dumps(interruption_transcript)
 
-        prompt = f"""You are detecting if a user interruption during speech is genuine or noise, and classifying the type.
+        prompt = f"""You are detecting if a user interruption during speech is genuine or noise.
 
 Previous response (interrupted):
 <interrupted_text>
@@ -4176,11 +4178,16 @@ User interruption:
 {interruption_text_json}
 </user_interruption>
 
-Classify the interruption type:
+Classify the interruption:
 - "addon": User adds to their previous query or modifies it ("...but in German", "...actually wait")
 - "topic_change": User switches topic entirely
 - "clarification": User clarifies their previous query
-- "noise": Filler words, coughs, false starts, accidental speech
+- "noise": Filler words, coughs, false starts, accidental speech, or non-speech sounds
+
+Important:
+- Short words like "stop", "wait", "yes", "no", "hello" are GENUINE speech, not noise
+- Single meaningful words should be classified as genuine
+- Only classify as "noise" if it's clearly non-speech or accidental
 
 Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": "...", "confidence": 0.0-1.0}}
 """
@@ -4209,31 +4216,38 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
                     content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
 
                     # Parse JSON response
-                    import json
                     try:
                         # Clean markdown code blocks if present
                         content = content.strip()
                         if content.startswith("```"):
-                            content = content.split("```")[1]
+                            # Remove ```json or ``` prefixes
+                            content = content.split("```", 1)[1]
                             if content.startswith("json"):
                                 content = content[4:]
                         classification = json.loads(content)
-                        logger.info(f"[{session.session_id}] LLM interruption classification: {classification}")
+                        logger.debug(f"[{session.session_id}] LLM barge-in classification: {classification}")
                         return {
                             "is_genuine": classification.get("is_genuine", True),
                             "interruption_type": classification.get("interruption_type", "addon"),
                             "confidence": classification.get("confidence", 0.5)
                         }
                     except json.JSONDecodeError as e:
-                        logger.warning(f"[{session.session_id}] Failed to parse LLM interruption response: {e}")
+                        logger.warning(f"[{session.session_id}] Failed to parse LLM barge-in response: {e}")
                         return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
                 else:
-                    logger.warning(f"[{session.session_id}] Groq API error for interruption validation: {response.status_code}")
+                    logger.warning(f"[{session.session_id}] Groq API error for barge-in validation: {response.status_code}")
                     return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
 
         except Exception as e:
-            logger.error(f"[{session.session_id}] LLM interruption validation error: {e}")
+            logger.error(f"[{session.session_id}] LLM barge-in validation error: {e}")
             return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
+
+    async def _classify_interruption(self, session: OrchestratorSession) -> None:
+        """
+        Deprecated: Interruption classification now happens synchronously during barge-in validation.
+        This method is kept for backward compatibility but does nothing.
+        """
+        pass  # Classification already done in _validate_bargein_with_llm
 
     async def _recover_from_noise_interrupt(self, session: OrchestratorSession):
         """Recover from false/noise barge-in by resuming the interrupted turn when possible."""

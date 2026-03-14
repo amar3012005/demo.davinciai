@@ -40,9 +40,10 @@ class GroqWhisperConfig:
     base_prompt: str = os.getenv("GROQ_BASE_PROMPT", "")
     
     # VAD settings (local pre-filtering)
-    vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "720"))  # RMS energy threshold
-    min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "320"))
-    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "950"))
+    # Higher energy threshold = less sensitive (reduces false positives from ambient noise/echo)
+    vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "850"))  # RMS energy threshold (default: 850, range: 500-1000)
+    min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "500"))  # Minimum speech length in ms (default: 500ms)
+    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "1200"))  # Silence before speech_end in ms (default: 1200ms)
     final_silence_padding_ms: int = int(os.getenv("FINAL_SILENCE_PADDING_MS", "1150"))
     pre_speech_padding_ms: int = int(os.getenv("PRE_SPEECH_PADDING_MS", "520"))
     
