@@ -45,7 +45,7 @@ services:
       - rag_eu_index:/app/index
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
-      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
       HIVEMIND_LLM_MODEL: ${HIVEMIND_LLM_MODEL:-llama-3.1-8b-instant}
       ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
       MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
@@ -64,12 +64,12 @@ services:
       ENABLE_LOCAL_RETRIEVAL: ${ENABLE_LOCAL_RETRIEVAL:-false}
       ENABLE_INGESTION_SERVICE: ${ENABLE_INGESTION_SERVICE:-false}
       USE_ULTIMATE_TARA: ${USE_ULTIMATE_TARA:-false}
-      HIVEMIND_IN_VISUAL_COPILOT: ${HIVEMIND_IN_VISUAL_COPILOT:-true}
+      HIVEMIND_IN_VISUAL_COPILOT: ${HIVEMIND_IN_VISUAL_COPILOT:-false}
 
-      USE_NEW_DETECTIVE: "false"
-      USE_MISSION_BRAIN: "false"
-      USE_LIVE_GRAPH: "false"
-      USE_HIVE_INTERFACE: "false"
+      USE_NEW_DETECTIVE: ${USE_NEW_DETECTIVE:-true}
+      USE_MISSION_BRAIN: ${USE_MISSION_BRAIN:-true}
+      USE_LIVE_GRAPH: ${USE_LIVE_GRAPH:-true}
+      USE_HIVE_INTERFACE: ${USE_HIVE_INTERFACE:-true}
 
       DAYTONA_RAG_ENABLE_CACHE: "false"
       DAYTONA_RAG_CACHE_TTL: "0"
@@ -111,14 +111,14 @@ services:
 
       GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3}
       ENABLE_MICRO_CHUNKING: ${ENABLE_MICRO_CHUNKING:-false}
-      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-120}
-      OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-60}
-      CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-3}
+      CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-200}
+      OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-100}
+      CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-5}
       VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-850}
-      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-500}
-      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-1200}
-      PRE_SPEECH_PADDING_MS: ${PRE_SPEECH_PADDING_MS:-520}
-      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-1150}
+      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-400}
+      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-1500}
+      PRE_SPEECH_PADDING_MS: ${PRE_SPEECH_PADDING_MS:-600}
+      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-800}
       GROQ_LANGUAGE: ${GROQ_LANGUAGE:-de}
       GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate, summarize, paraphrase, or normalize it into English. Preserve names, brands, German compounds, umlauts, and Eszett correctly. Keep acronyms and product names as spoken. Do not spell words letter by letter unless the speaker explicitly spells them.}
 
