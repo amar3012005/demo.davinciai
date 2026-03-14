@@ -1,285 +1,321 @@
 """
-Context Architecture v7 — B&B. Brand Voice Agent
-Model: gpt-oss-20b / Qwen 3 32B fallback | TTS: Cartesia Sonic 3
+Context Architecture v7 — B&B. Brand Voice Agent (Qwen 3 32B / Groq)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DROP-IN REPLACEMENT. Same class, same assemble_prompt() signature.
 
-Changes in v7:
-  - Zone A stripped to persona + language + TTS rules + sales behaviour only
-  - Agency/BLAIQ knowledge: minimal inline hints, rest comes from HiveMind/Qdrant
-  - TTS-safe output rules: no caps, no symbols, protected word list preserved as-is
-  - Interruption handling: human-like recovery, not a hard new turn
-  - No email prompt — UI handles that post-call
-  - Token target: under 900 total per turn (baseline, no docs)
+WHAT CHANGED IN v6 (vs v5):
+  1. TARA now has deep agency knowledge baked in as colleague memory:
+     - Key people, location, clients, services, BLAIQ, differentiation
+  2. Strategic proactive questioning from turn 1 — no more passive openers.
+     TARA asks like a consultant, not like a receptionist.
+  3. Yes-ladder: small yeses → confirmed pain → shared vision → big yes (call/project)
+  4. B&B differentiation narrative: what sets them apart from competitors
+  5. BLAIQ: B&B's own AI platform — TARA knows it, can introduce it naturally
+  6. Brand terminology: TARA speaks "brand DNA", "employer brand", "change comms" etc.
+     fluently but never mechanically/repeatedly
+  7. Colleague energy: TARA is part of the team, not an external chatbot
+  8. Language detection, cache architecture, token budget unchanged from v5
+
+TOKEN BUDGET:
+  Zone A  STATIC  ~1,050 tok  Persona + agency knowledge + AIDA + rules
+  Zone B  STATIC  ~  320 tok  4 seed examples (proactive pattern)
+  Zone C  DYNAMIC ~  100 tok  history(4) + docs(2×900ch) + query
+  Zone D  DYNAMIC ~  0-150 tok skills/rules, omitted when empty
+  Total           ~1,470 tok baseline (Groq caches ~1,370 from turn 2)
 """
 
 import datetime
 import re
 from difflib import SequenceMatcher
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 _STATIC_PREFIX_CACHE: Optional[str] = None
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Protected words — written exactly as listed, never modified by TTS clean-up.
-# Add new entries here. Casing and punctuation are preserved verbatim.
+# Protected words — written EXACTLY as listed, never modified or uppercased.
+# Cartesia reads these correctly when casing is preserved as shown.
+# Add new entries here freely.
 # ─────────────────────────────────────────────────────────────────────────────
 PROTECTED_WORDS: List[str] = [
-    "Blaiq",          # spoken as one word by Cartesia — do NOT capitalise to BLAIQ
-    "B&B.",           # agency name with period — always written exactly like this
-    "bundb.de",       # domain — lowercase, read correctly by Cartesia
-    "Mensch",         # brand term — capitalised as German noun, fine for TTS
-    "Markenagentur",  # compound noun — fine as-is
-    "Positionierung",
-    "Tonalität",
-    "Employer Brand", # two words, both capitalised — reads naturally
-    "Brand Voice",
-    "Brand DNA",
-    "KI-Kollegin",    # hyphen compound — Cartesia reads correctly
-    "DSGVO",          # acronym — add to list means we write it as "Datenschutz-Grundverordnung"
-                      # in actual output instead. See tts_safe() below.
+    "Blaiq",            # one word, NOT "BLAIQ" — Cartesia reads BLAIQ letter by letter
+    "B&B.",             # agency name with period — always exactly like this
+    "bundb.de",         # domain — lowercase, reads naturally
 ]
 
-# Acronyms that Cartesia reads letter-by-letter — replace with spoken form in output.
-# Format: { "WRITTEN_FORM": "spoken replacement" }
+# Acronyms Cartesia reads letter-by-letter — expand to spoken German before sending to TTS.
+# Key = what the model might write, Value = what Cartesia should speak.
 TTS_EXPAND: Dict[str, str] = {
-    "BLAIQ":  "Blaiq",           # spoken as one word — lowercase b is key
-    "KI":     "Künstliche Intelligenz",  # only when standalone, not in compounds
-    "DSGVO":  "Datenschutz-Grundverordnung",
-    "UX":     "User Experience",
-    "UI":     "User Interface",
-    "CEO":    "Geschäftsführer",
-    "HR":     "Human Resources",
-    "USP":    "Alleinstellungsmerkmal",
-    "ROI":    "Return on Investment",
-    "FAQ":    "häufig gestellte Fragen",
-    "CTA":    "Handlungsaufruf",
+    "BLAIQ":   "Blaiq",
+    "KI":      "künstliche Intelligenz",
+    "DSGVO":   "Datenschutz-Grundverordnung",
+    "UX":      "User Experience",
+    "UI":      "User Interface",
+    "CEO":     "Geschäftsführer",
+    "HR":      "Human Resources",
+    "USP":     "Alleinstellungsmerkmal",
+    "ROI":     "Return on Investment",
+    "FAQ":     "häufig gestellte Fragen",
+    "CRM":     "Kundenmanagement-System",
+    "B2B":     "Business-to-Business",
+    "B2C":     "Business-to-Consumer",
 }
 
 
 def tts_safe(text: str) -> str:
     """
-    Post-process any model output before sending to Cartesia.
-    1. Expand acronyms that get read letter-by-letter.
-    2. Strip markdown symbols that break TTS rhythm.
-    3. Preserve protected words exactly.
-    Calleded by the caller layer — not inside the prompt itself.
+    Post-process model output before sending to Cartesia.
+    Call this in the response layer — not inside the prompt itself.
+
+    Steps:
+      1. Expand acronyms that Cartesia reads letter-by-letter.
+      2. Strip markdown/symbol noise that breaks TTS rhythm.
     """
     if not text:
         return text
-
-    # Expand acronyms (standalone only — not inside longer words)
     for acronym, spoken in TTS_EXPAND.items():
         text = re.sub(rf"\b{re.escape(acronym)}\b", spoken, text)
-
-    # Strip markdown/symbol noise
-    text = re.sub(r"[*_`#~]", "", text)        # markdown
-    text = re.sub(r"\[.*?\]\(.*?\)", "", text)  # links
-    text = re.sub(r"---+", "—", text)           # hr → em dash
-    text = re.sub(r"\s{2,}", " ", text)         # extra spaces
-
+    # Strip markdown
+    text = re.sub(r"[*_`#~]", "", text)
+    text = re.sub(r"\[.*?\]\(.*?\)", "", text)   # links
+    text = re.sub(r"\s{2,}", " ", text)               # extra spaces
     return text.strip()
+
 
 
 class ContextArchitect:
     """
-    Token-efficient prompt assembler for Tara — B&B. brand voice agent.
-    Public API: assemble_prompt(query, raw_query, retrieved_docs, history,
-                                hive_mind, user_profile, agent_skills, agent_rules)
+    Token-efficient, cache-optimised prompt assembler for TARA — B&B. brand agent.
+
+    v7 additions: deep agency knowledge, proactive strategic questioning,
+    yes-ladder conversion, BLAIQ product knowledge, colleague persona.
+
+    Public API (unchanged):
+      assemble_prompt(query, raw_query, retrieved_docs, history,
+                      hive_mind, user_profile, agent_skills, agent_rules)
     """
 
-    # ── Language detection ────────────────────────────────────────────────────
+    @staticmethod
+    def _escape(text: str) -> str:
+        if not text:
+            return ""
+        return (
+            str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
 
-    _EN_STOPWORDS = frozenset({
-        "the", "this", "that", "with", "have", "are", "were", "from", "they",
-        "what", "when", "where", "who", "will", "would", "could", "should",
-        "about", "your", "you", "and", "but", "for", "not", "can", "want",
-        "need", "help", "how", "just", "like", "get", "do", "does", "did",
-        "brand", "branding", "marketing", "agency", "services", "work", "team",
-        "more", "more", "learn", "find", "out", "tell", "me", "us", "we",
-        "my", "our", "its", "their", "also", "some", "any", "all", "been",
-        "let", "make", "take", "know", "think", "say", "see", "look",
-        "using", "into", "over", "than", "other", "which", "only", "even",
-        "really", "very", "much", "well", "yes", "no", "hi", "hello", "hey",
-    })
+    # ── Language: German is hardcoded default ────────────────────────────────
+    # Tara ALWAYS speaks German.
+    # Switch to English ONLY when user explicitly asks — "speak english",
+    # "auf Englisch bitte", "in english please" etc.
+    # English sentences from user (e.g. STT-translated German) do NOT trigger a switch.
 
     _EN_REQUEST_PHRASES = (
-        "speak english", "in english", "english please",
+        "speak english", "in english please", "english please",
         "reply in english", "respond in english", "switch to english",
+        "auf englisch bitte", "english only",
+        "can you speak english", "talk to me in english",
+        "bitte auf englisch", "bitte englisch",
+        "nur englisch", "only english",
     )
 
     @classmethod
-    def _is_english(cls, text: str) -> bool:
-        if not text or len(text.strip().split()) < 2:
-            return False
-        t = text.lower().strip()
-        if any(c in t for c in "äöüß"):
-            return False
-        if any(p in t for p in cls._EN_REQUEST_PHRASES):
-            return True
-        words = {w.strip(".,!?;:\"'()[]") for w in t.split()}
-        return len(words & cls._EN_STOPWORDS) >= 2
+    def _explicit_english_request(cls, text: str) -> bool:
+        t = (text or "").lower().strip()
+        return any(phrase in t for phrase in cls._EN_REQUEST_PHRASES)
 
     @classmethod
-    def _detect_lang(cls, query: str, history: List[Dict[str, Any]], user_profile: Dict[str, Any]) -> str:
-        """Default: German. Switch only on explicit English request or clearly English text."""
-        if any(p in (query or "").lower() for p in cls._EN_REQUEST_PHRASES):
+    def _detect_lang(cls, query: str, history: List[Dict], user_profile: Dict) -> str:
+        """
+        DEFAULT: German. Always.
+        Switch to English ONLY when user explicitly requests it — by phrase.
+        English text from user (even full English sentences) does NOT switch language.
+        Reason: STT often transcribes German speech as English words.
+        Once switched to English it stays English.
+        """
+        # Explicit request in current query
+        if cls._explicit_english_request(query):
             return "en"
+        # Already locked to English from a prior explicit request
+        if user_profile.get("lang") == "en":
+            return "en"
+        # Prior turn had explicit English request
         if history:
             for turn in history:
-                if turn.get("role") == "user" and any(
-                    p in turn.get("content", "").lower() for p in cls._EN_REQUEST_PHRASES
+                if turn.get("role") == "user" and cls._explicit_english_request(
+                    turn.get("content", "")
                 ):
                     return "en"
-        if cls._is_english(query):
-            return "en"
+        # Everything else → German
         return "de"
 
-    # ── Cache ─────────────────────────────────────────────────────────────────
 
     @classmethod
     def _get_static_prefix(cls) -> str:
+        """
+        Zone A + Zone B. Computed once, cached module-level.
+        Byte-identical on every call → Groq prefix cache hits from turn 2.
+        NEVER inject timestamps, user data, or session state here.
+        """
         global _STATIC_PREFIX_CACHE
         if _STATIC_PREFIX_CACHE is None:
             _STATIC_PREFIX_CACHE = cls._render_zone_a() + "\n" + cls._render_zone_b()
         return _STATIC_PREFIX_CACHE
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     @classmethod
     def assemble_prompt(
         cls,
         query: str,
         raw_query: str,
-        retrieved_docs: List[Dict[str, Any]],
-        history: List[Dict[str, Any]],
-        hive_mind: Dict[str, Any],
-        user_profile: Dict[str, Any],
+        retrieved_docs: List[Dict],
+        history: List[Dict],
+        hive_mind: Dict,
+        user_profile: Dict,
         agent_skills: Optional[List[str]] = None,
         agent_rules: Optional[List[str]] = None,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
     ) -> str:
+        """
+        Assemble one turn with explicit HiveMind memory sections.
+
+        Args:
+            query: User query text
+            raw_query: Raw user query (before STT normalization)
+            retrieved_docs: Retrieved documents from vector search
+            history: Conversation history (last 4-8 turns)
+            hive_mind: HiveMind insights (tenant_memory, knowledge_base)
+            user_profile: User profile metadata
+            agent_skills: Optional retrieved skills from Qdrant
+            agent_rules: Optional retrieved rules from Qdrant
+            interrupted_text: Assistant's response text that was interrupted (barge-in)
+            interruption_transcripts: User's interruption transcripts
+            interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
+        """
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
-            query, raw_query, retrieved_docs, history, user_profile, hive_mind
+            query, raw_query, retrieved_docs, history, user_profile, hive_mind,
+            interrupted_text=interrupted_text,
+            interruption_transcripts=interruption_transcripts,
+            interruption_type=interruption_type,
         )
-        zone_d = cls._render_zone_d(agent_skills or [], agent_rules or [], hive_mind or {})
+        zone_d = cls._render_zone_d(
+            skills=agent_skills or [],
+            rules=agent_rules or [],
+            hive_mind=hive_mind or {},
+        )
         return f"{static}\n{zone_c}{zone_d}"
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE A — Persona + Language + TTS Rules + Sales Behaviour  (STATIC)
+    # ZONE A — Static persona + agency knowledge + rules  (~1,050 tokens)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
     def _render_zone_a(cls) -> str:
         return """<sys>
 
-## Wer du bist
+## Identität
+Tara — Mitarbeiterin bei B&B., einer Markenagentur in Hannover.
+Nicht Assistentin. Nicht Chatbot. Strategische Gesprächspartnerin mit echtem Interesse.
+Formel: Mensch mal Maschine gleich Marke.
 
-Du bist Tara — Gesprächspartnerin bei B&B., einer Markenagentur in Hannover.
-Keine Assistentin. Keine FAQ-Maschine. Eine Gesprächsführerin mit echtem Interesse.
-Du bist neugierig, direkt, warm — und du übernimmst die Führung.
-Du kennst die Agentur von innen: ihre Haltung, ihre Arbeit, ihren Blick auf Marken.
-Du lässt dich nicht aus der Ruhe bringen. Du hörst zu, bevor du sprichst.
-Motto: Mensch mal Maschine gleich Marke.
+## Charakter und Haltung
+Tara kennt die Agentur von innen. Sie spricht wie eine Kollegin, nicht wie ein Prospekt.
+Warm, direkt, neugierig — und sie übernimmt die Führung, ohne zu drängen.
+Sie liest Menschen, bevor sie berät. Vertrauen entsteht in den ersten Sekunden — durch echtes Interesse, nicht durch Kompetenzdemonstration.
+Sie spiegelt den Gesprächspartner: wer schnell und direkt ist, bekommt klare Antworten; wer zögerlich ist, bekommt Geduld und kleine Schritte.
+Sie hört mehr als sie spricht — Verhältnis etwa vierzig zu sechzig.
+Sie fragt eine Frage pro Antwort. Nie zwei. Nie eine Liste.
 
-## Wie du sprichst — Sprache und Ton
+## Sprache — immer Deutsch
+Tara antwortet immer auf Deutsch.
+Auch wenn jemand auf Englisch schreibt, bleibt Tara auf Deutsch — es sei denn, die Person sagt ausdrücklich: auf Englisch bitte, oder speak English, oder ähnliches.
+Anrede: Sie — außer die Person signalisiert du, dann spiegeln.
+Kein Marketingdeutsch. Kein Agenturjargon. Echte Sprache.
 
-Sprache: immer Deutsch, es sei denn die Person wechselt klar ins Englische.
-Anrede: "Sie" — außer die Person signalisiert "du", dann spiegelst du es.
-Ton: direkt, menschlich, keine Marketingfloskeln.
-Tempo: kurze Sätze. Pausen wirken. Nicht jede Stille füllen.
-Fragen: eine pro Antwort — nie zwei auf einmal.
+## Sprachqualität für Sprachausgabe
+Dies ist ein Telefongespräch. Jede Antwort wird von einer Stimme vorgelesen.
+Schreib so wie du sprechen würdest — lies jeden Satz laut vor, bevor du ihn schickst.
 Erster Satz: maximal zehn Wörter.
+Jeder weitere Satz: maximal fünfzehn Wörter.
+Gesamt: zwei bis vier Sätze pro Antwort. Manchmal reicht ein Satz.
+Verboten: Aufzählungen, Gedankenstriche als Listenzeichen, Schrägstriche als Trenner, Sternchen, Klammern, Emojis, Markdown jeder Art.
+Erlaubt: Komma, Punkt, Fragezeichen, Ausrufezeichen, ein einzelner Gedankenstrich für eine Sprechpause.
+Verboten: Abkürzungen in Großbuchstaben — schreib sie aus.
+Beispiel: nicht KI sondern künstliche Intelligenz, nicht DSGVO sondern Datenschutz-Grundverordnung.
+Geschützte Wörter — genau so schreiben, nie verändern: Blaiq, B&B., bundb.de
 
-## Sprachregeln für die Sprachausgabe
+## Gesprächsstrategie
+Tara wartet nicht. Sie führt ab dem ersten Satz.
+Kein Einstieg mit: Was kann ich für Sie tun? Das ist Rezeptionistin.
+Stattdessen: eine Beobachtung, ein Reframe, eine Frage die etwas aufdeckt.
+Die ersten fünfzehn Sekunden entscheiden — Neugier wecken, nicht vorstellen.
 
-Dies ist ein Telefongespräch. Deine Antwort wird von einer Stimme vorgelesen.
-Deshalb gelten diese Regeln ohne Ausnahme:
+Phasen:
+Aufmerksamkeit: Muster unterbrechen. Eine strategische Frage die echte Herausforderungen sichtbar macht.
+Interesse: erst zuhören, dann validieren, dann tiefer fragen. Tempo und Energie des Gegenübers spiegeln.
+Wunsch: zusammenfassen was gehört wurde. Ein Bild malen: wie sieht es aus wenn das Problem gelöst ist?
+Schritt: eine konkrete kleine Einladung. Kein Pitch. Kein Druck. Eine natürliche nächste Bewegung.
 
-Verboten: Großbuchstaben-Abkürzungen wie KI, HR, USP — schreibe sie aus.
-Verboten: Aufzählungen, Gedankenstriche als Listenzeichen, Schrägstriche, Sternchen.
-Verboten: Klammern, eckige Klammern, Emojis, Markdown-Formatierung jeder Art.
-Verboten: Mehr als ein Satz mit mehr als fünfzehn Wörtern.
-Erlaubt: Komma, Punkt, Fragezeichen, Ausrufezeichen, ein Gedankenstrich für eine natürliche Sprechpause.
-
-Schreibe so, wie du in einem echten Gespräch sprechen würdest.
-Ein Tipp: lies deinen Satz laut vor — klingt er natürlich? Dann ist er gut.
-
-Besondere Wörter, die genau so geschrieben bleiben wie hier angegeben:
-Blaiq, B&B., Mensch, Markenagentur, Employer Brand, Brand Voice, Brand DNA
-
-## Gesprächsstrategie — wie du Vertrauen und Interesse aufbaust
-
-Du wartest nicht. Du führst.
-Erster Zug: nicht vorstellen, sondern eine echte Frage stellen.
-Nicht: "Was kann ich für Sie tun?" — das ist Rezeptionistin.
-Besser: eine Beobachtung oder ein Reframe, der Neugier weckt.
-
-Phasen des Gesprächs:
-
-Aufmerksamkeit — Eröffnung mit einer strategischen Frage, die etwas aufdeckt.
-Interesse — erst zuhören, dann validieren, dann tiefer fragen.
-Wunsch — zusammenfassen was gehört wurde, ein Bild malen: wie sieht es aus wenn es gelöst ist?
-Schritt — eine konkrete, kleine Einladung. Kein Pitch. Kein Druck.
-
-Kleine Zustimmungen sammeln:
-Erst: "Das klingt als wäre das eigentliche Problem — liegt das in der Nähe?"
-Dann: "Und das kostet Sie wahrscheinlich auch Zeit oder Energie — stimmt das?"
-Dann: "Wenn das in sechs Monaten gelöst wäre — was würde sich verändern?"
-Erst dann eine Einladung zu einem Gespräch oder einem Beispiel.
+Kleine Zustimmungen sammeln — in dieser Reihenfolge:
+Erst bestätigen lassen: Das klingt als wäre das eigentliche Problem X — liegt das in der Nähe?
+Dann den Preis benennen: Das kostet Sie wahrscheinlich auch Zeit oder Energie — stimmt das?
+Dann das Ziel malen: Wenn das in sechs Monaten gelöst wäre — was würde sich für Sie verändern?
+Erst danach eine Einladung zu einem Gespräch oder einem Beispiel.
 
 Nach zwei bis drei kurzen Antworten: zusammenfassen, nicht weiter bohren.
-Zeige, dass du zugehört hast. Das ist der stärkste Zug.
+Zeige dass du zugehört hast — das ist der stärkste Zug im Gespräch.
+Offene Schleifen wirken: Ein Muster das wir bei fast allen in dieser Situation sehen... — kurze Pause.
 
-Zu Blaiq und B&B: erwähne sie nur wenn sie echten Mehrwert für das Gespräch bringen.
-Wenn jemand über Zeitdruck bei Content spricht, passt Blaiq. Wenn nicht, nicht.
-Details kommen aus dem Wissensspeicher — du musst sie nicht auswendig kennen.
+## Blaiq und B&B.
+Details kommen aus dem Wissensspeicher — nicht auswendig lernen.
+Blaiq nur erwähnen wenn Content, Zeit, Effizienz oder künstliche Intelligenz Thema werden.
+B&B. nur nennen wenn es dem Gespräch echten Mehrwert bringt.
+Nie: Ich bin Tara von B&B. als Einstieg. Nie selbst vorstellen außer auf Nachfrage.
 
-## Umgang mit Unterbrechungen
+## Unterbrechungen
+Gespräche werden unterbrochen. Das ist normal. Reagiere wie ein Mensch.
+Kurzes Signal wie hmm oder okay: ignorieren, Gedanken weiterführen.
+Kurze Unterbrechung: Faden aufnehmen — Sie meinten vorhin...
+Längere Unterbrechung mit neuem Gedanken: kurze Brücke — Guter Punkt, kurz dazu...
+Nie: Wie ich bereits sagte. Nie neu anfangen. Direkt weiter im Gespräch.
 
-Gespräche werden unterbrochen. Das ist normal. Reagiere wie ein Mensch:
-
-Kurzes Signal wie "Hmm" oder "Ähm" oder "Okay" → ignoriere es, mach weiter.
-Kurze Unterbrechung mit Wort oder Halbsatz → nimm den Faden auf: "Sie meinten vorhin..."
-Längere Unterbrechung mit neuem Gedanken → kurze Brücke bauen: "Guter Punkt, kurz dazu..."
-War die Unterbrechung unklar → sag: "Ich glaube ich hab den Faden kurz verloren — worum ging es Ihnen gerade?"
-
-Niemals: "Wie ich bereits sagte..." oder neu von vorne anfangen.
-Immer: direkt weiter im Gesprächsfaden. Kurz, menschlich, ohne Drama.
-
-## Was du nicht tust
-
-Keine E-Mail-Adresse erfragen — das übernimmt das System nach dem Gespräch.
-Nicht mehrere Fragen auf einmal stellen.
-Nicht dieselbe Frage zweimal stellen.
-Nicht "Super!", "Absolut!", "Natürlich!" als Gesprächseinstieg.
-Nicht mit "Ich bin Tara" oder "Ich bin eine KI" einsteigen.
-Nicht über B&B. sprechen wenn die Person etwas anderes braucht.
+## Keine E-Mail erfragen
+Tara fragt nie nach einer E-Mail-Adresse. Das übernimmt das System nach dem Gespräch.
 
 </sys>"""
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE B — 3 Pattern Seeds  (STATIC)
+    # ZONE B — 4 Seed Examples  (~320 tokens, STATIC)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
     def _render_zone_b(cls) -> str:
         return """<examples>
 
-[Erstkontakt — Führung übernehmen, keine Vorstellung]
+[Erstkontakt — Führung übernehmen, Muster unterbrechen]
 U: hallo
 T: Hallo, schön dass Sie da sind. Markenarbeit hat immer einen Auslöser — was hat Sie heute hierher gebracht?
 
-[Zustimmungsleiter — validieren, nicht verkaufen]
+[Zustimmungsleiter — validieren, Schmerz bestätigen]
 U: wir verlieren Bewerber an modernere Arbeitgeber
-T: Das klingt, als wäre das eigentliche Problem nicht der Markt — sondern dass Ihre echte Kultur nach außen noch nicht sichtbar ist. Liegt das in der Nähe?
+T: Das klingt, als wäre das eigentliche Problem nicht der Markt — sondern dass Ihre echte Unternehmenskultur nach außen noch nicht sichtbar ist. Liegt das in der Nähe?
 
-[Blaiq — nur wenn Zeitdruck oder Content-Thema auftaucht]
+[Blaiq — nur wenn Content oder Zeit Thema wird]
 U: wir haben kaum Zeit für Content
-T: Genau dafür haben wir Blaiq gebaut — eine Plattform, die Content in Ihrer eigenen Markensprache erstellt. Kunden sparen damit bis zu fünfzehn Stunden pro Woche. Was produziert Ihr Team aktuell am meisten?
+T: Genau dafür haben wir Blaiq gebaut — eine Plattform die Content in Ihrer eigenen Markensprache erstellt. Kunden sparen damit bis zu fünfzehn Stunden pro Woche. Was produziert Ihr Team aktuell am meisten?
+
+[Englisch — nur auf ausdrückliche Bitte, sonst Deutsch]
+U: speak english please
+T: Of course. What's the biggest challenge your brand is facing right now?
 
 </examples>"""
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE C — Dynamic per turn  (never cached)
+    # ZONE C — Dynamic per turn  (~100 tokens baseline)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
@@ -287,203 +323,213 @@ T: Genau dafür haben wir Blaiq gebaut — eine Plattform, die Content in Ihrer 
         cls,
         query: str,
         raw_query: str,
-        docs: List[Dict[str, Any]],
-        history: List[Dict[str, Any]],
-        user_profile: Dict[str, Any],
-        hive_mind: Dict[str, Any],
+        docs: List[Dict],
+        history: List[Dict],
+        user_profile: Dict,
+        hive_mind: Dict,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
     ) -> str:
+        """
+        Zone C: per-turn dynamic content. Never cached.
+        Optimisations: 4-turn history, 2 docs × 900 chars, inline profile,
+        single-line lang directive last (highest attention weight).
+
+        Args:
+            query: User query text
+            raw_query: Raw user query
+            docs: Retrieved documents
+            history: Conversation history
+            user_profile: User profile
+            hive_mind: HiveMind insights
+            interrupted_text: Assistant's interrupted response text
+            interruption_transcripts: User's interruption transcripts
+            interruption_type: Type of interruption
+        """
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         lang = cls._detect_lang(query, history, user_profile)
 
-        # Compact history — 4 turns, U/T prefix only
+        profile_str = (
+            " ".join(f"{cls._escape(k)}={cls._escape(str(v))}"
+                     for k, v in user_profile.items())
+            if user_profile else "new"
+        )
+
         h_lines = ""
         if history:
-            for turn in history[-4:]:  # pyre-ignore[67]
+            for turn in history[-4:]:
                 role = "U" if turn.get("role") == "user" else "T"
                 h_lines += f"{role}: {cls._escape(turn.get('content', ''))}\n"
         else:
-            h_lines = "[erstes Gespräch]\n"
+            h_lines = "[turn 1]\n"
 
-        # Interruption detection
-        interruption_hint = cls._detect_interruption(raw_query, history)
-
-        # Entity memory (canonical brand/company name)
         entity_memory = cls._build_entity_memory(query, raw_query, history)
 
-        # Retrieved docs — top 2, 800 chars each
         kb = ""
         if docs:
-            top = sorted(docs, key=lambda d: float(d.get("score", d.get("relevance", 0))), reverse=True)[:2]  # pyre-ignore[67]
+            top = sorted(
+                docs,
+                key=lambda d: float(d.get("score", d.get("relevance", 0))),
+                reverse=True
+            )[:2]
             for d in top:
                 src = cls._escape(d.get("metadata", {}).get("source", "kb"))
-                txt = cls._escape(d.get("text", d.get("content", "")))[:800]  # pyre-ignore[6]
+                txt = cls._escape(d.get("text", d.get("content", "")))[:900]
                 kb += f"[{src}] {txt}\n"
 
-        # HiveMind knowledge
-        hm_insights = ((hive_mind or {}).get("insights") or {})  # pyre-ignore[6]
-        hm_text = ""
-        for key in ("tenant_memory", "knowledge_base"):  # pyre-ignore[6]
-            val = str(hm_insights.get(key) or "").strip()
-            if val:
-                hm_text += val[:1000] + "\n"  # pyre-ignore[6]
+        hivemind_kb = ""
+        hivemind_insights = ((hive_mind or {}).get("insights") or {})
+        tenant_memory = hivemind_insights.get("tenant_memory") or ""
+        knowledge_base = hivemind_insights.get("knowledge_base") or ""
+        if tenant_memory:
+            hivemind_kb += cls._escape(str(tenant_memory))[:1200]
+        if knowledge_base:
+            if hivemind_kb:
+                hivemind_kb += "\n"
+            hivemind_kb += cls._escape(str(knowledge_base))[:1200]
 
-        # Language directive
         if lang == "en":
-            lang_line = "Sprache: Englisch. Jedes Wort Englisch. Kein deutsches Wort."
+            lang_line = (
+                "Sprache: Englisch. Der Nutzer hat ausdrücklich Englisch angefragt. "
+                "Jedes Wort der Antwort auf Englisch. Kein einziges deutsches Wort."
+            )
         else:
-            lang_line = "Sprache: Deutsch. Kein Englisch außer wenn die Person klar wechselt."
-
-        # Assemble
-        parts = [f'<ctx t="{current_time}" lang="{lang}">']
-        parts.append(f"<h>\n{h_lines.strip()}\n</h>")  # pyre-ignore[6]
-        if interruption_hint:
-            parts.append(f"<interruption>{cls._escape(interruption_hint)}</interruption>")
-        if entity_memory:
-            parts.append(f"<entity>{cls._escape(entity_memory)}</entity>")
-        if kb:
-            parts.append(f"<kb>\n{kb.strip()}\n</kb>")  # pyre-ignore[6]
-        if hm_text.strip():  # pyre-ignore[6]
-            parts.append(f"<hm>\n{cls._escape(hm_text.strip())}\n</hm>")
-        parts.append(f"<q>{cls._escape(query)}</q>")
-        parts.append(lang_line)
-        parts.append(
-            "Regeln: kein Markdown, keine Listen, keine Abkürzungen in Großbuchstaben, "
-            "maximal vier Sätze, erster Satz maximal zehn Wörter, eine Frage pro Antwort. "
-            "Schreib so dass eine deutsche Stimme es flüssig vorlesen kann. Jetzt antworten."
-        )
-        parts.append("</ctx>")
-        return "\n".join(parts) + "\n"
-
-    # ── Interruption detection ────────────────────────────────────────────────
-
-    # Filler signals — too short or too vague to be a real new turn
-    _FILLER_SIGNALS = frozenset({
-        "hmm", "hm", "ähm", "äh", "uh", "uhm", "okay", "ok", "ja", "nein",
-        "gut", "ah", "oh", "ach so", "alles klar", "verstehe", "genau",
-        "moment", "kurz", "warte", "warten sie", "entschuldigung",
-    })
-
-    @classmethod
-    def _detect_interruption(cls, raw_query: str, history: List[Dict[str, Any]]) -> str:
-        """
-        Returns a hint string when the current query looks like an interruption.
-        Empty string means: treat as a normal new turn.
-
-        Three tiers:
-          filler   — ignore and continue (Hmm, Ähm, Ok...)
-          soft     — short interjection, weave into thread
-          hard     — new thought mid-sentence, build a bridge
-        """
-        if not raw_query or not history:
-            return ""
-
-        q = raw_query.strip().lower().rstrip(".,!?")
-        words = q.split()
-
-        # Check last assistant turn ended mid-thought (no ending punctuation = was cut off)
-        last_tara = ""
-        for turn in reversed(history[-6:]):  # pyre-ignore[67]
-            if turn.get("role") == "assistant":
-                last_tara = turn.get("content", "").strip()
-                break
-
-        was_cut_off = bool(last_tara) and not last_tara[-1] in ".!?)"
-
-        if q in cls._FILLER_SIGNALS or (len(words) == 1 and q in cls._FILLER_SIGNALS):
-            return "filler: ignore this input, continue your previous thought naturally without saying 'wie ich sagte'."
-
-        if len(words) <= 3:
-            if was_cut_off:
-                return (
-                    f"soft_interruption: the person said '{raw_query}' while you were mid-sentence. "
-                    "Acknowledge briefly in one word and continue your thought from where you left off."
-                )
-            return ""  # short but not a clear interruption — treat normally
-
-        # Longer input while Tara was cut off = hard interruption
-        if was_cut_off:
-            return (
-                f"hard_interruption: you were cut off mid-sentence, then the person said: '{raw_query}'. "
-                "Build a short bridge: pick up their new point, then finish what you were saying if it still matters. "
-                "Sound like a human who got briefly interrupted, not like a system that restarted."
+            lang_line = (
+                "Sprache: Deutsch. Immer Deutsch — auch wenn der Nutzer auf Englisch schreibt. "
+                "Nur wechseln wenn der Nutzer ausdrücklich sagt: speak English oder auf Englisch bitte. "
+                "Englischer Text des Nutzers bedeutet keinen Sprachwechsel."
             )
 
-        return ""
+        kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
+        hivemind_block = f"<hm>\n{hivemind_kb.strip()}\n</hm>\n" if hivemind_kb.strip() else ""
+        entity_block = f"<entity_memory>\n{entity_memory}\n</entity_memory>\n" if entity_memory else ""
 
-    # ── Entity memory ─────────────────────────────────────────────────────────
+        # Build interruption context block for barge-in handling
+        interruption_block = ""
+        if interrupted_text and interruption_transcripts:
+            transcripts_str = " | ".join(cls._escape(t) for t in interruption_transcripts)
+            int_type = cls._escape(interruption_type or "unknown")
+            interruption_block = f"""<interruption>
+<was_interrupted>true</was_interrupted>
+<interrupted_response>{cls._escape(interrupted_text)}</interrupted_response>
+<interruption_transcripts>{transcripts_str}</interruption_transcripts>
+<interruption_type>{int_type}</interruption_type>
+<instruction>Der Nutzer hat Ihre vorherige Antwort unterbrochen.
+Wenn interruption_type="addon", kombinieren Sie den Kontext und fahren Sie fort.
+Antworten Sie natürlich, als ob Sie nie unterbrochen wurden, aber berücksichtigen Sie die Unterbrechung.</instruction>
+</interruption>
+"""
+
+        return (
+            f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
+            f"<h>\n{h_lines.strip()}\n</h>\n"
+            f"{entity_block}"
+            f"{kb_block}"
+            f"{hivemind_block}"
+            f"{interruption_block}"
+            f"<original_query>{cls._escape(raw_query)}</original_query>\n"
+            f"<translated_query_for_search>{cls._escape(query)}</translated_query_for_search>\n"
+            f"Sprache: Immer auf Deutsch antworten, basierend auf der original_query.\n"
+            f"Wichtig: Nutze die original_query (deutsch) als Grundlage für die Antwort, nicht die translated_query_for_search (englisch).\n"
+            f"{lang_line}\n"
+            f"Use concrete HiveMind memory when present before relying on generic agency knowledge.\n"
+            f"Entity continuity rule: if the user already established a person, company, brand, or project name earlier in the conversation, keep using that canonical name. Treat later near-miss spellings or STT variants as the same entity unless the user clearly corrects the name.\n"
+            f"TTS format rule: output only plain German sentences that Cartesia can read smoothly. No markdown, no lists, no symbols-heavy formatting, no slash-separated phrases. Keep it to 2-4 short sentences and at most 1 question.\n"
+            f"Run checklist. Plain text. 1 question max. Yes-ladder: small yes → big yes.\n"
+            f"</ctx>\n"
+        )
 
     @staticmethod
     def _normalize_entity(entity: str) -> str:
-        return re.sub(r"\s+", " ", (entity or "").strip(" .,!?:;\"'()[]{}"))
+        text = (entity or "").strip(" .,!?:;\"'()[]{}")
+        text = re.sub(r"\s+", " ", text)
+        return text
 
     @classmethod
     def _extract_named_entity_signals(cls, text: str) -> List[str]:
-        if not text:
+        sample = (text or "").strip()
+        if not sample:
             return []
+
         patterns = [
-            r"(?:my|our|meine?r?|unser[e]?)\s+(?:company|brand|agency|firma|marke|agentur)\s+(?:is|called|heißt|ist)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'\-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'\-]+){0,3})",
-            r"(?:i have|ich habe)\s+(?:a|an|eine[n]?)?\s*(?:company|brand|firma|marke)\s+(?:called|namens)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'\-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'\-]+){0,3})",
+            r"(?:my|our|meine|meiner|mein)\s+(?:company|brand|agency|business|firm|gallery|studio|firma|marke|agentur)\s+(?:is|called|named|heißt)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+){0,3})",
+            r"(?:i have|ich habe)\s+(?:a|an|eine|einen)?\s*(?:company|brand|agency|business|gallery|studio|firma|marke|agentur)\s+(?:called|named|namens)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+){0,3})",
+            r"^([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.'-]+){0,3})\s+(?:is|ist)\s+(?:about|an|a|ein|eine)",
         ]
+
         found: List[str] = []
-        for pat in patterns:
-            for m in re.findall(pat, text, re.IGNORECASE):
-                e = cls._normalize_entity(m)
-                if e and e not in found:
-                    found.append(e)
+        for pattern in patterns:
+            for match in re.findall(pattern, sample, flags=re.IGNORECASE):
+                entity = cls._normalize_entity(match)
+                if entity and entity not in found:
+                    found.append(entity)
         return found
 
     @classmethod
-    def _build_entity_memory(cls, query: str, raw_query: str, history: List[Dict[str, Any]]) -> str:
+    def _build_entity_memory(cls, query: str, raw_query: str, history: List[Dict]) -> str:
         user_turns = [
-            str(t.get("content", "")).strip()
-            for t in history[-8:]  # pyre-ignore[67]
-            if t.get("role") == "user" and t.get("content", "").strip()
+            str(turn.get("content", "")).strip()
+            for turn in history[-8:]
+            if str(turn.get("role", "")).strip() == "user" and str(turn.get("content", "")).strip()
         ]
-        entities: List[str] = []
-        for txt in user_turns:
-            for e in cls._extract_named_entity_signals(txt):
-                if e not in entities:
-                    entities.append(e)
-        if not entities:
+
+        explicit_entities: List[str] = []
+        for turn_text in user_turns:
+            for entity in cls._extract_named_entity_signals(turn_text):
+                if entity not in explicit_entities:
+                    explicit_entities.append(entity)
+
+        if not explicit_entities:
             return ""
-        canonical = entities[0]
-        variants: List[str] = []
-        for txt in user_turns + [str(query), str(raw_query)]:
-            for e in cls._extract_named_entity_signals(txt):
-                n = cls._normalize_entity(e)
-                if not n or n == canonical or n in variants:
+
+        canonical = explicit_entities[0]
+        variant_candidates: List[str] = []
+        recent_texts = user_turns + [str(query or "").strip(), str(raw_query or "").strip()]
+
+        for text in recent_texts:
+            for entity in cls._extract_named_entity_signals(text):
+                normalized = cls._normalize_entity(entity)
+                if not normalized or normalized == canonical or normalized in variant_candidates:
                     continue
-                if SequenceMatcher(None, canonical.lower(), n.lower()).ratio() >= 0.45:
-                    variants.append(n)
-        result = f"canonical_name={canonical}"
-        if variants:
-            result += " | stt_variants=" + " | ".join(variants[:3])  # pyre-ignore[67]
-        return result
+                similarity = SequenceMatcher(None, canonical.lower(), normalized.lower()).ratio()
+                c_split = canonical.lower().split()
+                n_split = normalized.lower().split()
+                if similarity >= 0.45 or (c_split and n_split and c_split[0][:3] == n_split[0][:3]):
+                    variant_candidates.append(normalized)
+
+        lines = [
+            f"canonical_company_or_brand={cls._escape(canonical)}",
+            "If later turns contain a phonetically similar or slightly different company/brand name, assume it refers to the same canonical entity unless the user explicitly says the name changed or corrects it."
+        ]
+        if variant_candidates:
+            lines.append("possible_stt_variants=" + " | ".join(cls._escape(v) for v in variant_candidates[:4]))
+        return "\n".join(lines)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ZONE D — Qdrant skills + rules + HiveMind  (0 tokens when empty)
+    # ZONE D — Dynamic skills + rules  (0 tokens when empty)
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
-    def _render_zone_d(cls, skills: List[str], rules: List[str], hive_mind: Dict[str, Any]) -> str:
-        hm = ((hive_mind or {}).get("insights") or {})
-        tenant = str(hm.get("tenant_memory") or "").strip()
-        kb     = str(hm.get("knowledge_base") or "").strip()
-        if not skills and not rules and not tenant and not kb:
+    def _render_zone_d(cls, skills: List[str], rules: List[str], hive_mind: Dict) -> str:
+        """
+        Qdrant-retrieved skills, rules, case memory and knowledge.
+        Omitted entirely when empty — zero tokens, zero cost.
+        Priority: rules > case_memory > knowledge > skills > default.
+        """
+        hivemind_insights = ((hive_mind or {}).get("insights") or {})
+        tenant_memory = str(hivemind_insights.get("tenant_memory") or "").strip()
+        knowledge_base = str(hivemind_insights.get("knowledge_base") or "").strip()
+
+        if not skills and not rules and not tenant_memory and not knowledge_base:
             return ""
         parts = []
         if rules:
             parts.append("rules[HIGH]: " + " | ".join(cls._escape(r) for r in rules))
-        if tenant:
-            parts.append("memory: " + cls._escape(tenant[:1400]))  # pyre-ignore[6]
-        if kb:
-            parts.append("kb: " + cls._escape(kb[:1400]))  # pyre-ignore[6]
+        if tenant_memory:
+            parts.append("case_memory[HIGH]: " + cls._escape(tenant_memory[:1600]))
+        if knowledge_base:
+            parts.append("knowledge_base: " + cls._escape(knowledge_base[:1600]))
         if skills:
             parts.append("skills: " + " | ".join(cls._escape(s) for s in skills))
-        return "<g>\n" + "\n".join(parts) + "\nPriority: rules > memory > kb > skills\n</g>\n"
-
-    @staticmethod
-    def _escape(text: str) -> str:
-        if not text:
-            return ""
-        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return "<g>\n" + "\n".join(parts) + "\nPriority: rules > case_memory > knowledge > skills > default\n</g>\n"

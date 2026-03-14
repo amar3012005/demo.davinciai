@@ -185,6 +185,8 @@ class OrchestratorSession:
     current_response_text: str = ""  # Accumulates current assistant reply so interrupted turns keep context
     interrupted_response_text: str = ""  # Used to resume TTS if barge-in turns out to be noise
     interrupted_response_language: str = "de"
+    interruption_transcripts: List[str] = field(default_factory=list)  # Collected transcripts during interruption
+    interruption_type: Optional[str] = None  # Classified interruption type from LLM
 
     # Host-based configuration overrides
     agent_name: str = "agent"
@@ -249,17 +251,16 @@ class OrchestratorWSHandler:
         logger.info(
             "✅ OrchestratorWSHandler initialized "
             f"(Stream Out: {self.config.languages.stream_out}, "
-            f"BargeIn: {self.config.session.bargin_feature}, "
-            f"IgnoreSTTWhileSpeaking: {self.config.session.ignore_stt_while_speaking})"
+            f"BargeIn: {self.config.session.bargin_feature})"
         )
 
     def _is_bargin_enabled(self) -> bool:
-        """Feature gate for barge-in behavior."""
-        return bool(getattr(self.config.session, "bargin_feature", False))
+        """Feature gate for barge-in behavior.
 
-    def _should_ignore_stt_while_speaking(self) -> bool:
-        """Feature gate for suppressing inbound user audio/STT while agent audio is active."""
-        return bool(getattr(self.config.session, "ignore_stt_while_speaking", True))
+        When enabled, user speech can interrupt agent speaking (barge-in).
+        When disabled, STT transcripts are ignored while agent is speaking.
+        """
+        return bool(getattr(self.config.session, "bargin_feature", False))
 
     async def shutdown(self):
         """
@@ -1068,10 +1069,11 @@ class OrchestratorWSHandler:
             return
         
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING and self._should_ignore_stt_while_speaking() and not session.barge_in_pending:
+        # When barge-in is disabled, ignore audio chunks while SPEAKING
+        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled() and not session.barge_in_pending:
             logger.debug(
                 f"[{session.session_id}] ⏸️ Ignoring audio chunk during SPEAKING "
-                f"(IGNORE_STT_WHILE_SPEAKING={self._should_ignore_stt_while_speaking()})"
+                f"(BARGIN_FEATURE={self._is_bargin_enabled()})"
             )
             return
         
@@ -1106,10 +1108,11 @@ class OrchestratorWSHandler:
     async def _handle_binary_audio(self, session: OrchestratorSession, audio_bytes: bytes):
         """Handle raw binary audio data - ALWAYS forward to STT regardless of state"""
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING and self._should_ignore_stt_while_speaking() and not session.barge_in_pending:
+        # When barge-in is disabled, ignore binary audio while SPEAKING
+        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled() and not session.barge_in_pending:
             logger.debug(
                 f"[{session.session_id}] ⏸️ Ignoring binary audio during SPEAKING "
-                f"(IGNORE_STT_WHILE_SPEAKING={self._should_ignore_stt_while_speaking()})"
+                f"(BARGIN_FEATURE={self._is_bargin_enabled()})"
             )
             return
         
@@ -1326,10 +1329,11 @@ class OrchestratorWSHandler:
         if session.is_closed:
             return
         state_mgr = session.state_manager
-        if state_mgr.state == State.SPEAKING and self._should_ignore_stt_while_speaking() and not session.barge_in_pending:
+        # When barge-in is disabled, ignore STT results while SPEAKING
+        if state_mgr.state == State.SPEAKING and not self._is_bargin_enabled() and not session.barge_in_pending:
             logger.debug(
                 f"[{session.session_id}] ⏸️ Ignoring STT result during SPEAKING "
-                f"(IGNORE_STT_WHILE_SPEAKING={self._should_ignore_stt_while_speaking()})"
+                f"(BARGIN_FEATURE={self._is_bargin_enabled()})"
             )
             return
 
@@ -1415,7 +1419,18 @@ class OrchestratorWSHandler:
             if is_valid:
                 logger.info(f"[{session.session_id}] 🛑 VALID barge-in ({'FINAL' if is_final else 'Fragment'}): '{text}' (nsp={no_speech_prob})")
                 session.barge_in_pending = False
+
+                # Collect interruption transcript for LLM validation
+                if not session.interruption_transcripts:
+                    session.interruption_transcripts = []
+                session.interruption_transcripts.append(text)
+
                 await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_validated"})
+
+                # Call LLM to classify interruption type (async, non-blocking)
+                if session.interrupted_response_text and session.interruption_transcripts:
+                    asyncio.create_task(self._classify_interruption(session))
+
                 # After interrupt, continue to process the final transcript in LISTENING state
                 # but return here if it was a fragment to avoid duplicate processing later
                 if not is_final:
@@ -2364,6 +2379,15 @@ class OrchestratorWSHandler:
             # Get form data from history manager
             form_data = session.history_manager.form_data if session.history_manager.form_data else None
 
+            # Check for interruption context (barge-in handling)
+            interrupted_text = session.interrupted_response_text if session.interrupted_response_text else None
+            interruption_transcripts = session.interruption_transcripts if session.interruption_transcripts else None
+            interruption_type = session.interruption_type if session.interruption_type else None
+
+            # Log interruption context if present
+            if interrupted_text:
+                logger.info(f"[{session.session_id}] 🔄 Processing with interruption context: type={interruption_type}, transcripts={len(interruption_transcripts or [])}")
+
             # Stream from pipeline and forward to TTS (STAY IN THINKING STATE)
             # Use output_language (which respects session.stream_out_override) for RAG response language
             async for token_data in self.pipeline.process_query(
@@ -2375,7 +2399,10 @@ class OrchestratorWSHandler:
                 history_context=history_context,
                 form_data=form_data,
                 rag_url=session.rag_url,
-                tenant_id=session.tenant_id
+                tenant_id=session.tenant_id,
+                interrupted_text=interrupted_text,
+                interruption_transcripts=interruption_transcripts,
+                interruption_type=interruption_type,
             ):
                 # Check if session is closed (client disconnected)
                 if session.is_closed:
@@ -2486,6 +2513,9 @@ class OrchestratorWSHandler:
                 })
                 session.current_response_text = ""
                 session.interrupted_response_text = ""
+                # Clear interruption context after processing
+                session.interruption_transcripts = []
+                session.interruption_type = None
 
             # Receive and forward TTS audio chunks with timeout protection
             chunk_counter = 0
@@ -4071,6 +4101,127 @@ class OrchestratorWSHandler:
         })
         logger.info(f"[{session.session_id}] 📝 Saved interrupted assistant turn for barge-in context ({len(partial)} chars)")
         session.current_response_text = ""
+
+    async def _classify_interruption(self, session: OrchestratorSession) -> None:
+        """
+        Classify interruption type using LLM and store result for RAG context.
+        Called asynchronously after barge-in is validated.
+        """
+        interrupted_text = session.interrupted_response_text or ""
+        interruption_transcripts = session.interruption_transcripts or []
+
+        result = await self._validate_interruption_with_llm(
+            session, interrupted_text, interruption_transcripts
+        )
+
+        # Store classification for RAG context
+        session.interruption_type = result.get("interruption_type", "addon")
+        logger.info(f"[{session.session_id}] 🏷️ Interruption classified: {session.interruption_type} (confidence: {result.get('confidence', 0.5):.2f})")
+
+    async def _validate_interruption_with_llm(
+        self,
+        session: OrchestratorSession,
+        interrupted_text: str,
+        interruption_transcripts: List[str],
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to classify interruption type for smarter barge-in handling.
+
+        Args:
+            session: Orchestrator session
+            interrupted_text: The assistant's response that was interrupted
+            interruption_transcripts: List of user transcripts during interruption
+
+        Returns:
+            Dict with 'is_genuine' (bool), 'interruption_type' (str), 'confidence' (float)
+            interruption_type can be: 'addon', 'topic_change', 'clarification', 'noise'
+        """
+        if not interrupted_text or not interruption_transcripts:
+            return {"is_genuine": True, "interruption_type": "unknown", "confidence": 0.5}
+
+        interruption_text = " ".join(interruption_transcripts)
+
+        # Use Groq API for fast classification (<100ms)
+        groq_api_key = os.getenv("GROQ_API_KEY") or os.getenv("LLM_API_KEY")
+        if not groq_api_key:
+            logger.warning(f"[{session.session_id}] No GROQ_API_KEY for interruption validation, using rule-based fallback")
+            return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
+
+        # Use JSON encoding to prevent prompt injection via special characters
+        import json
+        interrupted_text_json = json.dumps(interrupted_text)
+        interruption_text_json = json.dumps(interruption_text)
+
+        prompt = f"""You are detecting if a user interruption during speech is genuine or noise, and classifying the type.
+
+Previous response (interrupted):
+<interrupted_text>
+{interrupted_text_json}
+</interrupted_text>
+
+User interruption:
+<user_interruption>
+{interruption_text_json}
+</user_interruption>
+
+Classify the interruption type:
+- "addon": User adds to their previous query or modifies it ("...but in German", "...actually wait")
+- "topic_change": User switches topic entirely
+- "clarification": User clarifies their previous query
+- "noise": Filler words, coughs, false starts, accidental speech
+
+Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": "...", "confidence": 0.0-1.0}}
+"""
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "llama-3.1-8b-instant",
+                        "messages": [
+                            {"role": "system", "content": "Respond in JSON format only. No markdown, no explanations."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 50
+                    }
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+
+                    # Parse JSON response
+                    import json
+                    try:
+                        # Clean markdown code blocks if present
+                        content = content.strip()
+                        if content.startswith("```"):
+                            content = content.split("```")[1]
+                            if content.startswith("json"):
+                                content = content[4:]
+                        classification = json.loads(content)
+                        logger.info(f"[{session.session_id}] LLM interruption classification: {classification}")
+                        return {
+                            "is_genuine": classification.get("is_genuine", True),
+                            "interruption_type": classification.get("interruption_type", "addon"),
+                            "confidence": classification.get("confidence", 0.5)
+                        }
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[{session.session_id}] Failed to parse LLM interruption response: {e}")
+                        return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
+                else:
+                    logger.warning(f"[{session.session_id}] Groq API error for interruption validation: {response.status_code}")
+                    return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
+
+        except Exception as e:
+            logger.error(f"[{session.session_id}] LLM interruption validation error: {e}")
+            return {"is_genuine": True, "interruption_type": "addon", "confidence": 0.5}
 
     async def _recover_from_noise_interrupt(self, session: OrchestratorSession):
         """Recover from false/noise barge-in by resuming the interrupted turn when possible."""

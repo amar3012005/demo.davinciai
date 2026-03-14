@@ -341,7 +341,9 @@ T: Natürlich! Wie viele Kundenanrufe bearbeitet Ihr Team aktuell pro Monat?
             f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
             f"<h>\n{h_lines.strip()}\n</h>\n"
             f"{kb_block}"
-            f"<q>{cls._escape(query)}</q>\n"
+            f"<original_query>{cls._escape(raw_query)}</original_query>\n"
+            f"<translated_query_for_search>{cls._escape(query)}</translated_query_for_search>\n"
+            f"INSTRUCTION: Always respond based on original_query, not translated_query_for_search.\n"
             f"{lang_line}\n"
             f"Run checklist. Plain text. 1 question max. Drive AIDA forward.\n"
             f"</ctx>\n"

@@ -49,6 +49,8 @@ services:
       USE_MISSION_BRAIN: "false"
       USE_LIVE_GRAPH: "false"
       USE_HIVE_INTERFACE: "false"
+
+      EMBEDDINGS_SERVICE_URL: http://embeddings-eu-local:4006/embed
     restart: unless-stopped
     depends_on:
       redis-eu-local:
@@ -140,7 +142,6 @@ services:
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
       BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
-      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
       DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-}

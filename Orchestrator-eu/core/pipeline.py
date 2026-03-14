@@ -56,10 +56,13 @@ class ProcessingPipeline:
                            history_context: Optional[str] = None,
                            form_data: Optional[Dict[str, Any]] = None,
                            rag_url: Optional[str] = None,
-                           tenant_id: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+                           tenant_id: Optional[str] = None,
+                           interrupted_text: Optional[str] = None,
+                           interruption_transcripts: Optional[List[str]] = None,
+                           interruption_type: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process user query through the pipeline
-        
+
         Args:
             query: User query text from STT
             session_id: Session identifier
@@ -67,7 +70,10 @@ class ProcessingPipeline:
             language: Optional pre-detected language (if None, will detect)
             history_context: Optional conversation history for context-aware responses
             form_data: Optional form data (e.g., appointment booking slots)
-        
+            interrupted_text: Assistant's response text that was interrupted (barge-in)
+            interruption_transcripts: User's interruption transcripts collected during interruption
+            interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
+
         Yields:
             Dict with 'token', 'language', 'is_final', etc.
         """
@@ -124,7 +130,10 @@ class ProcessingPipeline:
                 context=context,
                 history_context=history_context,
                 base_url=rag_url,
-                tenant_id=tenant_id
+                tenant_id=tenant_id,
+                interrupted_text=interrupted_text,
+                interruption_transcripts=interruption_transcripts,
+                interruption_type=interruption_type
             ):
                 # Check for llm_usage metadata dict from service_client
                 if isinstance(token, dict) and "__llm_usage__" in token:

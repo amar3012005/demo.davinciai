@@ -192,7 +192,6 @@ session:
   max_timeout_prompts: 2  # After 2 timeouts, play exit dialogue and end session
   ttl_seconds: 3600
   bargin_feature: false
-  ignore_stt_while_speaking: true
 
 performance:
   enable_incremental_rag: true

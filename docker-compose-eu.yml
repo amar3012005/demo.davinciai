@@ -45,7 +45,7 @@ services:
       - rag_eu_index:/app/index
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
-      LLM_MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
       HIVEMIND_LLM_MODEL: ${HIVEMIND_LLM_MODEL:-llama-3.1-8b-instant}
       ANALYTICS_MODEL: ${ANALYTICS_MODEL:-qwen/qwen3-32b}
       MIND_READER_MODEL: ${MIND_READER_MODEL:-llama-3.1-8b-instant}
@@ -74,7 +74,7 @@ services:
       DAYTONA_RAG_ENABLE_CACHE: "false"
       DAYTONA_RAG_CACHE_TTL: "0"
 
-      EMBEDDINGS_SERVICE_URL: ${EMBEDDINGS_SERVICE_URL:-http://embeddings-eu:4006/embed}
+      EMBEDDINGS_SERVICE_URL: ${EMBEDDINGS_SERVICE_URL:-https://demo.davinciai.eu:8001/embed}
       DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
       COOLIFY_CONTAINER_NAME: rag-eu
     dns:
@@ -269,7 +269,6 @@ services:
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
       BARGIN_FEATURE: ${BARGIN_FEATURE:-true}
-      IGNORE_STT_WHILE_SPEAKING: ${IGNORE_STT_WHILE_SPEAKING:-false}
       TENANT_ID_INTRO: ${TENANT_ID_INTRO}
       DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}

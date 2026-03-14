@@ -662,7 +662,10 @@ class RAGClient:
                             context: Optional[Dict[str, Any]] = None,
                             history_context: Optional[str] = None,
                             base_url: Optional[str] = None,
-                            tenant_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+                            tenant_id: Optional[str] = None,
+                            interrupted_text: Optional[str] = None,
+                            interruption_transcripts: Optional[List[str]] = None,
+                            interruption_type: Optional[str] = None) -> AsyncGenerator[str, None]:
         """
         Query RAG service with streaming response
         
@@ -673,7 +676,10 @@ class RAGClient:
             language: Language code
             context: Optional context/intent information
             history_context: Optional conversation history for context-aware responses
-        
+            interrupted_text: Assistant's response text that was interrupted (barge-in)
+            interruption_transcripts: User's interruption transcripts collected during interruption
+            interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
+
         Yields:
             Text tokens as they arrive
         """
@@ -698,6 +704,14 @@ class RAGClient:
                     logger.debug(f"Sending to RAG with history_context: {len(history_context)} chars, language: {language}")
                 else:
                     logger.debug(f"Sending to RAG without history_context, language: {language}")
+
+                # Add interruption context for barge-in handling
+                if interrupted_text:
+                    payload["interrupted_text"] = interrupted_text
+                if interruption_transcripts:
+                    payload["interruption_transcripts"] = interruption_transcripts
+                if interruption_type:
+                    payload["interruption_type"] = interruption_type
 
                 # Use the correct streaming endpoint for Daytona RAG
                 url = base_url if base_url else self.config.url

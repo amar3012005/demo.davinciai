@@ -91,6 +91,10 @@ class QueryRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session identifier from orchestrator")
     user_id: Optional[str] = Field(None, description="User identifier")
     agent_name: Optional[str] = Field(None, description="Agent name for session config")
+    # Interruption handling fields (barge-in support)
+    interrupted_text: Optional[str] = Field(None, description="The assistant's response text that was interrupted by user speech")
+    interruption_transcripts: Optional[List[str]] = Field(None, description="User's interruption transcripts collected during interruption")
+    interruption_type: Optional[str] = Field(None, description="Type of interruption: 'addon', 'topic_change', 'clarification', or 'noise'")
 
 
 class QueryResponse(BaseModel):
@@ -334,7 +338,7 @@ async def lifespan(app: FastAPI):
         # Log web search configuration
         if config.enable_web_search:
             if config.google_search_api_key and config.google_cse_id:
-                logger.info(f" ✅ Web search ENABLED (API key: {config.google_search_api_key[:10]}..., CSE ID: {config.google_cse_id})")
+                logger.info(f" ✅ Web search ENABLED (API key: {config.google_search_api_key[:2]}..., CSE ID: {config.google_cse_id})")
             else:
                 logger.warning(f" ⚠️ Web search enabled but credentials missing (API key: {'present' if config.google_search_api_key else 'missing'}, CSE ID: {'present' if config.google_cse_id else 'missing'})")
         else:
@@ -1359,7 +1363,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
             masked_api_key = "unset"
             raw_key = qdrant_cfg.get("api_key")
             if raw_key:
-                masked_api_key = f"{raw_key[:4]}***{raw_key[-3:]}" if len(raw_key) >= 8 else "***"
+                masked_api_key = f"{raw_key[:2]}***{raw_key[-2:]}" if len(raw_key) >= 8 else "***"
 
             logger.info("============================================================")
             logger.info("============================================================")
@@ -1508,7 +1512,10 @@ async def stream_query_knowledge_base(request: QueryRequest):
                         "max_tokens": 220,
                         "temperature": 0.6,
                         "stop": ["</resp>", "</turn>", "</ctxt>"]
-                    }
+                    },
+                    interrupted_text=request.interrupted_text,
+                    interruption_transcripts=request.interruption_transcripts,
+                    interruption_type=request.interruption_type,
                 )
                 
                 # Store result for caching

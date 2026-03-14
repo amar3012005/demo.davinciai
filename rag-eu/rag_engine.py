@@ -957,9 +957,25 @@ class RAGEngine:
         history_context: Optional[str] = None,
         tenant_id: str = "tara",
         force_non_stream: bool = False,
-        generation_config: Optional[Dict[str, Any]] = None
+        generation_config: Optional[Dict[str, Any]] = None,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """High-performance RAG pipeline with parallel retrieval and FAST-PATH."""
+        """High-performance RAG pipeline with parallel retrieval and FAST-PATH.
+
+        Args:
+            query: User query text
+            context: Optional context/intent information
+            streaming_callback: Optional callback for streaming responses
+            history_context: Optional conversation history for context-aware responses
+            tenant_id: Tenant/tenant identifier for cache isolation
+            force_non_stream: Force non-streaming response
+            generation_config: Optional generation configuration
+            interrupted_text: Assistant's response text that was interrupted (barge-in)
+            interruption_transcripts: User's interruption transcripts collected during interruption
+            interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
+        """
         start_time = time.time()
 
         # Fail fast with a clear response if LLM initialization failed at startup.
@@ -1075,7 +1091,10 @@ class RAGEngine:
                 hive_mind=hive_mind_state,
                 user_profile=user_profile,
                 agent_skills=skill_texts,
-                agent_rules=rule_texts
+                agent_rules=rule_texts,
+                interrupted_text=interrupted_text,
+                interruption_transcripts=interruption_transcripts,
+                interruption_type=interruption_type,
             )
         prompt = self._apply_prompt_budget(prompt, active_llm_model)
 

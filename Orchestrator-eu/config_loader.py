@@ -135,7 +135,6 @@ class SessionConfig:
     max_timeout_prompts: int = 3
     ttl_seconds: int = 3600
     bargin_feature: bool = False
-    ignore_stt_while_speaking: bool = True
 
 
 @dataclass
@@ -367,17 +366,12 @@ class ConfigLoader:
                 "BARGIN_FEATURE",
                 os.getenv("BARGE_IN_FEATURE", str(session_data.get("bargin_feature", False)))
             ).lower() == "true"
-            ignore_stt_while_speaking = os.getenv(
-                "IGNORE_STT_WHILE_SPEAKING",
-                str(session_data.get("ignore_stt_while_speaking", True))
-            ).lower() == "true"
 
             config.session = SessionConfig(
                 timeout_seconds=float(os.getenv("SESSION_TIMEOUT_SECONDS", session_data.get("timeout_seconds", 10.0))),
                 max_timeout_prompts=int(os.getenv("MAX_TIMEOUT_PROMPTS", session_data.get("max_timeout_prompts", 3))),
                 ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", session_data.get("ttl_seconds", 3600))),
-                bargin_feature=bargin_feature,
-                ignore_stt_while_speaking=ignore_stt_while_speaking
+                bargin_feature=bargin_feature
             )
         
         # Performance config (with env var overrides)

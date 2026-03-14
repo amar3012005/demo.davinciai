@@ -25,6 +25,11 @@ services:
       - coolify.name=embeddings-eu
       - coolify.service.subType=application
       - coolify.service.subName=embeddings
+      - traefik.enable=true
+      - traefik.http.routers.embeddings-eu.entryPoints=https
+      - traefik.http.routers.embeddings-eu.rule=Host(`demo.davinciai.eu`) && PathPrefix(`/embed`)
+      - traefik.http.routers.embeddings-eu.tls=true
+      - traefik.http.services.embeddings-eu.loadbalancer.server.port=4006
     env_file:
       - .env.eu
 

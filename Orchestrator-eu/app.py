@@ -997,6 +997,54 @@ async def proxy_rag_skill_list(request: Request, tenant_id: Optional[str] = None
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/hivemind/rules")
+async def proxy_rag_rule_list(request: Request, tenant_id: Optional[str] = None):
+    """Proxy agent rule listing."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        resolved_tenant_id = _resolve_requested_tenant(request=request, explicit_tenant_id=tenant_id)
+        # RAG only has /api/v1/skills endpoint, it returns all types
+        # We'll filter for rules on the backend if needed, or just return all
+        rag_url = f"{config.services.rag.url}/api/v1/skills?tenant_id={resolved_tenant_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(rag_url, timeout=aiohttp.ClientTimeout(total=20)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                data = await response.json()
+                # Filter to only rules
+                if isinstance(data, dict) and "rules" in data:
+                    return JSONResponse({"rules": data["rules"], "total": len(data["rules"])})
+                return JSONResponse(data)
+    except Exception as e:
+        logger.error(f"RAG Proxy rule list error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/hivemind/knowledge_base")
+async def proxy_rag_knowledge_list(request: Request, tenant_id: Optional[str] = None):
+    """Proxy general knowledge base listing."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        resolved_tenant_id = _resolve_requested_tenant(request=request, explicit_tenant_id=tenant_id)
+        rag_url = f"{config.services.rag.url}/api/v1/skills?tenant_id={resolved_tenant_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(rag_url, timeout=aiohttp.ClientTimeout(total=20)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                data = await response.json()
+                # Filter to only knowledge base entries
+                if isinstance(data, dict) and "knowledge" in data:
+                    return JSONResponse({"knowledge": data["knowledge"], "total": len(data["knowledge"])})
+                return JSONResponse(data)
+    except Exception as e:
+        logger.error(f"RAG Proxy knowledge list error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/v1/skills")
 @app.post("/hivemind/skills")
 async def proxy_rag_skill_upsert(request: Request, tenant_id: Optional[str] = None):
@@ -1016,6 +1064,50 @@ async def proxy_rag_skill_upsert(request: Request, tenant_id: Optional[str] = No
                 return JSONResponse(await response.json())
     except Exception as e:
         logger.error(f"RAG Proxy skill upsert error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/hivemind/rules")
+async def proxy_rag_rule_upsert(request: Request, tenant_id: Optional[str] = None):
+    """Proxy agent rule upserts to RAG."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        body = await request.json()
+        resolved_tenant_id = _resolve_requested_tenant(request=request, body=body, explicit_tenant_id=tenant_id)
+        # Ensure type is set to agent_rule
+        body = _merge_proxy_body(body, resolved_tenant_id, extra={"type": "agent_rule"})
+        rag_url = f"{config.services.rag.url}/api/v1/skills?tenant_id={resolved_tenant_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy rule upsert error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/hivemind/knowledge_base")
+async def proxy_rag_knowledge_upsert(request: Request, tenant_id: Optional[str] = None):
+    """Proxy general knowledge base upserts to RAG."""
+    if not config:
+        return JSONResponse({"error": "Configuration not loaded"}, status_code=503)
+    try:
+        body = await request.json()
+        resolved_tenant_id = _resolve_requested_tenant(request=request, body=body, explicit_tenant_id=tenant_id)
+        # Ensure type is set to general_kb
+        body = _merge_proxy_body(body, resolved_tenant_id, extra={"type": "general_kb"})
+        rag_url = f"{config.services.rag.url}/api/v1/skills?tenant_id={resolved_tenant_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    return JSONResponse({"error": error_text}, status_code=response.status)
+                return JSONResponse(await response.json())
+    except Exception as e:
+        logger.error(f"RAG Proxy knowledge upsert error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
