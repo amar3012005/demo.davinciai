@@ -114,11 +114,11 @@ services:
       CHUNK_DURATION_MS: ${CHUNK_DURATION_MS:-200}
       OVERLAP_DURATION_MS: ${OVERLAP_DURATION_MS:-100}
       CONTEXT_WINDOW_SEGMENTS: ${CONTEXT_WINDOW_SEGMENTS:-5}
-      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-850}
-      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-400}
-      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-1500}
+      VAD_ENERGY_THRESHOLD: ${VAD_ENERGY_THRESHOLD:-500}
+      MIN_SPEECH_DURATION_MS: ${MIN_SPEECH_DURATION_MS:-300}
+      MIN_SILENCE_DURATION_MS: ${MIN_SILENCE_DURATION_MS:-1200}
       PRE_SPEECH_PADDING_MS: ${PRE_SPEECH_PADDING_MS:-600}
-      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-800}
+      FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-600}
       GROQ_LANGUAGE: ${GROQ_LANGUAGE:-de}
       GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate, summarize, paraphrase, or normalize it into English. Preserve names, brands, German compounds, umlauts, and Eszett correctly. Keep acronyms and product names as spoken. Do not spell words letter by letter unless the speaker explicitly spells them.}
 
