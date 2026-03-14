@@ -143,9 +143,10 @@ services:
       STREAM_OUT: ${STREAM_OUT:-auto}
       SUPPORTED_LANGUAGES: ${SUPPORTED_LANGUAGES:-en,de}
       ENABLE_FILLERS: ${ENABLE_FILLERS:-false}
-      BARGIN_FEATURE: ${BARGIN_FEATURE:-false}
+      BARGIN_FEATURE: ${BARGIN_FEATURE:-true}
       DEFAULT_INTRO: ${DEFAULT_INTRO:-Hello! I am TARA, your AI assistant. How can I help you today?}
       DEFAULT_INTRO_DE: ${DEFAULT_INTRO_DE:-Hallo! Ich bin TARA, Ihre KI-Assistentin. Wie kann ich Ihnen helfen?}
+      BUNDB_CARTESIA_PRONUNCIATION_DICT_ID: ${BUNDB_CARTESIA_PRONUNCIATION_DICT_ID:-pdict_aiA2sefpW2w4nXqFjde8pa}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
       DAVINCIAI_BACKEND_URL: ${DAVINCIAI_BACKEND_URL:-https://api.enterprise.davinciai.eu:8450/api/webhooks/session}
@@ -229,19 +230,29 @@ services:
     ports:
       - "${TTS_EU_PORT:-4013}:4003"
     environment:
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-f786b574-daa5-4673-aa0c-cbe3e8534c02}
+      # TTS Cartesia Configuration - Optimized for German pronunciation
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY}
+      # German-native voice ID (improves pronunciation of German text, umlauts, compounds)
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-694f9389-aac1-45b6-b726-9d9369183238}
+      CARTESIA_LANGUAGE: ${CARTESIA_LANGUAGE:-de}  # Default language for German TTS
       CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
       CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
-      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}  # Multilingual model
+      # Speed: 0.9 improves German compound word clarity (range: 0.5-2.0)
+      CARTESIA_SPEED: ${CARTESIA_SPEED:-0.9}
+      # Tenant-specific pronunciation dictionary for brand names (e.g., BLAIQ, DaVinci)
+      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-}
 
       TTS_CARTESIA_HOST: 0.0.0.0
       TTS_CARTESIA_PORT: 4003
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CONNECTION_POOL_SIZE: ${CONNECTION_POOL_SIZE:-5}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:4003/health" ]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
+      start_period: 10s
     restart: unless-stopped
     networks:
       - eu-local

@@ -163,12 +163,18 @@ services:
 
     command: "python -m uvicorn app:app --host 0.0.0.0 --port 4003"
     environment:
+      # TTS Cartesia Configuration - Optimized for German pronunciation
       CARTESIA_API_KEY: ${CARTESIA_API_KEY}
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-b9de4a89-2257-424b-94c2-db18ba68c81a}  # German-capable voice
+      # German-native voice ID (improves pronunciation of German text, umlauts, compounds)
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-694f9389-aac1-45b6-b726-9d9369183238}
       CARTESIA_LANGUAGE: ${CARTESIA_LANGUAGE:-de}  # Default language for German TTS
       CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT:-pcm_f32le}
       CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE:-44100}
       CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}  # Multilingual model
+      # Speed: 0.9 improves German compound word clarity (range: 0.5-2.0)
+      CARTESIA_SPEED: ${CARTESIA_SPEED:-0.9}
+      # Tenant-specific pronunciation dictionary for brand names (e.g., BLAIQ, DaVinci)
+      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID:-}
 
       TTS_CARTESIA_HOST: 0.0.0.0
       TTS_CARTESIA_PORT: 4003

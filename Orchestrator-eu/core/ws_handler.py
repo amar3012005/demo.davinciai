@@ -1416,17 +1416,33 @@ class OrchestratorWSHandler:
                 session.interruption_transcripts = []
             session.interruption_transcripts.append(text)
 
-            # Validated by LLM - proceed with interrupt
-            logger.info(f"[{session.session_id}] 🛑 Barge-in transcript collected: '{text}' (nsp={no_speech_prob}) - sending to LLM verdict")
-            session.barge_in_pending = False
+            # Cancel the barge-in validation timeout - transcript arrived, LLM will validate
+            if session.transcript_timeout_task and not session.transcript_timeout_task.done():
+                session.transcript_timeout_task.cancel()
+                try:
+                    await asyncio.wait_for(session.transcript_timeout_task, timeout=0.1)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            # Log LLM validation request
+            interrupted_text_preview = (session.interrupted_response_text or "")[:80]
+            logger.info(f"[{session.session_id}] 🧠 LLM BARGE-IN VALIDATION | Transcript: '{text}' | Interrupted response: '{interrupted_text_preview}...' | NSP: {no_speech_prob}")
 
             # Call LLM to validate if this is a genuine interruption (blocking for accuracy)
             llm_verdict = await self._validate_bargein_with_llm(session, text, interrupted_text=session.interrupted_response_text)
 
-            if llm_verdict.get("is_genuine", False):
-                interruption_type = llm_verdict.get("interruption_type", "addon")
-                confidence = llm_verdict.get("confidence", 0.5)
-                logger.info(f"[{session.session_id}] ✅ LLM verdict: GENUINE interruption (type={interruption_type}, confidence={confidence:.2f})")
+            # Clear barge_in_pending AFTER LLM validation completes
+            session.barge_in_pending = False
+
+            interruption_type = llm_verdict.get("interruption_type", "unknown")
+            confidence = llm_verdict.get("confidence", 0.0)
+            is_genuine = llm_verdict.get("is_genuine", False)
+
+            # Log LLM validation response
+            logger.info(f"[{session.session_id}] 🧠 LLM VERDICT | Genuine: {is_genuine} | Type: {interruption_type} | Confidence: {confidence:.2f} | Transcript: '{text}'")
+
+            if is_genuine:
+                logger.info(f"[{session.session_id}] ✅ GENUINE INTERRUPTION - pausing browser, interrupting response")
 
                 await self._handle_interrupt(session, {"type": "interrupt", "trigger": "stt_validated"})
 
@@ -1436,10 +1452,9 @@ class OrchestratorWSHandler:
                 if not is_final:
                     return  # Wait for final transcript
             else:
-                confidence = llm_verdict.get("confidence", 0.5)
-                logger.info(f"[{session.session_id}] 🚫 LLM verdict: NOISE (confidence={confidence:.2f}) - resuming playback")
+                logger.info(f"[{session.session_id}] 🚫 NOISE (confidence={confidence:.2f}) - browser continues playing, dropping transcript")
                 session.interruption_transcripts.clear()  # Clear collected transcripts
-                await self._recover_from_noise_interrupt(session)
+                # Do NOT call _recover_from_noise_interrupt - browser never paused, just continue playing
                 return  # Drop noise transcript
 
         # Store partial transcript for early processing
@@ -1582,25 +1597,24 @@ class OrchestratorWSHandler:
                 logger.debug(f"[{session.session_id}] ⏸️ Ignoring SPEECH_END during SPEAKING (BARGIN_FEATURE=false)")
                 return
 
-            # DEFERRED BARGE-IN: If SPEAKING, don't hard-interrupt — stay in SPEAKING,
-            # pause browser playback, and wait for STT to validate real speech vs noise.
+            # DEFERRED BARGE-IN: If SPEAKING, mark barge-in pending but DO NOT pause browser.
+            # Browser continues playing audio. Only pause AFTER LLM validates genuine interruption.
             if state_mgr.state == State.SPEAKING:
-                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_END) - deferring, waiting for STT validation")
+                logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_END) - collecting transcript for LLM validation (browser continues playing)")
                 session.barge_in_pending = True
-                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
+                # DO NOT send playback_stop here - browser continues playing until LLM validates
 
-                # Start a timeout: if no valid STT transcript arrives, recover from noise
+                # Start a timeout: if no valid STT transcript arrives, clear barge-in pending
+                # Timeout is 15s to account for slow STT responses (Groq Whisper can take 5-10s under load)
                 output_language = self._get_output_language(session.current_language, session)
 
                 async def barge_in_validation_timeout():
                     try:
-                        await asyncio.sleep(5.0)
-                        # Only recover if we're STILL in an active speaking interruption window.
-                        # If playback already completed or state moved on, do nothing.
-                        if session.barge_in_pending and not session.is_closed and state_mgr.state == State.SPEAKING:
+                        await asyncio.sleep(15.0)  # 15 second timeout for STT
+                        # Only clear if barge-in still pending (transcript never arrived or validation still running)
+                        if session.barge_in_pending and not session.is_closed:
                             session.barge_in_pending = False
-                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after barge-in, returning to LISTENING")
-                            await self._recover_from_noise_interrupt(session)
+                            logger.info(f"[{session.session_id}] 🔄 Barge-in timeout - no transcript received, ignoring")
                         else:
                             session.barge_in_pending = False
                     except asyncio.CancelledError:
@@ -2479,7 +2493,7 @@ class OrchestratorWSHandler:
                         session.filler_task.cancel()
                         logger.debug(f"[{session.session_id}] ⏸️ Cancelled filler task on first text token")
                 
-                await session.tts_client.stream_chunk(token, output_language, emotion="helpful", voice_id=session.voice_id_override, pronunciation_dict_id=session.pronunciation_dict_id_override)
+                await session.tts_client.stream_chunk(token, output_language, emotion="helpful", voice_id=session.voice_id_override, pronunciation_dict_id=session.pronunciation_dict_id_override, tenant_id=session.tenant_id)
 
             # Cancel latency fillers since RAG response is complete and TTS is about to start
             if session.filler_task and not session.filler_task.done():
@@ -3341,7 +3355,7 @@ class OrchestratorWSHandler:
                             await self._broadcast_state(session, State.SPEAKING)
 
                         # Stream text to TTS service (audio results will be picked up by forward_audio task)
-                        await session.tts_client.stream_chunk(content, language=output_language, voice_id=session.voice_id_override, pronunciation_dict_id=session.pronunciation_dict_id_override)
+                        await session.tts_client.stream_chunk(content, language=output_language, voice_id=session.voice_id_override, pronunciation_dict_id=session.pronunciation_dict_id_override, tenant_id=session.tenant_id)
                 
                 elif msg_type == "action":
                     payload = chunk.get("payload")
@@ -3467,6 +3481,7 @@ class OrchestratorWSHandler:
                 emotion="helpful",
                 voice_id=session.voice_id_override,
                 pronunciation_dict_id=session.pronunciation_dict_id_override,
+                tenant_id=session.tenant_id,
             )
             
             # Default values (standard for our STT/TTS stack)
@@ -3967,13 +3982,26 @@ class OrchestratorWSHandler:
             elapsed = time.time() - session.audio_playback_start_time
             # Keep a small margin for browser clock drift.
             if elapsed + 0.08 < session.audio_playback_duration:
-                # If we are in deferred barge-in validation, trust browser completion
-                # and finish this turn to avoid false noise_recovery replays.
+                # If we are in deferred barge-in validation, do NOT transition to LISTENING yet.
+                # Wait for LLM validation to complete in _handle_stt_result().
+                # Browser may have finished playing, but we stay in SPEAKING until LLM verdict.
                 if session.barge_in_pending:
                     logger.info(
-                        f"[{session.session_id}] ✅ Accepting playback_done during pending barge-in "
+                        f"[{session.session_id}] ⏸️ Playback done, but barge-in validation pending - staying in SPEAKING "
                         f"(elapsed: {elapsed:.2f}s, duration: {session.audio_playback_duration:.2f}s)"
                     )
+                    # Cancel watchdog timer - browser finished playback, but LLM validation is pending
+                    # Will be handled by _handle_interrupt() if genuine, or ignored if noise
+                    if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+                        session.audio_playback_server_timer.cancel()
+                        try:
+                            await asyncio.wait_for(session.audio_playback_server_timer, timeout=0.1)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+                    # Do NOT clear barge_in_pending
+                    # Do NOT transition to LISTENING
+                    # Let _handle_stt_result() complete LLM validation and trigger _handle_interrupt() if genuine
+                    return
                 else:
                     # Premature playback_done - ignore it (watchdog will handle it)
                     logger.debug(
@@ -3981,7 +4009,7 @@ class OrchestratorWSHandler:
                         f"(elapsed: {elapsed:.2f}s < duration: {session.audio_playback_duration:.2f}s)"
                     )
                     return
-        
+
         # Cancel server-side timer if browser confirms early (but valid)
         if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
             session.audio_playback_server_timer.cancel()
@@ -3990,7 +4018,7 @@ class OrchestratorWSHandler:
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             logger.debug(f"[{session.session_id}] ⏸️ Cancelled playback watchdog timer - browser confirmed playback done")
-        
+
         logger.info(f"[{session.session_id}] ✅ Playback DONE (browser confirmed)")
 
         # Clear playback tracking
@@ -4012,7 +4040,7 @@ class OrchestratorWSHandler:
                 await asyncio.wait_for(session.transcript_timeout_task, timeout=0.1)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-        
+
         playback_side_effects = await state_mgr.transition(State.LISTENING, trigger="playback_done")
         await self._execute_side_effects(session, playback_side_effects, output_language)
         await self._broadcast_state(session, State.LISTENING)

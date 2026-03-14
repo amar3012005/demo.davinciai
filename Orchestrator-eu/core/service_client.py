@@ -194,8 +194,10 @@ class TTSClient:
         
         # Chunk batching (to prevent detected_unusual_activity from tiny chunks)
         self._chunk_buffer: str = ""
-        self._min_chunk_size: int = 20  # Minimum chars before sending
-        self._max_chunk_size: int = 150  # Maximum chars per chunk
+        # German requires larger chunks for compound words (Markenstimme, Unternehmenskultur, etc.)
+        # Increased from 20/150 to 40/200 to avoid splitting German compounds mid-word
+        self._min_chunk_size: int = 40  # was 20 — buffer more context
+        self._max_chunk_size: int = 200  # was 150 — allow longer compounds
         self._flush_task: Optional[asyncio.Task] = None
         self._last_stream_language: str = "de"
         self._last_stream_emotion: str = "helpful"
@@ -203,7 +205,40 @@ class TTSClient:
         self._last_stream_pronunciation_dict_id: Optional[str] = None
 
     @staticmethod
-    def _normalize_tts_text(text: str) -> str:
+    def _get_tenant_pronunciation_dict_id(tenant_id: Optional[str]) -> Optional[str]:
+        """Get tenant-specific pronunciation dictionary ID for brand names."""
+        if not tenant_id:
+            return None
+        # Map tenant IDs to their pronunciation dictionaries
+        # Format: {tenant_id}_PRONUNCIATION_DICT_ID environment variable
+        PRONUNCIATION_DICTS = {
+            "bundb": "pdict_aiA2sefpW2w4nXqFjde8pa",  # BUNDB tenant
+            # Add more tenants as needed
+        }
+        return PRONUNCIATION_DICTS.get(tenant_id.lower())
+
+    # Acronyms Cartesia reads letter-by-letter — expand to spoken German
+    # This dictionary is applied in _normalize_tts_text() before sending to TTS
+    TTS_EXPAND = {
+        "BLAIQ": "Blaiq",
+        "KI": "künstliche Intelligenz",
+        "DSGVO": "Datenschutz-Grundverordnung",
+        "UX": "User Experience",
+        "UI": "User Interface",
+        "CEO": "Geschäftsführer",
+        "HR": "Human Resources",
+        "USP": "Alleinstellungsmerkmal",
+        "ROI": "Return on Investment",
+        "FAQ": "häufig gestellte Fragen",
+        "CRM": "Kundenmanagement-System",
+        "B2B": "Business-to-Business",
+        "B2C": "Business-to-Consumer",
+        "AI": "Davinci",  # Brand-specific for DaVinci AI
+        "TARA": "Tara",  # Avoid spelling T-A-R-A
+    }
+
+    @staticmethod
+    def _normalize_tts_text(text: str, language: str = "de") -> str:
         """Normalize unicode/punctuation that causes character-by-character spelling in TTS."""
         if not text:
             return ""
@@ -223,13 +258,17 @@ class TTSClient:
         }
         for old, new in replacements.items():
             normalized = normalized.replace(old, new)
+
         # Dot-separated tokens should stay punctuation-like, not be read out literally.
         # Replacing with a soft sentence break helps TTS pause instead of saying "dot".
         normalized = re.sub(r"(?<=\w)\.(?=\w)", ", ", normalized)
+
         # Avoid clipped acronym-hyphen compounds like "KI-gestützt" getting spelled out.
         normalized = re.sub(r"\b([A-ZÄÖÜ]{2,})-(?=\w)", r"\1 ", normalized)
+
         # German-specific: Replace slashes with "oder" for better TTS pronunciation
         normalized = re.sub(r"\s*/\s*", " oder ", normalized)
+
         # German-specific: Handle common abbreviations that TTS might mispronounce
         abbreviation_replacements = {
             r"\bz\.B\.": "zum Beispiel",
@@ -241,7 +280,21 @@ class TTSClient:
         }
         for pattern, replacement in abbreviation_replacements.items():
             normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+
+        # CRITICAL: Expand acronyms that Cartesia reads letter-by-letter
+        # Only apply for German language
+        if language == "de":
+            for acronym, spoken in TTSClient.TTS_EXPAND.items():
+                # Use word boundary matching to avoid partial replacements
+                normalized = re.sub(rf"\b{re.escape(acronym)}\b", spoken, normalized, flags=re.IGNORECASE if acronym.isupper() else 0)
+
+        # Ensure terminal punctuation (Cartesia needs this for prosody cues)
+        if normalized and not normalized[-1] in '.!?':
+            normalized += '.'
+
+        # Clean up multiple spaces
         normalized = re.sub(r"\s+", " ", normalized).strip()
+
         return normalized
     
     async def connect(self, session_id: str, retries: int = 3, retry_delay: float = 2.0) -> bool:
@@ -287,14 +340,16 @@ class TTSClient:
         
         return False
     
-    async def synthesize(self, text: str, language: str = "en", emotion: str = "helpful", voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
+    async def synthesize(self, text: str, language: str = "de", emotion: str = "helpful", voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, tenant_id: Optional[str] = None):
         """
         Send synthesis request to TTS service
-        
+
         Args:
             text: Text to synthesize
             language: Language code (en, de)
             emotion: Emotion/voice style
+            pronunciation_dict_id: Optional pronunciation dictionary ID override
+            tenant_id: Optional tenant ID for auto-applying pronunciation dictionary
         """
         # Ensure connection exists and is open
         if not self.ws or self.ws.closed:
@@ -307,11 +362,16 @@ class TTSClient:
             else:
                 logger.error("TTS WebSocket not connected and no session_id available")
                 return
-        
-        text = self._normalize_tts_text(text)
+
+        # Normalize text with language-aware acronym expansion
+        text = self._normalize_tts_text(text, language)
         self._last_stream_language = language or self._last_stream_language
         self._last_stream_emotion = emotion or self._last_stream_emotion
         self._last_stream_voice_id = voice_id
+
+        # Auto-apply tenant-specific pronunciation dictionary if not provided
+        if not pronunciation_dict_id and tenant_id:
+            pronunciation_dict_id = self._get_tenant_pronunciation_dict_id(tenant_id)
         self._last_stream_pronunciation_dict_id = pronunciation_dict_id
 
         # Get voice config for language
@@ -319,7 +379,7 @@ class TTSClient:
         if voice_id is None:
             voice_id = voice_config.voice_id if voice_config else "default"
         voice_lang = voice_config.language if voice_config else f"{language}-{language.upper()}"
-        
+
         # Retry logic if send fails
         try:
             await self.ws.send_json({
@@ -349,21 +409,27 @@ class TTSClient:
             else:
                 logger.error("Cannot reconnect: no session_id available")
     
-    async def stream_chunk(self, text: str, language: str = "en", emotion: str = "helpful", voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
+    async def stream_chunk(self, text: str, language: str = "de", emotion: str = "helpful", voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, tenant_id: Optional[str] = None):
         """
         Send streaming text chunk to TTS service with intelligent batching.
-        
+
         Small chunks are buffered and combined to prevent detected_unusual_activity errors.
-        
+
         Args:
             text: Text chunk to synthesize
             language: Language code
             emotion: Emotion/voice style
+            tenant_id: Optional tenant ID for auto-applying pronunciation dictionary
         """
-        text = self._normalize_tts_text(text)
+        # Normalize text with language-aware acronym expansion
+        text = self._normalize_tts_text(text, language)
         self._last_stream_language = language or self._last_stream_language
         self._last_stream_emotion = emotion or self._last_stream_emotion
         self._last_stream_voice_id = voice_id
+
+        # Auto-apply tenant-specific pronunciation dictionary if not provided
+        if not pronunciation_dict_id and tenant_id:
+            pronunciation_dict_id = self._get_tenant_pronunciation_dict_id(tenant_id)
         self._last_stream_pronunciation_dict_id = pronunciation_dict_id
 
         # Ensure connection exists and is open
@@ -377,14 +443,14 @@ class TTSClient:
             else:
                 logger.error("TTS WebSocket not connected and no session_id available")
                 return
-        
+
         # CRITICAL FIX: Batch small chunks to prevent rate limiting
         self._chunk_buffer += text
-        
+
         # Strip XML tags to see how much actual text we have
         text_no_tags = re.sub(r'<[^>]+>', '', self._chunk_buffer).strip()
         str_no_tags = re.sub(r'<[^>]+>', '', text).strip()
-        
+
         # If buffer is large enough OR chunk is already large, send immediately
         if len(text_no_tags) >= self._min_chunk_size or len(str_no_tags) >= self._max_chunk_size:
             await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
@@ -405,16 +471,24 @@ class TTSClient:
         await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
     
     async def _flush_chunks(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
-        """Send buffered chunks to TTS service."""
+        """Send buffered chunks to TTS service.
+
+        CRITICAL: Cartesia requires streamed inputs to form valid transcript when joined.
+        "Hello, world!" must be followed by " How are you?" (with leading space),
+        not "How are you?" - otherwise they join as "Hello, world!How are you?" (invalid).
+
+        German compound words like "Unternehmenskultur" must not be split mid-word.
+        """
         if not self._chunk_buffer:
             return
-        
+
         # Split buffer into optimal-sized chunks
         chunks_to_send = []
         buffer = self._chunk_buffer
         self._chunk_buffer = ""
-        
+
         # Split by sentences if possible, otherwise by max size
+        # IMPORTANT: Preserve spacing between chunks for Cartesia continuations
         while len(buffer) > self._max_chunk_size:
             # Try to split at sentence boundary
             split_pos = buffer.rfind('. ', 0, self._max_chunk_size)
@@ -422,9 +496,18 @@ class TTSClient:
                 split_pos = buffer.rfind(' ', 0, self._max_chunk_size)
             if split_pos == -1:
                 split_pos = self._max_chunk_size
-            
-            chunks_to_send.append(buffer[:split_pos + 1].strip())
-            buffer = buffer[split_pos + 1:].strip()
+
+            # Strip trailing whitespace only - preserve content
+            chunk = buffer[:split_pos].rstrip()
+            chunks_to_send.append(chunk)
+
+            # CRITICAL: Keep leading space on next chunk for Cartesia continuations
+            # "Hello, world!" + " How are you?" = "Hello, world! How are you?" (valid)
+            # "Hello, world!" + "How are you?" = "Hello, world!How are you?" (INVALID)
+            buffer = buffer[split_pos:].lstrip()
+            # Now add back single leading space for continuation
+            if buffer and not buffer.startswith(' '):
+                buffer = ' ' + buffer
         
         if buffer:
             chunks_to_send.append(buffer)

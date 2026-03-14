@@ -383,6 +383,8 @@ class CartesiaManager:
                             continue
 
                         target_model = model_id or self.config.model
+
+                        # Build base message
                         message = {
                             "context_id": ctx_id,
                             "model_id": target_model,
@@ -391,18 +393,28 @@ class CartesiaManager:
                             "output_format": self.config.get_output_format_config(),
                             "continue": stream_start_time is not None,
                         }
-                        
-                        if "multilingual" in target_model.lower() or "sonic-3" in target_model.lower() or "sonic-4" in target_model.lower():
-                            raw_lang = language or self.config.language
-                            if raw_lang:
-                                message["language"] = raw_lang.split("-")[0].split("_")[0]
-                        
-                        if pronunciation_dict_id and pronunciation_dict_id.strip().strip('"').strip("'"):
-                            clean_dict_id = pronunciation_dict_id.strip().strip('"').strip("'")
+
+                        # CRITICAL: Always send language parameter for correct phonology
+                        # Cartesia Sonic-3 auto-detects but defaults to English without explicit language
+                        raw_lang = language or self.config.language
+                        if raw_lang:
+                            # Normalize language code: "de-DE" → "de", "en_US" → "en"
+                            message["language"] = raw_lang.split("-")[0].split("_")[0]
+                            logger.debug(f"[{ctx_id[:8]}] Language: {message['language']}")
+
+                        # Add speed control (0.9 recommended for German compound words)
+                        if hasattr(self.config, 'speed') and self.config.speed:
+                            message["speed"] = self.config.speed
+
+                        # Add pronunciation dictionary for tenant-specific brand names
+                        dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
+                        if dict_id and dict_id.strip().strip('"').strip("'"):
+                            clean_dict_id = dict_id.strip().strip('"').strip("'")
                             if clean_dict_id.startswith("pdict_"):
                                 message["pronunciation_dict_id"] = clean_dict_id
+                                logger.debug(f"[{ctx_id[:8]}] Pronunciation dict: {clean_dict_id}")
                             else:
-                                logger.warning(f"[{ctx_id[:8]}] Ignoring invalid pronunciation_dict_id: '{pronunciation_dict_id}'")
+                                logger.warning(f"[{ctx_id[:8]}] Ignoring invalid pronunciation_dict_id: '{dict_id}'")
                         
                         if stream_start_time is None:
                             logger.info(f"[{ctx_id[:8]}] Sending first chunk: {text_chunk[:30]}...")

@@ -24,18 +24,22 @@ class CartesiaConfig:
     api_key: str = field(default_factory=lambda: os.getenv("CARTESIA_API_KEY", ""))
     model: str = field(default_factory=lambda: os.getenv("CARTESIA_MODEL", "sonic-3"))
     voice_id: str = field(default_factory=lambda: os.getenv("CARTESIA_VOICE_ID", ""))
-    
+
     # WebSocket settings
     websocket_url: str = "wss://api.cartesia.ai/tts/websocket"
     api_version: str = "2024-06-10"  # Cartesia API version
-    
+
     # Audio format settings
     sample_rate: int = field(default_factory=lambda: int(os.getenv("CARTESIA_SAMPLE_RATE", "44100")))
     output_format: str = field(default_factory=lambda: os.getenv("CARTESIA_OUTPUT_FORMAT", "pcm_f32le").strip())  # pcm_s16le, pcm_f32le, pcm_mulaw, pcm_alaw
     container: str = "raw"  # raw or mp3
-    
+
     # Voice settings
     language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "de").strip())  # Default to German for EU deployment
+    speed: float = field(default_factory=lambda: float(os.getenv("CARTESIA_SPEED", "0.9")))  # Speed: 0.9 for German clarity (range: 0.5-2.0)
+
+    # Pronunciation dictionary for tenant-specific brand names
+    pronunciation_dict_id: Optional[str] = field(default_factory=lambda: os.getenv("CARTESIA_PRONUNCIATION_DICT_ID", "").strip() or None)
     
     # Connection pool settings (for robustness)
     pool_size: int = field(default_factory=lambda: int(os.getenv("CONNECTION_POOL_SIZE", "3")))
@@ -60,41 +64,49 @@ class CartesiaConfig:
                 "CARTESIA_API_KEY must be set. "
                 "Get your API key from https://play.cartesia.ai/"
             )
-        
+
         if not self.voice_id:
             logger.warning("CARTESIA_VOICE_ID not set, using default German voice")
-            # Default to a German-capable voice (Sonic-3 multilingual)
-            self.voice_id = "b9de4a89-2257-424b-94c2-db18ba68c81a"  # German-capable voice
-        
+            # Default to German-native voice for optimal German pronunciation
+            self.voice_id = "694f9389-aac1-45b6-b726-9d9369183238"  # German-native voice
+
         # Validate model
         valid_models = ["sonic-english", "sonic-multilingual", "sonic-2", "sonic-3", "sonic-4"]
         if self.model not in valid_models:
             logger.warning(f"Unknown model '{self.model}', using 'sonic-3' for multilingual support")
             self.model = "sonic-3"
-        
+
+        # Validate speed (Cartesia range: 0.5-2.0)
+        if not (0.5 <= self.speed <= 2.0):
+            logger.warning(f"Speed {self.speed} out of range [0.5-2.0], clamping to 0.9")
+            self.speed = 0.9
+
         # Validate output format
         valid_formats = ["pcm_s16le", "pcm_f32le", "pcm_mulaw", "pcm_alaw"]
-        
+
         # DEBUG LOGGING
         logger.info(f"🔍 DEBUG: Raw output_format from env: '{self.output_format}'")
-        
+
         if self.output_format not in valid_formats:
             logger.warning(f"Invalid output_format '{self.output_format}', forcing 'pcm_f32le'")
             self.output_format = "pcm_f32le"
-            
+
         # FORCE F32LE for Orchestrator compatibility
         if self.output_format == "pcm_s16le":
             logger.warning("⚠️ Detected 'pcm_s16le', upgrading to 'pcm_f32le' for high-quality playback")
             self.output_format = "pcm_f32le"
-        
+
         # Log configuration
         masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
         logger.info(f"🔑 Cartesia API key configured: {masked_key}")
         logger.info(f"🎤 Model: {self.model} ({'multilingual' if 'multilingual' in self.model.lower() or 'sonic-3' in self.model.lower() or 'sonic-4' in self.model.lower() else 'english-only'})")
-        logger.info(f"🔊 Voice ID: {self.voice_id}")
+        logger.info(f"🔊 Voice ID: {self.voice_id} (German-native)")
         logger.info(f"🌐 Language: {self.language} (for multilingual models)")
+        logger.info(f"⚡ Speed: {self.speed} (0.9 recommended for German)")
         logger.info(f"📊 Sample rate: {self.sample_rate}Hz")
         logger.info(f"🔄 Connection pool size: {self.pool_size}")
+        if self.pronunciation_dict_id:
+            logger.info(f"📖 Pronunciation Dictionary: {self.pronunciation_dict_id}")
     
     def get_websocket_url(self) -> str:
         """Get full WebSocket URL with query parameters"""
