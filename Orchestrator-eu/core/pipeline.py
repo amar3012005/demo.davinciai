@@ -7,7 +7,7 @@ Handles STT -> Language Detection -> RAG -> TTS pipeline with multi-language sup
 import asyncio
 import logging
 import time
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Dict, Any, Optional, AsyncGenerator, List
 
 from core.service_client import RAGClient, IntentClient
 from utils.lang_detect import detect_language, detect_language_from_metadata

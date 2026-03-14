@@ -39,8 +39,7 @@ from .models.hivemind_schema import (
 from daytona_agent.services.rag.index_builder import IndexBuilder
 
 # Import rate limiter
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
-from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
+from shared.rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
 
 # Configure logging
 logging.basicConfig(
@@ -2474,13 +2473,13 @@ async def hive_mind_websocket(websocket: WebSocket):
         if websocket in hive_mind_connections:
             hive_mind_connections.remove(websocket)
         logger.info(f"🔌 Hive Mind Visualizer disconnected. Remaining: {len(hive_mind_connections)}")
+    except Exception as e:
+        logger.error(f"📠 WebSocket error: {e}")
+        if websocket in hive_mind_connections:
+            hive_mind_connections.remove(websocket)
     finally:
         # Rate limit: Decrement connection count
         ws_rate_limiter.disconnect(client_ip)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        if websocket in hive_mind_connections:
-            hive_mind_connections.remove(websocket)
 
 
 # Static file serving (for index.html demo page)

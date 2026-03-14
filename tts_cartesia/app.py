@@ -32,9 +32,7 @@ from config import CartesiaConfig
 from cartesia_manager import CartesiaManager
 
 # Import rate limiter
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
-from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
+from shared.rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
 
 # Configure logging
 logging.basicConfig(

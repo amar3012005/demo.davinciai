@@ -22,7 +22,7 @@ class GroqWhisperConfig:
     """
     
     # Groq API settings
-    api_key: str = os.getenv("GROQ_API_KEY", "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")
+    api_key: str = os.getenv("GROQ_API_KEY", "")
     base_url: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
     model: str = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
     

@@ -34,9 +34,7 @@ from core.pipeline import ProcessingPipeline
 from core.ws_handler import OrchestratorWSHandler
 
 # Import rate limiter
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
-from rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
+from shared.rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
 
 # Metrics imports
 from starlette.middleware.base import BaseHTTPMiddleware
