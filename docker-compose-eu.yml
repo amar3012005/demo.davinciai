@@ -120,7 +120,7 @@ services:
       PRE_SPEECH_PADDING_MS: ${PRE_SPEECH_PADDING_MS:-600}
       FINAL_SILENCE_PADDING_MS: ${FINAL_SILENCE_PADDING_MS:-600}
       GROQ_LANGUAGE: ${GROQ_LANGUAGE:-de}
-      GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate, summarize, paraphrase, or normalize it into English. Preserve names, brands, German compounds, umlauts, and Eszett correctly. Keep acronyms and product names as spoken. Do not spell words letter by letter unless the speaker explicitly spells them.}
+      GROQ_BASE_PROMPT: ${GROQ_BASE_PROMPT:-Transcribe the spoken audio exactly in German using normal German orthography. Do not translate.}
 
       STT_GROQ_HOST: 0.0.0.0
       STT_GROQ_PORT: 4002
