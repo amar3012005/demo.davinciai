@@ -149,11 +149,21 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
     const sessionIdRef = useRef(null);
 
     const checkPlaybackComplete = useCallback(() => {
-        if (!audioCtxRef.current) return;
-        if (audioCtxRef.current.currentTime >= lastPlaybackTimeRef.current - 0.1) {
+        if (!audioCtxRef.current) {
+            console.log('[TARA] ⚠️ Audio context not available');
+            return;
+        }
+        const currentTime = audioCtxRef.current.currentTime;
+        const threshold = lastPlaybackTimeRef.current - 0.1;
+
+        console.log(`[TARA] 🔍 Checking playback complete: currentTime=${currentTime.toFixed(3)}, lastPlaybackTime=${lastPlaybackTimeRef.current.toFixed(3)}, threshold=${threshold.toFixed(3)}`);
+
+        if (currentTime >= threshold) {
+            console.log('[TARA] ✅ Playback time threshold reached');
             setAgentIsSpeaking(false);
             if (audioStreamCompleteRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
                 const duration = playbackStartTimeRef.current ? Date.now() - playbackStartTimeRef.current : 0;
+                console.log(`[TARA] 📤 Sending playback_done: duration=${duration}ms, turn=${currentPlaybackTurnIdRef.current}`);
                 wsRef.current.send(JSON.stringify({
                     type: 'playback_done',
                     duration_ms: duration,
@@ -163,7 +173,11 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
                 playbackStartTimeRef.current = null;
                 audioStreamCompleteRef.current = false;
                 currentPlaybackTurnIdRef.current = null;
+            } else {
+                console.log(`[TARA] ⚠️ Cannot send playback_done: audioStreamComplete=${audioStreamCompleteRef.current}, wsState=${wsRef.current?.readyState}`);
             }
+        } else {
+            console.log(`[TARA] ⏳ Waiting for playback complete: need ${threshold.toFixed(3)}, have ${currentTime.toFixed(3)}`);
         }
     }, []);
 
@@ -354,15 +368,30 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
                     if (turnId < minAcceptedPlaybackTurnIdRef.current) {
                         console.log(`[TARA] 🚫 Rejected stale audio chunk: turn ${turnId} < min ${minAcceptedPlaybackTurnIdRef.current}`);
                         if (d.binary_sent && binaryQueueRef.current.length > 0) binaryQueueRef.current.shift();
+                        // Check is_final even for stale chunks (in case this is the final signal)
+                        if (d.is_final) {
+                            console.log(`[TARA] 🏁 Final chunk received (stale turn ${turnId})`);
+                            audioStreamCompleteRef.current = true;
+                            checkPlaybackComplete();
+                        }
                         return;
                     }
                     currentPlaybackTurnIdRef.current = turnId;
                 }
                 if (d.sample_rate) audioConfigRef.current.sampleRate = d.sample_rate;
-                setAgentIsSpeaking(true); audioStreamCompleteRef.current = false;
+                // Only set speaking state if there's actual audio data
+                const hasAudioData = d.binary_sent || d.data || d.audio;
+                if (hasAudioData) {
+                    setAgentIsSpeaking(true);
+                    audioStreamCompleteRef.current = false;
+                }
                 if (d.binary_sent && binaryQueueRef.current.length > 0) { const c = binaryQueueRef.current.shift(); if (c) playAudioChunk(c, audioConfigRef.current.format === 'pcm_s16le'); }
                 else { const a = d.data || d.audio; if (a) playAudioChunk(a); }
-                if (d.is_final) { audioStreamCompleteRef.current = true; checkPlaybackComplete(); }
+                if (d.is_final) {
+                    console.log(`[TARA] 🏁 Final chunk received (turn ${turnId})`);
+                    audioStreamCompleteRef.current = true;
+                    checkPlaybackComplete();
+                }
             } else if (d.type === 'audio_complete' || d.is_final) { audioStreamCompleteRef.current = true; checkPlaybackComplete(); }
             else if (d.type === 'interrupt' || d.type === 'clear' || d.type === 'playback_stop') {
                 stopPlayback();

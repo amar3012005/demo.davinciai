@@ -31,6 +31,8 @@
 
 <!-- Add new entries here (most recent first) -->
 
+- **2026-03-15**: `Orchestrator-eu/static/BundBTaraVoiceWidget_new.jsx` - Fixed `playback_done` not being sent: added debug logging, fixed is_final handling for stale chunks, only reset audioStreamCompleteRef when actual audio data exists
+- **2026-03-15**: `context_architecture/context_architecture.py` - Fixed `TypeError` with `interrupted_text` param: updated `_render_zone_c()` signature and added interruption block rendering for barge-in handling
 - **2026-03-15**: `docker-compose.embeddings.yml` - Added embeddings-eu service with native HTTPS (port 8001→4006, SSL certs from Let's Encrypt), matching orchestrator-eu pattern
 - **2026-03-15**: `.env.eu`, `.env.coolify` - Updated `EMBEDDINGS_SERVICE_URL` to internal Docker URL `https://embeddings-eu:4006/embed`
 - **2026-03-15**: `remote_embeddings.py` - Added `follow_redirects=True`, `verify=False` for HTTPS, `httpx.ConnectError` handler with warning-level logging

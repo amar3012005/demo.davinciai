@@ -94,6 +94,9 @@ class ContextArchitect:
         user_profile: Dict,
         agent_skills: Optional[List[str]] = None,
         agent_rules: Optional[List[str]] = None,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
     ) -> str:
         """
         Assembles the full prompt for one conversation turn.
@@ -104,12 +107,28 @@ class ContextArchitect:
           3. [DYNAMIC] Zone C — User profile + History + Docs + Query
           4. [DYNAMIC] Zone D — Skills + Rules (omitted if empty)
 
+        Args:
+            query: User query text
+            raw_query: Raw user query (before STT normalization)
+            retrieved_docs: Retrieved documents from vector search
+            history: Conversation history (last 4-8 turns)
+            hive_mind: HiveMind insights (tenant_memory, knowledge_base)
+            user_profile: User profile metadata
+            agent_skills: Optional retrieved skills from Qdrant
+            agent_rules: Optional retrieved rules from Qdrant
+            interrupted_text: Assistant's response text that was interrupted (barge-in)
+            interruption_transcripts: User's interruption transcripts
+            interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
+
         hive_mind is currently unused but retained for API compatibility.
         Its insights should be passed via retrieved_docs or user_profile.
         """
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
-            query, raw_query, retrieved_docs, history, user_profile
+            query, raw_query, retrieved_docs, history, user_profile,
+            interrupted_text=interrupted_text,
+            interruption_transcripts=interruption_transcripts,
+            interruption_type=interruption_type,
         )
         zone_d = cls._render_zone_d(agent_skills or [], agent_rules or [])
         return f"{static}\n{zone_c}{zone_d}"
@@ -608,6 +627,9 @@ class ContextArchitect:
         docs: List[Dict],
         history: List[Dict],
         user_profile: Dict,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
     ) -> str:
         """
         Zone C — All dynamic per-turn content.
@@ -651,6 +673,20 @@ class ContextArchitect:
         else:
             context_xml = "    <!-- No retrieved context -->\n"
 
+        # Interruption context (barge-in handling)
+        interruption_block = ""
+        if interrupted_text and interruption_transcripts:
+            transcripts_str = " | ".join(cls._escape(t) for t in interruption_transcripts)
+            int_type = cls._escape(interruption_type or "unknown")
+            interruption_block = f"""
+  <interruption>
+    <was_interrupted>true</was_interrupted>
+    <interrupted_response>{cls._escape(interrupted_text)}</interrupted_response>
+    <interruption_transcripts>{transcripts_str}</interruption_transcripts>
+    <interruption_type>{int_type}</interruption_type>
+  </interruption>
+"""
+
         return f"""<zone_c_dynamic>
 
   <time>{current_time}</time>
@@ -663,7 +699,7 @@ class ContextArchitect:
 
   <knowledge>
 {context_xml}  </knowledge>
-
+{interruption_block}
   <query>{cls._escape(query)}</query>
   <raw>{cls._escape(raw_query)}</raw>
 

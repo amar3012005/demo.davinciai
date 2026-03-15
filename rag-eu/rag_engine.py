@@ -784,9 +784,10 @@ class RAGEngine:
                                     tenant_id=tenant_id,
                                     doc_types=target_types,
                                     limit=unified_limit,
-                                    score_threshold=0.2
+                                    score_threshold=0.2,
+                                    query_text=query
                                 ),
-                                timeout=1.2 # Allow slightly more time for complex filter
+                                timeout=1.5 # Allow slightly more time for hybrid search
                             )
                         
                         search_time = (time.time() - unified_start) * 1000

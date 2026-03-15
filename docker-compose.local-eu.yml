@@ -59,6 +59,9 @@ services:
         condition: service_healthy
       embeddings-eu-local:
         condition: service_started
+    extra_hosts:
+      - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
+      - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"
     networks:
       - eu-local
     env_file:
@@ -109,6 +112,9 @@ services:
     depends_on:
       redis-eu-local:
         condition: service_healthy
+    extra_hosts:
+      - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
+      - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"
     networks:
       - eu-local
     env_file:

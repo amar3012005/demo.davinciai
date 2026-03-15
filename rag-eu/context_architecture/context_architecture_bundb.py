@@ -112,19 +112,14 @@ class ContextArchitect:
     # "auf Englisch bitte", "in english please" etc.
     # English sentences from user (e.g. STT-translated German) do NOT trigger a switch.
 
-    _EN_REQUEST_PHRASES = (
-        "speak english", "in english please", "english please",
-        "reply in english", "respond in english", "switch to english",
-        "auf englisch bitte", "english only",
-        "can you speak english", "talk to me in english",
-        "bitte auf englisch", "bitte englisch",
-        "nur englisch", "only english",
-    )
-
     @classmethod
     def _explicit_english_request(cls, text: str) -> bool:
         t = (text or "").lower().strip()
-        return any(phrase in t for phrase in cls._EN_REQUEST_PHRASES)
+        # Look for the word english/englisch alongside action words
+        if "english" in t or "englisch" in t:
+            action_words = ["speak", "talk", "switch", "change", "reply", "respond", "please", "bitte", "only", "nur", "in"]
+            return any(w in t for w in action_words)
+        return False
 
     @classmethod
     def _detect_lang(cls, query: str, history: List[Dict], user_profile: Dict) -> str:
@@ -250,6 +245,7 @@ Erlaubt: Komma, Punkt, Fragezeichen, Ausrufezeichen, ein einzelner Gedankenstric
 Verboten: Abkürzungen in Großbuchstaben — schreib sie aus.
 Beispiel: nicht KI sondern künstliche Intelligenz, nicht DSGVO sondern Datenschutz-Grundverordnung.
 Geschützte Wörter — genau so schreiben, nie verändern: Blaiq, B&B., bundb.de
+WICHTIG: Wenn der Nutzer "BNB" oder "B and B" schreibt/sagt, ist IMMER die B&B. Markenagentur gemeint.
 
 ## Deutsche Aussprache und Rechtschreibung (TTS-optimiert)
 Schreib jedes deutsche Wort korrekt nach standard deutscher Rechtschreibung — optimiert für Cartesia TTS Sprachausgabe.
@@ -424,11 +420,11 @@ T: Of course. What's the biggest challenge your brand is facing right now?
         tenant_memory = hivemind_insights.get("tenant_memory") or ""
         knowledge_base = hivemind_insights.get("knowledge_base") or ""
         if tenant_memory:
-            hivemind_kb += cls._escape(str(tenant_memory))[:1200]
+            hivemind_kb += cls._escape(str(tenant_memory))[:8000]
         if knowledge_base:
             if hivemind_kb:
                 hivemind_kb += "\n"
-            hivemind_kb += cls._escape(str(knowledge_base))[:1200]
+            hivemind_kb += cls._escape(str(knowledge_base))[:8000]
 
         if lang == "en":
             lang_line = (

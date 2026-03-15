@@ -2112,15 +2112,38 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                 # Named vectors support: point.vector can be dict{name: list}
                 vec = point.vector
                 if isinstance(vec, dict):
-                    vec = next(iter(vec.values())) if vec else None
+                    # For hybrid collections, first vector is usually dense, second is sparse
+                    # We want the dense one (usually first in the dict or named 'dense' or 'vector')
+                    if "dense" in vec:
+                        vec = vec["dense"]
+                    elif "vector" in vec:
+                        vec = vec["vector"]
+                    else:
+                        vec = next(iter(vec.values())) if vec else None
+                
                 if vec is None:
                     continue
-                vectors.append(vec)
-                payloads.append(point.payload or {})
-                point_ids.append(str(point.id))
+                
+                # Robust Dimension Filtering:
+                # Ensure all vectors in the visualization set have identical dimensions
+                if not vectors:
+                    # First valid vector sets the primary dimension
+                    vectors.append(vec)
+                    payloads.append(point.payload or {})
+                    point_ids.append(str(point.id))
+                elif len(vec) == len(vectors[0]):
+                    # Only keep vectors that match the primary dimension
+                    vectors.append(vec)
+                    payloads.append(point.payload or {})
+                    point_ids.append(str(point.id))
+                else:
+                    logger.warning(
+                        f"Skipping point {point.id} in visualization: "
+                        f"dimension mismatch ({len(vec)} vs {len(vectors[0])})"
+                    )
         
         if len(vectors) < 2:
-            # Need at least 2 points for dimensionality reduction
+            # t-SNE / PCA need at least 2 points to calculate relationships
             return HiveMindVisualizationResponse(
                 points=[
                     HiveMindPoint(
@@ -2139,7 +2162,7 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                 ] if vectors else [],
                 collection_name=collection_name,
                 total_points=len(vectors),
-                dimension=qdrant.embedding_dim,
+                dimension=len(vectors[0]) if vectors else qdrant.embedding_dim,
                 algorithm=algorithm
             )
         

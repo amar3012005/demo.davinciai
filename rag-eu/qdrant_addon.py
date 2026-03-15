@@ -2,6 +2,8 @@ import os
 import time
 import uuid
 import logging
+import re
+import hashlib
 from typing import List, Dict, Optional, Any, Union
 
 # Try to import qdrant_client - graceful degradation if missing
@@ -30,6 +32,37 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+class LexicalSparseEncoder:
+    """
+    Very lightweight tokenizer-based sparse vector generator.
+    Enables BM25-like behavior in Qdrant without needing heavy SPLADE models.
+    """
+    def __init__(self, max_indices: int = 1000000):
+        self.max_indices = max_indices
+
+    def encode(self, text: str) -> Dict[str, Union[List[int], List[float]]]:
+        if not text:
+            return {"indices": [], "values": []}
+            
+        # Tokenize (lowercase, remove non-alphanumeric except underscore)
+        tokens = re.findall(r'\w+', text.lower())
+        if not tokens:
+            return {"indices": [], "values": []}
+
+        # Count frequencies
+        counts = {}
+        for t in tokens:
+            # Hash token to a stable index within range
+            idx = int(hashlib.md5(t.encode()).hexdigest(), 16) % self.max_indices
+            counts[idx] = counts.get(idx, 0) + 1
+
+        # Sort by index for Qdrant compatibility (though not strictly required for dict format)
+        sorted_indices = sorted(counts.keys())
+        return {
+            "indices": sorted_indices,
+            "values": [float(counts[idx]) for idx in sorted_indices]
+        }
+
 class QdrantAddon:
     """
     The 'Memory Add-on' for TARA.
@@ -52,6 +85,7 @@ class QdrantAddon:
         self._sync_clients = {}
         self._async_clients = {}
         self._vector_name_cache = {}
+        self.sparse_encoder = LexicalSparseEncoder()
         
         if not QDRANT_AVAILABLE:
             logger.warning("⚠️ qdrant-client not installed. Memory features disabled.")
@@ -351,12 +385,19 @@ class QdrantAddon:
             
             point_id = payload.pop("uuid")  # Use schema-generated UUID
             
+            # Generate sparse vector for hybrid search
+            sparse_vec = self.sparse_encoder.encode(f"{issue} {solution}")
+            dense_name = vector_name or "vector"
+
             await async_client.upsert(
                 collection_name=collection_name,
                 points=[
                     models.PointStruct(
                         id=point_id,
-                        vector={vector_name: vector} if vector_name else vector,
+                        vector={
+                            dense_name: vector,
+                            "sparse": models.SparseVector(**sparse_vec)
+                        },
                         payload=payload
                     )
                 ]
@@ -690,10 +731,12 @@ class QdrantAddon:
         tenant_id: str = "tara",
         doc_types: Optional[List[str]] = None,
         limit: int = 10,
-        score_threshold: float = 0.4
+        score_threshold: float = 0.4,
+        query_text: Optional[str] = None
     ) -> List[Dict]:
         """
         Unified search across multiple doc types with filtering.
+        Supports Hybrid Search (Vector + Lexical) if query_text is provided.
         """
         if not self.enabled: return []
         
@@ -746,14 +789,57 @@ class QdrantAddon:
             else:
                  final_filter = models.Filter(must=must_conditions)
 
-            response = await async_client.query_points(
-                collection_name=collection_name,
-                query=query_vector,
-                using=vector_name,
-                query_filter=final_filter,
-                limit=limit,
-                score_threshold=score_threshold
-            )
+            # Hybrid Search Logic:
+            # We use Prefetches to combine Dense and Sparse search results via RRF
+            if query_text:
+                sparse_vec = self.sparse_encoder.encode(query_text)
+                # Note: We assume the collection has a sparse vector named 'sparse'
+                # If it doesn't, this will gracefully fail or we can catch it.
+                
+                # We also need the dense vector name (usually 'dense' or 'vector')
+                dense_name = vector_name or "vector"
+                
+                try:
+                    response = await async_client.query_points(
+                        collection_name=collection_name,
+                        prefetch=[
+                            models.Prefetch(
+                                query=query_vector,
+                                using=dense_name,
+                                filter=final_filter,
+                                limit=limit * 2,
+                                score_threshold=score_threshold
+                            ),
+                            models.Prefetch(
+                                query=models.SparseVector(**sparse_vec),
+                                using="sparse",
+                                filter=final_filter,
+                                limit=limit * 2
+                            )
+                        ],
+                        query=models.FusionQuery(fusion=models.Fusion.RRF),
+                        limit=limit
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Hybrid search failed (fallback to dense): {e}")
+                    response = await async_client.query_points(
+                        collection_name=collection_name,
+                        query=query_vector,
+                        using=vector_name,
+                        query_filter=final_filter,
+                        limit=limit,
+                        score_threshold=score_threshold
+                    )
+            else:
+                response = await async_client.query_points(
+                    collection_name=collection_name,
+                    query=query_vector,
+                    using=vector_name,
+                    query_filter=final_filter,
+                    limit=limit,
+                    score_threshold=score_threshold
+                )
+            
             hits = response.points
             
             results = []
@@ -859,12 +945,60 @@ class QdrantAddon:
         batch_size = 50
         for i in range(0, len(points), batch_size):
             batch = points[i : i + batch_size]
+            
+            # Hybrid Search Enrichment:
+            # Ensure every point has a sparse vector for lexical search coverage
+            enriched_batch = []
+            for p in batch:
+                vectors = p.vector
+                # If vectors is already a dict with 'sparse', keep it as is
+                if isinstance(vectors, dict) and "sparse" in vectors:
+                    enriched_batch.append(p)
+                    continue
+                
+                # Otherwise, try to generate sparse from payload
+                try:
+                    payload = p.payload or {}
+                    # Collect all searchable text fields
+                    searchable_text = " ".join([
+                        str(payload.get(f, "")) 
+                        for f in ["text", "issue", "solution", "summary", "topic", "filename", "question"] 
+                        if payload.get(f)
+                    ])
+                    
+                    if searchable_text:
+                        sparse_vec = self.sparse_encoder.encode(searchable_text)
+                        
+                        # Handle dense vector name
+                        # Most batches use named vectors or just 'vector' for default
+                        if isinstance(vectors, dict):
+                            # It's a dict but missing 'sparse'
+                            new_vectors = dict(vectors)
+                            new_vectors["sparse"] = models.SparseVector(**sparse_vec)
+                        else:
+                            # It's a single vector (list/array)
+                            new_vectors = {
+                                "dense": vectors,
+                                "sparse": models.SparseVector(**sparse_vec)
+                            }
+                        
+                        enriched_batch.append(models.PointStruct(
+                            id=p.id,
+                            vector=new_vectors,
+                            payload=payload
+                        ))
+                    else:
+                        enriched_batch.append(p)
+                except Exception as e:
+                    logger.warning(f"Failed to enrich point {p.id} with sparse vector: {e}")
+                    enriched_batch.append(p)
+
             try:
                 await async_client.upsert(
                     collection_name=collection_name,
-                    points=batch,
+                    points=enriched_batch,
                 )
-                total += len(batch)
+                total += len(enriched_batch)
             except Exception as e:
                 logger.error(f"Batch upsert failed at offset {i}: {e}")
         return total
