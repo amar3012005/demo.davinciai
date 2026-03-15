@@ -1102,7 +1102,7 @@ class RAGEngine:
         # 4.5 Generation controls (endpoint-tunable)
         gen_cfg = generation_config or {}
         generation_temperature = float(gen_cfg.get("temperature", 0.65))
-        generation_max_tokens = int(gen_cfg.get("max_tokens", 220))
+        generation_max_tokens = int(gen_cfg.get("max_tokens", 400))
         generation_stop = gen_cfg.get("stop")
         if isinstance(generation_stop, str):
             generation_stop = [generation_stop]
