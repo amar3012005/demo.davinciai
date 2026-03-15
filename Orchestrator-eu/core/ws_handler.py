@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import time
+import re
 from urllib.parse import parse_qs
 from urllib.parse import urlparse, urlunparse
 from copy import deepcopy
@@ -1402,9 +1403,13 @@ class OrchestratorWSHandler:
 
             # Quick pre-filter: Only reject obvious non-speech (high confidence noise)
             # Let LLM make the final verdict on everything else
+            # Stricter thresholds to prevent false positives from coughs, background noise
             is_obvious_noise = (
                 not stripped  # Empty text
-                or (no_speech_prob is not None and no_speech_prob > 0.85)  # Very high no-speech probability
+                or len(stripped) < 2  # Too short to be meaningful
+                or (no_speech_prob is not None and no_speech_prob > 0.70)  # Lowered from 0.85 to 0.70
+                or re.match(r'^[aeiouAEIOU]+$', stripped)  # Vowel-only sounds (ah, oh, umm)
+                or len(set(stripped.lower())) == 1  # Repeated single character (aaa, hhh)
             )
 
             if is_obvious_noise:
@@ -1440,6 +1445,27 @@ class OrchestratorWSHandler:
 
             # Log LLM validation response
             logger.info(f"[{session.session_id}] 🧠 LLM VERDICT | Genuine: {is_genuine} | Type: {interruption_type} | Confidence: {confidence:.2f} | Transcript: '{text}'")
+
+            # Confidence gating: only accept as genuine if confidence >= 0.6
+            # This prevents marginal false positives from triggering interruptions
+            if confidence < 0.6:
+                logger.info(f"[{session.session_id}] 🚫 LOW CONFIDENCE ({confidence:.2f} < 0.6) - treating as noise, browser continues playing")
+                session.interruption_transcripts.clear()
+                return
+
+            # Multiple transcript requirement for short interruptions
+            # If the transcript is very short (< 4 chars), require at least 2 transcripts
+            # This prevents single-speech false positives from triggering
+            if len(text) < 4 and len(session.interruption_transcripts) < 2:
+                logger.info(f"[{session.session_id}] 🚫 SHORT TRANSCRIPT ({len(text)} chars) - waiting for more evidence (collected: {len(session.interruption_transcripts)})")
+                # Don't clear - continue collecting transcripts
+                # But don't trigger interruption yet either
+                if not is_final:
+                    return
+                # If final but still short, treat as noise
+                logger.info(f"[{session.session_id}] 🚫 SHORT FINAL TRANSCRIPT - treating as noise")
+                session.interruption_transcripts.clear()
+                return
 
             if is_genuine:
                 logger.info(f"[{session.session_id}] ✅ GENUINE INTERRUPTION - pausing browser, interrupting response")
@@ -1599,7 +1625,13 @@ class OrchestratorWSHandler:
 
             # DEFERRED BARGE-IN: If SPEAKING, mark barge-in pending but DO NOT pause browser.
             # Browser continues playing audio. Only pause AFTER LLM validates genuine interruption.
+            # Also check minimum speaking time before allowing barge-in (prevents rapid state flipping)
             if state_mgr.state == State.SPEAKING:
+                # Check if we've been speaking long enough to allow barge-in
+                if not state_mgr.is_barge_in_allowed():
+                    logger.debug(f"[{session.session_id}] ⏱️ SPEECH_END ignored - minimum speaking time not met")
+                    return
+
                 logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_END) - collecting transcript for LLM validation (browser continues playing)")
                 session.barge_in_pending = True
                 # DO NOT send playback_stop here - browser continues playing until LLM validates
@@ -1680,21 +1712,28 @@ class OrchestratorWSHandler:
                 return
 
             if state_mgr.state == State.SPEAKING:
-                # DEFERRED BARGE-IN: Don't hard-interrupt on VAD alone - wait for STT validation
+                # Check if we've been speaking long enough to allow barge-in
+                if not state_mgr.is_barge_in_allowed():
+                    logger.debug(f"[{session.session_id}] ⏱️ SPEECH_START ignored - minimum speaking time not met")
+                    return
+
+                # DEFERRED BARGE-IN: Don't stop playback on VAD alone - wait for STT validation
+                # This prevents false positives from stopping the agent prematurely
                 logger.info(f"[{session.session_id}] ⏸️ Potential barge-in (SPEECH_START) - deferring, waiting for STT validation")
                 session.barge_in_pending = True
-                await self._send_json(session.websocket, {"type": "playback_stop", "timestamp": time.time()}, session)
+                # DO NOT send playback_stop here - browser continues playing until LLM validates genuine interruption
 
-                # Start a timeout: if no valid STT transcript arrives, recover from noise
+                # Start a timeout: if no valid STT transcript arrives, clear barge-in pending (same as SPEECH_END)
+                # Timeout is 15s to account for slow STT responses (Groq Whisper can take 5-10s under load)
                 output_language = self._get_output_language(session.current_language, session)
 
                 async def barge_in_validation_timeout():
                     try:
-                        await asyncio.sleep(5.0)
-                        if session.barge_in_pending and not session.is_closed and state_mgr.state == State.SPEAKING:
+                        await asyncio.sleep(15.0)  # 15 second timeout for STT
+                        # Only clear if barge-in still pending (transcript never arrived or validation still running)
+                        if session.barge_in_pending and not session.is_closed:
                             session.barge_in_pending = False
-                            logger.info(f"[{session.session_id}] 🔄 Noise recovery - no valid transcript after SPEECH_START barge-in, returning to LISTENING")
-                            await self._recover_from_noise_interrupt(session)
+                            logger.info(f"[{session.session_id}] 🔄 Barge-in timeout - no transcript received, ignoring")
                         else:
                             session.barge_in_pending = False
                     except asyncio.CancelledError:
@@ -4212,10 +4251,18 @@ Classify the interruption:
 - "clarification": User clarifies their previous query
 - "noise": Filler words, coughs, false starts, accidental speech, or non-speech sounds
 
+Confidence Scoring Guidelines:
+- Use confidence scores consistently and conservatively
+- High confidence (0.8-1.0): Clear, meaningful speech that contextually fits as an interruption
+- Medium confidence (0.6-0.79): Likely genuine speech but somewhat ambiguous
+- Low confidence (below 0.6): Marginal case - could go either way, lean toward rejecting
+
 Important:
 - Short words like "stop", "wait", "yes", "no", "hello" are GENUINE speech, not noise
-- Single meaningful words should be classified as genuine
+- Single meaningful words should be classified as genuine with MEDIUM confidence (0.6-0.7)
 - Only classify as "noise" if it's clearly non-speech or accidental
+- Coughs, throat clearing, "ah", "oh", "hmm", "umm" are NOISE - classify with high confidence
+- Background sounds, laughter, sighs are NOISE
 
 Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": "...", "confidence": 0.0-1.0}}
 """

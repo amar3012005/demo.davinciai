@@ -41,6 +41,9 @@ from daytona_agent.services.rag.index_builder import IndexBuilder
 # Import rate limiter
 from shared.rate_limiter import RateLimitMiddleware, WebSocketRateLimiter
 
+# Import tts_safe for German text post-processing before TTS
+from context_architecture import tts_safe
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1444,6 +1447,8 @@ async def stream_query_knowledge_base(request: QueryRequest):
             # Clean markdown from entire answer first
             cleaned_answer = re.sub(r'\*\*([^*]+)\*\*', r'\1', answer)
             cleaned_answer = re.sub(r'\*([^*]+)\*', r'\1', cleaned_answer)
+            # Apply German TTS post-processing (umlauts, numbers, loanwords)
+            cleaned_answer = tts_safe(cleaned_answer)
             
             # Split by sentences for more natural chunking (fallback to word-based if no periods)
             sentences = re.split(r'([.!?]\s+)', cleaned_answer)
@@ -1501,6 +1506,8 @@ async def stream_query_knowledge_base(request: QueryRequest):
             import re
             cleaned_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Remove **bold**
             cleaned_text = re.sub(r'\*([^*]+)\*', r'\1', cleaned_text)  # Remove *italic*
+            # Apply German TTS post-processing (umlauts, numbers, loanwords)
+            cleaned_text = tts_safe(cleaned_text)
             q.put_nowait((cleaned_text, is_final))
             
         async def run_query():

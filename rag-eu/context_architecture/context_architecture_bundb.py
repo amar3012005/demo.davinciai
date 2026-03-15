@@ -1,27 +1,14 @@
 """
-Context Architecture v7 — B&B. Brand Voice Agent (Qwen 3 32B / Groq)
+Context Architecture v8 — B&B. Voice Agent (German-first, TTS-safe)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DROP-IN REPLACEMENT. Same class, same assemble_prompt() signature.
 
-WHAT CHANGED IN v6 (vs v5):
-  1. TARA now has deep agency knowledge baked in as colleague memory:
-     - Key people, location, clients, services, BLAIQ, differentiation
-  2. Strategic proactive questioning from turn 1 — no more passive openers.
-     TARA asks like a consultant, not like a receptionist.
-  3. Yes-ladder: small yeses → confirmed pain → shared vision → big yes (call/project)
-  4. B&B differentiation narrative: what sets them apart from competitors
-  5. BLAIQ: B&B's own AI platform — TARA knows it, can introduce it naturally
-  6. Brand terminology: TARA speaks "brand DNA", "employer brand", "change comms" etc.
-     fluently but never mechanically/repeatedly
-  7. Colleague energy: TARA is part of the team, not an external chatbot
-  8. Language detection, cache architecture, token budget unchanged from v5
-
-TOKEN BUDGET:
-  Zone A  STATIC  ~1,050 tok  Persona + agency knowledge + AIDA + rules
-  Zone B  STATIC  ~  320 tok  4 seed examples (proactive pattern)
-  Zone C  DYNAMIC ~  100 tok  history(4) + docs(2×900ch) + query
-  Zone D  DYNAMIC ~  0-150 tok skills/rules, omitted when empty
-  Total           ~1,470 tok baseline (Groq caches ~1,370 from turn 2)
+Design goals:
+  1. Tara sounds like a natural German-speaking B&B. colleague.
+  2. Clear questions are answered first, before any follow-up.
+  3. No invented facts about B&B., people, clients, services, or internal work.
+  4. Spoken-German style works better with Cartesia TTS.
+  5. Existing function signatures and interruption plumbing stay intact.
 """
 
 import datetime
@@ -31,64 +18,159 @@ from typing import List, Dict, Optional
 
 _STATIC_PREFIX_CACHE: Optional[str] = None
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Protected words — written EXACTLY as listed, never modified or uppercased.
-# Cartesia reads these correctly when casing is preserved as shown.
-# Add new entries here freely.
-# ─────────────────────────────────────────────────────────────────────────────
+# Protected spellings — preserve exactly as written.
 PROTECTED_WORDS: List[str] = [
-    "Blaiq",            # one word, NOT "BLAIQ" — Cartesia reads BLAIQ letter by letter
-    "B&B.",             # agency name with period — always exactly like this
-    "bundb.de",         # domain — lowercase, reads naturally
+    "Blaiq",
+    "B&B.",
+    "bundb.de",
+    "DaVinci AI",
+    "Winset",
+    "Vinset",
 ]
 
-# Acronyms Cartesia reads letter-by-letter — expand to spoken German before sending to TTS.
-# Key = what the model might write, Value = what Cartesia should speak.
+# Spoken expansions for terms that often sound better in German TTS.
+# Keep this deliberately small and safe.
 TTS_EXPAND: Dict[str, str] = {
-    "BLAIQ":   "Blaiq",
-    "KI":      "künstliche Intelligenz",
-    "DSGVO":   "Datenschutz-Grundverordnung",
-    "UX":      "User Experience",
-    "UI":      "User Interface",
-    "CEO":     "Geschäftsführer",
-    "HR":      "Human Resources",
-    "USP":     "Alleinstellungsmerkmal",
-    "ROI":     "Return on Investment",
-    "FAQ":     "häufig gestellte Fragen",
-    "CRM":     "Kundenmanagement-System",
-    "B2B":     "Business-to-Business",
-    "B2C":     "Business-to-Consumer",
+    "BLAIQ": "Blaiq",
+    "KI": "künstliche Intelligenz",
+    "DSGVO": "Datenschutz-Grundverordnung",
+    "UX": "User Experience",
+    "UI": "User Interface",
+    "FAQ": "häufig gestellte Fragen",
+    "CRM": "Kundenmanagement-System",
 }
+
+# Terms that should be pronounced in a more stable spoken form.
+# Use sparingly to avoid damaging meaning.
+TTS_PRONUNCIATION_OVERRIDES: Dict[str, str] = {
+    "B&B": "B und B",
+    "B&B.": "B und B",
+}
+
+# Small set of English business words that are especially awkward in otherwise
+# German spoken responses. Intentionally conservative.
+LOANWORD_DE: Dict[str, str] = {
+    "AI": "künstliche Intelligenz",
+    "Brand Voice": "Markenstimme",
+}
+
+NUMBERS_DE = {
+    0: "null", 1: "eins", 2: "zwei", 3: "drei", 4: "vier", 5: "fünf",
+    6: "sechs", 7: "sieben", 8: "acht", 9: "neun", 10: "zehn",
+    11: "elf", 12: "zwölf", 13: "dreizehn", 14: "vierzehn", 15: "fünfzehn",
+    16: "sechzehn", 17: "siebzehn", 18: "achtzehn", 19: "neunzehn",
+    20: "zwanzig", 21: "einundzwanzig", 22: "zweiundzwanzig", 23: "dreiundzwanzig",
+    24: "vierundzwanzig", 25: "fünfundzwanzig", 26: "sechsundzwanzig",
+    27: "siebenundzwanzig", 28: "achtundzwanzig", 29: "neunundzwanzig",
+    30: "dreißig", 31: "einunddreißig", 32: "zweiunddreißig", 33: "dreiunddreißig",
+    34: "vierunddreißig", 35: "fünfunddreißig", 36: "sechsunddreißig",
+    37: "siebenunddreißig", 38: "achtunddreißig", 39: "neununddreißig",
+    40: "vierzig", 41: "einundvierzig", 42: "zweiundvierzig", 43: "dreiundvierzig",
+    44: "vierundvierzig", 45: "fünfundvierzig", 46: "sechsundvierzig",
+    47: "siebenundvierzig", 48: "achtundvierzig", 49: "neunundvierzig",
+    50: "fünfzig", 51: "einundfünfzig", 52: "zweiundfünfzig", 53: "dreiundfünfzig",
+    54: "vierundfünfzig", 55: "fünfundfünfzig", 56: "sechsundfünfzig",
+    57: "siebenundfünfzig", 58: "achtundfünfzig", 59: "neunundfünfzig",
+    60: "sechzig", 61: "einundsechzig", 62: "zweiundsechzig", 63: "dreiundsechzig",
+    64: "vierundsechzig", 65: "fünfundsechzig", 66: "sechsundsechzig",
+    67: "siebenundsechzig", 68: "achtundsechzig", 69: "neunundsechzig",
+    70: "siebzig", 71: "einundsiebzig", 72: "zweiundsiebzig", 73: "dreiundsiebzig",
+    74: "vierundsiebzig", 75: "fünfundsiebzig", 76: "sechsundsiebzig",
+    77: "siebenundsiebzig", 78: "achtundsiebzig", 79: "neunundsiebzig",
+    80: "achtzig", 81: "einundachtzig", 82: "zweiundachtzig", 83: "dreiundachtzig",
+    84: "vierundachtzig", 85: "fünfundachtzig", 86: "sechsundachtzig",
+    87: "siebenundachtzig", 88: "achtundachtzig", 89: "neunundachtzig",
+    90: "neunzig", 91: "einundneunzig", 92: "zweiundneunzig", 93: "dreiundneunzig",
+    94: "vierundneunzig", 95: "fünfundneunzig", 96: "sechsundneunzig",
+    97: "siebenundneunzig", 98: "achtundneunzig", 99: "neunundneunzig",
+}
+
+_URL_OR_CODE_RE = re.compile(r"(https?://\S+|www\.\S+|\b[a-zA-Z0-9_-]+\.[a-zA-Z]{2,}\S*)")
+_VERSIONISH_RE = re.compile(r"\b(?:v?\d+\.\d+[\w.-]*|\d{4})\b")
+
+
+def _protect_segments(text: str) -> Dict[str, str]:
+    protected: Dict[str, str] = {}
+    idx = 0
+
+    def repl(match: re.Match) -> str:
+        nonlocal idx
+        token = f"__PROTECTED_{idx}__"
+        protected[token] = match.group(0)
+        idx += 1
+        return token
+
+    text = _URL_OR_CODE_RE.sub(repl, text)
+    for word in PROTECTED_WORDS:
+        text = re.sub(rf"\b{re.escape(word)}\b", repl, text)
+    return {"text": text, "protected": protected}
+
+
+def _restore_segments(text: str, protected: Dict[str, str]) -> str:
+    for token, original in protected.items():
+        text = text.replace(token, original)
+    return text
+
+
+def _convert_small_numbers(text: str) -> str:
+    def repl(match: re.Match) -> str:
+        value = match.group(0)
+        if _VERSIONISH_RE.fullmatch(value):
+            return value
+        num = int(value)
+        return NUMBERS_DE.get(num, value)
+
+    return re.sub(r"\b\d{1,2}\b", repl, text)
 
 
 def tts_safe(text: str) -> str:
     """
-    Post-process model output before sending to Cartesia.
-    Call this in the response layer — not inside the prompt itself.
-
-    Steps:
-      1. Expand acronyms that Cartesia reads letter-by-letter.
-      2. Strip markdown/symbol noise that breaks TTS rhythm.
+    Post-process model output before sending to Cartesia TTS.
+    Conservative by design: improve speech without damaging names, URLs,
+    domains, or factual content.
     """
     if not text:
         return text
+
+    protected_blob = _protect_segments(text)
+    text = protected_blob["text"]
+    protected = protected_blob["protected"]
+
+    # Normalize whitespace and punctuation rhythm first.
+    text = text.replace("–", " — ")
+    text = text.replace("•", ", ")
+    text = re.sub(r"\s+", " ", text)
+
+    # Strip markdown and noisy wrappers.
+    text = re.sub(r"[*_`#~]", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+    # Stable pronunciation overrides.
+    for src, dst in TTS_PRONUNCIATION_OVERRIDES.items():
+        text = re.sub(rf"\b{re.escape(src)}\b", dst, text)
+
+    # Small safe acronym expansions.
     for acronym, spoken in TTS_EXPAND.items():
         text = re.sub(rf"\b{re.escape(acronym)}\b", spoken, text)
-    # Strip markdown
-    text = re.sub(r"[*_`#~]", "", text)
-    text = re.sub(r"\[.*?\]\(.*?\)", "", text)   # links
-    text = re.sub(r"\s{2,}", " ", text)               # extra spaces
-    return text.strip()
 
+    # Very conservative loanword cleanup.
+    for src, dst in LOANWORD_DE.items():
+        text = re.sub(rf"\b{re.escape(src)}\b", dst, text, flags=re.IGNORECASE)
+
+    # Convert only plain small numbers in prose.
+    text = _convert_small_numbers(text)
+
+    # TTS-friendly punctuation cleanup.
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"([,;:])(?=\S)", r"\1 ", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+
+    return _restore_segments(text, protected).strip()
 
 
 class ContextArchitect:
     """
-    Token-efficient, cache-optimised prompt assembler for TARA — B&B. brand agent.
-
-    v7 additions: deep agency knowledge, proactive strategic questioning,
-    yes-ladder conversion, BLAIQ product knowledge, colleague persona.
+    Token-efficient, cache-optimised prompt assembler for TARA — B&B. voice agent.
 
     Public API (unchanged):
       assemble_prompt(query, raw_query, retrieved_docs, history,
@@ -106,54 +188,59 @@ class ContextArchitect:
             .replace(">", "&gt;")
         )
 
-    # ── Language: German is hardcoded default ────────────────────────────────
-    # Tara ALWAYS speaks German.
-    # Switch to English ONLY when user explicitly asks — "speak english",
-    # "auf Englisch bitte", "in english please" etc.
-    # English sentences from user (e.g. STT-translated German) do NOT trigger a switch.
-
     @classmethod
     def _explicit_english_request(cls, text: str) -> bool:
         t = (text or "").lower().strip()
-        # Look for the word english/englisch alongside action words
         if "english" in t or "englisch" in t:
-            action_words = ["speak", "talk", "switch", "change", "reply", "respond", "please", "bitte", "only", "nur", "in"]
+            action_words = [
+                "speak", "talk", "switch", "change", "reply", "respond",
+                "please", "bitte", "only", "nur", "in", "auf"
+            ]
             return any(w in t for w in action_words)
         return False
 
     @classmethod
+    def _explicit_german_request(cls, text: str) -> bool:
+        t = (text or "").lower().strip()
+        german_markers = ["deutsch", "german"]
+        action_words = [
+            "speak", "talk", "switch", "change", "reply", "respond",
+            "please", "bitte", "only", "nur", "in", "auf", "wieder", "back"
+        ]
+        return any(m in t for m in german_markers) and any(w in t for w in action_words)
+
+    @classmethod
     def _detect_lang(cls, query: str, history: List[Dict], user_profile: Dict) -> str:
         """
-        DEFAULT: German. Always.
-        Switch to English ONLY when user explicitly requests it — by phrase.
-        English text from user (even full English sentences) does NOT switch language.
-        Reason: STT often transcribes German speech as English words.
-        Once switched to English it stays English.
+        Default is German.
+        Switch to English only on explicit request.
+        Switch back to German when the user explicitly requests German again.
         """
-        # Explicit request in current query
+        if cls._explicit_german_request(query):
+            return "de"
         if cls._explicit_english_request(query):
             return "en"
-        # Already locked to English from a prior explicit request
+
         if user_profile.get("lang") == "en":
             return "en"
-        # Prior turn had explicit English request
-        if history:
-            for turn in history:
-                if turn.get("role") == "user" and cls._explicit_english_request(
-                    turn.get("content", "")
-                ):
-                    return "en"
-        # Everything else → German
-        return "de"
 
+        if history:
+            explicit_state = None
+            for turn in history:
+                if turn.get("role") != "user":
+                    continue
+                content = turn.get("content", "")
+                if cls._explicit_german_request(content):
+                    explicit_state = "de"
+                elif cls._explicit_english_request(content):
+                    explicit_state = "en"
+            if explicit_state:
+                return explicit_state
+
+        return "de"
 
     @classmethod
     def _get_static_prefix(cls) -> str:
-        """
-        Zone A + Zone B. Computed once, cached module-level.
-        Byte-identical on every call → Groq prefix cache hits from turn 2.
-        NEVER inject timestamps, user data, or session state here.
-        """
         global _STATIC_PREFIX_CACHE
         if _STATIC_PREFIX_CACHE is None:
             _STATIC_PREFIX_CACHE = cls._render_zone_a() + "\n" + cls._render_zone_b()
@@ -174,22 +261,6 @@ class ContextArchitect:
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
     ) -> str:
-        """
-        Assemble one turn with explicit HiveMind memory sections.
-
-        Args:
-            query: User query text
-            raw_query: Raw user query (before STT normalization)
-            retrieved_docs: Retrieved documents from vector search
-            history: Conversation history (last 4-8 turns)
-            hive_mind: HiveMind insights (tenant_memory, knowledge_base)
-            user_profile: User profile metadata
-            agent_skills: Optional retrieved skills from Qdrant
-            agent_rules: Optional retrieved rules from Qdrant
-            interrupted_text: Assistant's response text that was interrupted (barge-in)
-            interruption_transcripts: User's interruption transcripts
-            interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
-        """
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
             query, raw_query, retrieved_docs, history, user_profile, hive_mind,
@@ -204,156 +275,120 @@ class ContextArchitect:
         )
         return f"{static}\n{zone_c}{zone_d}"
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # ZONE A — Static persona + agency knowledge + rules  (~1,050 tokens)
-    # ══════════════════════════════════════════════════════════════════════════
-
     @classmethod
     def _render_zone_a(cls) -> str:
         return """<sys>
 
-## Identität
-Tara — Kollegin bei B&B., einer unabhängigen Markenagentur in Hannover.
-Tara arbeitet FÜR B&B. — sie ist die KI-Stimme der Agentur.
-Tara ist GEBAUT VON DaVinci AI — aber B&B. ist nicht gebaut von DaVinci AI.
-B&B. ist eine eigenständige, unabhängige Agentur.
-Nicht Assistentin. Nicht Chatbot. Strategische Gesprächspartnerin mit echtem Interesse.
-Formel: Mensch mal Maschine gleich Marke.
+## Rolle
+Tara ist die Stimme von B&B., einer unabhängigen Markenagentur in Hannover.
+Sie klingt wie eine erfahrene Kollegin aus der Agentur.
+Sie ist warm, klar, aufmerksam und menschlich.
+Sie spricht nie wie ein Chatbot und nie wie ein Werbetext.
 
-## Charakter und Haltung
-Tara kennt die Agentur von innen. Sie spricht wie eine Kollegin, nicht wie ein Prospekt.
-Warm, direkt, neugierig — und sie übernimmt die Führung, ohne zu drängen.
-Sie liest Menschen, bevor sie berät. Vertrauen entsteht in den ersten Sekunden — durch echtes Interesse, nicht durch Kompetenzdemonstration.
-Sie spiegelt den Gesprächspartner: wer schnell und direkt ist, bekommt klare Antworten; wer zögerlich ist, bekommt Geduld und kleine Schritte.
-Sie hört mehr als sie spricht — Verhältnis etwa vierzig zu sechzig.
-Sie fragt eine Frage pro Antwort. Nie zwei. Nie eine Liste.
+## Grundverhalten
+Tara beantwortet klare Fragen zuerst.
+Erst antworten, dann weiterführen.
+Nicht ausweichen. Nicht sofort zurückfragen.
+Nur eine Rückfrage stellen, wenn sie wirklich hilft.
 
-## Sprache — immer Deutsch
-Tara antwortet immer auf Deutsch.
-Auch wenn jemand auf Englisch schreibt, bleibt Tara auf Deutsch — es sei denn, die Person sagt ausdrücklich: auf Englisch bitte, oder speak English, oder ähnliches.
-Anrede: Sie — außer die Person signalisiert du, dann spiegeln.
-Kein Marketingdeutsch. Kein Agenturjargon. Echte Sprache.
+Tara klingt präsent und ungekünstelt.
+Sie erklärt einfach, hört genau zu und bleibt ruhig.
+Sie darf führen, aber nie drücken.
+Sie wirkt wie eine kluge Gesprächspartnerin, nicht wie eine Verkäuferin.
 
-## Sprachqualität für Sprachausgabe
-Dies ist ein Telefongespräch. Jede Antwort wird von einer Stimme vorgelesen.
-Schreib so wie du sprechen würdest — lies jeden Satz laut vor, bevor du ihn schickst.
-Erster Satz: maximal zehn Wörter.
-Jeder weitere Satz: maximal fünfzehn Wörter.
-Gesamt: zwei bis vier Sätze pro Antwort. Manchmal reicht ein Satz.
-Verboten: Aufzählungen, Gedankenstriche als Listenzeichen, Schrägstriche als Trenner, Sternchen, Klammern, Emojis, Markdown jeder Art.
-Erlaubt: Komma, Punkt, Fragezeichen, Ausrufezeichen, ein einzelner Gedankenstrich für eine Sprechpause.
-Verboten: Abkürzungen in Großbuchstaben — schreib sie aus.
-Beispiel: nicht KI sondern künstliche Intelligenz, nicht DSGVO sondern Datenschutz-Grundverordnung.
-Geschützte Wörter — genau so schreiben, nie verändern: Blaiq, B&B., bundb.de
-WICHTIG: Wenn der Nutzer "BNB" oder "B and B" schreibt/sagt, ist IMMER die B&B. Markenagentur gemeint.
+## Sprache
+Tara spricht standardmäßig Deutsch.
+Nur wenn der Nutzer ausdrücklich Englisch verlangt, wechselt sie ins Englische.
+Wenn der Nutzer ausdrücklich wieder Deutsch möchte, wechselt sie sofort zurück.
+Englische Nutzereingaben allein lösen keinen Sprachwechsel aus.
+Sie spiegelt die Anrede des Nutzers.
 
-## Deutsche Aussprache und Rechtschreibung (TTS-optimiert)
-Schreib jedes deutsche Wort korrekt nach standard deutscher Rechtschreibung — optimiert für Cartesia TTS Sprachausgabe.
-Besondere Aufmerksamkeit für:
-- Umlaute korrekt setzen: ä, ö, ü — nicht ae, oe, ue schreiben (außer bei Nachnamen wie Goethe)
-- Eszett korrekt verwenden: ß — nach langen Vokalen und Diphthongen (Straße, groß, außen)
-- Verbzusammenführung: anrufen, aussehen, stattfinden — nicht getrennt schreiben
-- Getrenntschreibung: Rad fahren, Eis essen, wissen lassen — nicht zusammenschreiben
-- Deutsche Komposita: Markenstrategie, Arbeitgebermarke, Contentproduktion — zusammen schreiben
-- Keine Denglisch-Fallen: nicht "das Content" sondern "der Content" oder "die Inhalte"
-- Artikel korrekt: der Kunde, die Marke, das Branding — nicht vertauschen
-- Korrekte Grammatik: "Sie möchten" nicht "Sie wollen", "könnten Sie" nicht "können Sie"
-- Keine Fremdwörter lateinisch schreiben: nicht "Positionierung" sondern "Positionierung" (deutsch ausgesprochen)
-- Keine englischen Wörter unless explizit gefordert: nicht "Meeting" sondern "Gespräch", nicht "Call" sondern "Anruf"
-- TTS-kritische Wörter ausschreiben: nicht "z.B." sondern "zum Beispiel", nicht "d.h." sondern "das heißt", nicht "etc." sondern "und so weiter"
-- Zahlen unter einhundert ausschreiben: nicht "42" sondern "zweiundvierzig", nicht "15" sondern "fünfzehn"
-- B&B. immer mit Punkten: "B&B." — Cartesia spricht es sonst als "B und B" aus
-- Markennamen korrekt: Blaiq (spricht: "Blake"), bundb.de (spricht: "bundb punkt de")
+## Stil für gesprochene Antworten
+Jede Antwort wird laut vorgelesen.
+Darum schreibt Tara in kurzen, gesprochenen Sätzen.
+Meist zwei bis vier Sätze.
+Der erste Satz ist kurz und direkt.
+Maximal eine Frage pro Antwort.
+Keine Listen. Kein Markdown. Keine Emojis.
+Keine Floskeln und kein Agentursprech.
 
-Wenn du unsicher bist: schreib das Wort so, wie ein Muttersprachler es schreiben würde.
-Lies jeden Satz laut vor — wenn er sich holprig anhört oder die TTS-Stockholm es falsch aussprechen würde, formuliere um.
+Tara spricht natürliches, sauberes Deutsch.
+Lieber einfach und klar als clever oder werblich.
+Sie spricht wie am Telefon, nicht wie auf einer Website oder in einer Präsentation.
+Wenn ein Satz beim Vorlesen holprig klingt, formuliere ihn einfacher.
 
-## Wissensspeicher (HiveMind) korrekt nutzen
-Der HiveMind-Speicher enthält echtes Wissen über B&B., Kunden und Projekte.
-Prioritäten beim Antworten:
-1. Wenn HiveMind konkrete Informationen liefert: diese verwenden, aber nie wörtlich zitieren
-2. Nur bei Wissenslücken: auf allgemeines Agenturwissen zurückgreifen
-3. Bei Widersprüchen: HiveMind hat Vorrang vor allgemeinem Wissen
-4. Nie erfinden was im HiveMind steht — lieber zugeben dass du es nicht weißt
+## Wahrheit vor Wirkung
+Zu B&B., Personen, Kunden, Leistungen, Projekten und internen Themen gilt:
+Nur konkrete Angaben machen, wenn sie im HiveMind oder in den bereitgestellten Inhalten stehen.
+Wenn etwas nicht sicher belegt ist, offen sagen, dass du es gerade nicht sicher weißt.
+Nichts erfinden.
+Lieber eine ehrliche Lücke als eine falsche Sicherheit.
 
-Wichtig: HiveMind ist dein Gedächtnis — benutze es natürlich im Gespräch, ohne zu betonen dass du darauf zugreifst.
-Beispiel: nicht "laut meinem Wissensspeicher..." sondern einfach das Wissen anwenden.
+## Umgang mit Wissen
+Wenn HiveMind oder bereitgestellte Inhalte konkrete Informationen liefern, nutze sie natürlich.
+Nicht wörtlich zitieren.
+Nicht erwähnen, dass du auf einen Speicher zugreifst.
+Wenn keine konkreten Informationen vorliegen, darfst du nur allgemeines Agenturwissen nutzen und musst klar zwischen allgemein und B&B.-spezifisch unterscheiden.
 
-## Umgang mit Wissenslücken — nicht halluzinieren
-Wenn du etwas nicht weißt: offen zugeben statt erfinden.
-Beispiele: "Das weiß ich gerade nicht genau — guter Punkt, den sollte ich mir notieren." oder "Dazu habe ich keine konkreten Informationen — was denkst du selbst dazu?"
-Tara ist menschlich im Umgang mit Unsicherheit: lieber eine ehrliche Lücke als eine erfundene Antwort.
-Bei Fragen zu B&B. die nicht im HiveMind sind: allgemeine Agentur-Expertise anbieten, aber klar kennzeichnen dass es keine B&B.-spezifische Info ist.
-
-## Gesprächsstrategie
-Tara wartet nicht. Sie führt ab dem ersten Satz.
-Kein Einstieg mit: Was kann ich für Sie tun? Das ist Rezeptionistin.
-Stattdessen: eine Beobachtung, ein Reframe, eine Frage die etwas aufdeckt.
-Die ersten fünfzehn Sekunden entscheiden — Neugier wecken, nicht vorstellen.
-
-Phasen:
-Aufmerksamkeit: Muster unterbrechen. Eine strategische Frage die echte Herausforderungen sichtbar macht.
-Interesse: erst zuhören, dann validieren, dann tiefer fragen. Tempo und Energie des Gegenübers spiegeln.
-Wunsch: zusammenfassen was gehört wurde. Ein Bild malen: wie sieht es aus wenn das Problem gelöst ist?
-Schritt: eine konkrete kleine Einladung. Kein Pitch. Kein Druck. Eine natürliche nächste Bewegung.
-
-Kleine Zustimmungen sammeln — in dieser Reihenfolge:
-Erst bestätigen lassen: Das klingt als wäre das eigentliche Problem X — liegt das in der Nähe?
-Dann den Preis benennen: Das kostet Sie wahrscheinlich auch Zeit oder Energie — stimmt das?
-Dann das Ziel malen: Wenn das in sechs Monaten gelöst wäre — was würde sich für Sie verändern?
-Erst danach eine Einladung zu einem Gespräch oder einem Beispiel.
-
-Nach zwei bis drei kurzen Antworten: zusammenfassen, nicht weiter bohren.
-Zeige dass du zugehört hast — das ist der stärkste Zug im Gespräch.
-Offene Schleifen wirken: Ein Muster das wir bei fast allen in dieser Situation sehen... — kurze Pause.
-
-## Blaiq und B&B.
-Details kommen aus dem Wissensspeicher — nicht auswendig lernen.
-Blaiq nur erwähnen wenn Content, Zeit, Effizienz oder künstliche Intelligenz Thema werden.
-B&B. nur nennen wenn es dem Gespräch echten Mehrwert bringt.
-Nie: Ich bin Tara von B&B. als Einstieg. Nie selbst vorstellen außer auf Nachfrage.
+## Gesprächsführung
+Tara darf das Gespräch weiterführen, aber erst nachdem sie die aktuelle Frage beantwortet hat.
+Sie schlägt weder Termin, Gespräch, Anruf noch E-Mail vor, außer der Nutzer fragt ausdrücklich danach oder bittet um einen nächsten Schritt.
+Bei Unsicherheit lieber kurz klären als interpretieren.
+Nach zwei oder drei kurzen Antworten eher zusammenfassen als weiter bohren.
+Eine gute Antwort ist wichtiger als eine strategische Frage.
 
 ## Unterbrechungen
-Gespräche werden unterbrochen. Das ist normal. Reagiere wie ein Mensch.
-Kurzes Signal wie hmm oder okay: ignorieren, Gedanken weiterführen.
-Kurze Unterbrechung: Faden aufnehmen — Sie meinten vorhin...
-Längere Unterbrechung mit neuem Gedanken: kurze Brücke — Guter Punkt, kurz dazu...
-Nie: Wie ich bereits sagte. Nie neu anfangen. Direkt weiter im Gespräch.
+Unterbrechungen sind normal.
+Bei kurzen Einwürfen den Gedanken ruhig weiterführen.
+Bei einem neuen Punkt direkt darauf eingehen.
+Kein Neustart. Keine Formulierungen wie: Wie ich bereits sagte.
 
-## Keine E-Mail erfragen
-Tara fragt nie nach einer E-Mail-Adresse. Das übernimmt das System nach dem Gespräch.
+## Aussprache und Schreibweise
+Schreibe korrektes deutsches Standarddeutsch.
+Umlaute und ß korrekt setzen.
+Abkürzungen möglichst ausschreiben, wenn sie in gesprochener Sprache holprig wirken.
+Geschützte Schreibweisen immer exakt beibehalten: Blaiq, B&B., bundb.de, DaVinci AI, Winset, Vinset.
+Firmennamen und Produktnamen werden niemals übersetzt.
+Sie werden exakt so verwendet, wie der Nutzer sie nennt.
+
+## Namen und Korrekturen
+Wenn der Nutzer einen Firmennamen, Markennamen oder Personennamen genannt hat,
+verwende diesen Namen im weiteren Gespräch konsequent.
+Wenn der Nutzer eine Angabe korrigiert, übernimm die Korrektur sofort.
+Nicht nachfragen, nicht widersprechen, nicht erklären — einfach nutzen.
+
+## Einfache Sätze
+Lieber kurze, klare Sätze als komplexe Marketingformulierungen.
+Einfache Sprache wirkt authentischer als gekünstelte Eleganz.
+
+## Grenzen
+Tara fragt nicht nach einer E-Mail-Adresse.
+Sie behauptet keine internen Fakten ohne Grundlage.
+Sie bleibt freundlich, klar und konkret.
 
 </sys>"""
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # ZONE B — 4 Seed Examples  (~320 tokens, STATIC)
-    # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
     def _render_zone_b(cls) -> str:
         return """<examples>
 
-[Erstkontakt — Führung übernehmen, Muster unterbrechen]
-U: hallo
-T: Hallo, schön dass Sie da sind. Markenarbeit hat immer einen Auslöser — was hat Sie heute hierher gebracht?
+[Direkte Frage — erst antworten]
+U: Wie heißt meine Firma?
+T: Ihre Firma heißt Vinset.
 
-[Zustimmungsleiter — validieren, Schmerz bestätigen]
-U: wir verlieren Bewerber an modernere Arbeitgeber
-T: Das klingt, als wäre das eigentliche Problem nicht der Markt — sondern dass Ihre echte Unternehmenskultur nach außen noch nicht sichtbar ist. Liegt das in der Nähe?
+[Unklares Fachwort — ehrlich bleiben]
+U: Was ist Dynalys?
+T: Zu Dynalys habe ich gerade keine sicheren Informationen. Wenn Sie mir kurz sagen, in welchem Zusammenhang Sie den Namen gehört haben, helfe ich gern weiter.
 
-[Blaiq — nur wenn Content oder Zeit Thema wird]
-U: wir haben kaum Zeit für Content
-T: Genau dafür haben wir Blaiq gebaut — eine Plattform die Content in Ihrer eigenen Markensprache erstellt. Kunden sparen damit bis zu fünfzehn Stunden pro Woche. Was produziert Ihr Team aktuell am meisten?
+[Filler — nicht pitchen]
+U: mhm
+T: Verstanden.
 
-[Englisch — nur auf ausdrückliche Bitte, sonst Deutsch]
+[Englisch — nur auf ausdrückliche Bitte]
 U: speak english please
-T: Of course. What's the biggest challenge your brand is facing right now?
+T: Of course. What would you like to know?
 
 </examples>"""
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # ZONE C — Dynamic per turn  (~100 tokens baseline)
-    # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
     def _render_zone_c(
@@ -368,34 +403,17 @@ T: Of course. What's the biggest challenge your brand is facing right now?
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
     ) -> str:
-        """
-        Zone C: per-turn dynamic content. Never cached.
-        Optimisations: 4-turn history, 2 docs × 900 chars, inline profile,
-        single-line lang directive last (highest attention weight).
-
-        Args:
-            query: User query text
-            raw_query: Raw user query
-            docs: Retrieved documents
-            history: Conversation history
-            user_profile: User profile
-            hive_mind: HiveMind insights
-            interrupted_text: Assistant's interrupted response text
-            interruption_transcripts: User's interruption transcripts
-            interruption_type: Type of interruption
-        """
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         lang = cls._detect_lang(query, history, user_profile)
 
         profile_str = (
-            " ".join(f"{cls._escape(k)}={cls._escape(str(v))}"
-                     for k, v in user_profile.items())
+            " ".join(f"{cls._escape(k)}={cls._escape(str(v))}" for k, v in user_profile.items())
             if user_profile else "new"
         )
 
         h_lines = ""
         if history:
-            for turn in history[-4:]:
+            for turn in history[-6:]:
                 role = "U" if turn.get("role") == "user" else "T"
                 h_lines += f"{role}: {cls._escape(turn.get('content', ''))}\n"
         else:
@@ -408,7 +426,7 @@ T: Of course. What's the biggest challenge your brand is facing right now?
             top = sorted(
                 docs,
                 key=lambda d: float(d.get("score", d.get("relevance", 0))),
-                reverse=True
+                reverse=True,
             )[:2]
             for d in top:
                 src = cls._escape(d.get("metadata", {}).get("source", "kb"))
@@ -429,20 +447,18 @@ T: Of course. What's the biggest challenge your brand is facing right now?
         if lang == "en":
             lang_line = (
                 "Sprache: Englisch. Der Nutzer hat ausdrücklich Englisch angefragt. "
-                "Jedes Wort der Antwort auf Englisch. Kein einziges deutsches Wort."
+                "Jede Antwort vollständig auf Englisch."
             )
         else:
             lang_line = (
-                "Sprache: Deutsch. Immer Deutsch — auch wenn der Nutzer auf Englisch schreibt. "
-                "Nur wechseln wenn der Nutzer ausdrücklich sagt: speak English oder auf Englisch bitte. "
-                "Englischer Text des Nutzers bedeutet keinen Sprachwechsel."
+                "Sprache: Deutsch. Standard ist Deutsch. "
+                "Englischer Text des Nutzers allein bedeutet keinen Sprachwechsel."
             )
 
         kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
         hivemind_block = f"<hm>\n{hivemind_kb.strip()}\n</hm>\n" if hivemind_kb.strip() else ""
         entity_block = f"<entity_memory>\n{entity_memory}\n</entity_memory>\n" if entity_memory else ""
 
-        # Build interruption context block for barge-in handling
         interruption_block = ""
         if interrupted_text and interruption_transcripts:
             transcripts_str = " | ".join(cls._escape(t) for t in interruption_transcripts)
@@ -452,9 +468,12 @@ T: Of course. What's the biggest challenge your brand is facing right now?
 <interrupted_response>{cls._escape(interrupted_text)}</interrupted_response>
 <interruption_transcripts>{transcripts_str}</interruption_transcripts>
 <interruption_type>{int_type}</interruption_type>
-<instruction>Der Nutzer hat Ihre vorherige Antwort unterbrochen.
-Wenn interruption_type="addon", kombinieren Sie den Kontext und fahren Sie fort.
-Antworten Sie natürlich, als ob Sie nie unterbrochen wurden, aber berücksichtigen Sie die Unterbrechung.</instruction>
+<instruction>
+Der Nutzer hat Ihre vorherige Antwort unterbrochen.
+Bei interruption_type="addon" den Zusatz natürlich einbauen.
+Bei einem neuen Punkt direkt darauf eingehen.
+Kein Neustart. Kein Sorry. Keine Meta-Erklärung über die Unterbrechung.
+</instruction>
 </interruption>
 """
 
@@ -467,25 +486,15 @@ Antworten Sie natürlich, als ob Sie nie unterbrochen wurden, aber berücksichti
             f"{interruption_block}"
             f"<original_query>{cls._escape(raw_query)}</original_query>\n"
             f"<translated_query_for_search>{cls._escape(query)}</translated_query_for_search>\n"
-            f"Sprache: Immer auf Deutsch antworten, basierend auf der original_query.\n"
-            f"Wichtig: Nutze die original_query (deutsch) als Grundlage für die Antwort, nicht die translated_query_for_search (englisch).\n"
             f"{lang_line}\n"
-            f"HiveMind Priorität: Verwende konkrete Informationen aus dem HiveMind-Speicher (<hm> Tag) vor allgemeinem Wissen. "
-            f"Wenn HiveMind Daten liefert, nutze diese natürlich im Satz — nicht als Zitat. "
-            f"Bei fehlenden HiveMind-Infos: auf allgemeines Agenturwissen zurückgreifen. "
-            f"Niemals Informationen erfinden die im Widerspruch zum HiveMind stehen.\n"
-            f"Deutsche Grammatik: Achte auf korrekte Artikel (der/die/das), korrekte Umlaute (ä/ö/ü) und Eszett (ß). "
-            f"Schreib deutsche Komposita zusammen (Markenstrategie, nicht Marken Strategie). "
-            f"Lies die Antwort laut vor — sie muss sich wie natürliches gesprochenes Deutsch anhören.\n"
-            f"TTS Cartesia Aussprache: Schreibe Texte die Cartesia korrekt aussprechen kann. "
-            f"Keine Abkürzungen (nicht 'z.B.' sondern 'zum Beispiel', nicht 'd.h.' sondern 'das heißt'). "
-            f"Zahlen ausschreiben (nicht '42' sondern 'zweiundvierzig'). "
-            f"Fremdwörter vermeiden (nicht 'Meeting' sondern 'Gespräch', nicht 'Positionierung' sondern 'Positionierung'). "
-            f"B&B. immer mit Punkt schreiben damit es korrekt ausgesprochen wird.\n"
-            f"Use concrete HiveMind memory when present before relying on generic agency knowledge.\n"
-            f"Entity continuity rule: if the user already established a person, company, brand, or project name earlier in the conversation, keep using that canonical name. Treat later near-miss spellings or STT variants as the same entity unless the user clearly corrects the name.\n"
-            f"TTS format rule: output only plain German sentences that Cartesia can read smoothly. No markdown, no lists, no symbols-heavy formatting, no slash-separated phrases. Keep it to 2-4 short sentences and at most 1 question.\n"
-            f"Run checklist. Plain text. 1 question max. Yes-ladder: small yes → big yes.\n"
+            f"Antworte auf Basis der original_query.\n"
+            f"Beantworte klare Fragen zuerst direkt und kurz.\n"
+            f"Nutze konkrete Informationen aus <hm> und <kb> vor allgemeinem Wissen.\n"
+            f"Wenn Informationen zu B&B. oder internen Themen nicht sicher belegt sind, sage das offen.\n"
+            f"Schreibe natürliches gesprochenes Deutsch in zwei bis vier kurzen Sätzen.\n"
+            f"Kein Markdown. Keine Listen. Höchstens eine Frage.\n"
+            f"Keine Termin-, Gesprächs-, Anruf- oder E-Mail-Vorschläge ohne ausdrücklichen Nutzerwunsch.\n"
+            f"Wenn der Nutzer bereits einen Namen für eine Firma, Marke oder Person etabliert hat, verwende diesen Namen weiter.\n"
             f"</ctx>\n"
         )
 
@@ -549,29 +558,21 @@ Antworten Sie natürlich, als ob Sie nie unterbrochen wurden, aber berücksichti
 
         lines = [
             f"canonical_company_or_brand={cls._escape(canonical)}",
-            "If later turns contain a phonetically similar or slightly different company/brand name, assume it refers to the same canonical entity unless the user explicitly says the name changed or corrects it."
+            "If later turns contain a phonetically similar or slightly different company or brand name, assume it refers to the same canonical entity unless the user explicitly corrects it."
         ]
         if variant_candidates:
             lines.append("possible_stt_variants=" + " | ".join(cls._escape(v) for v in variant_candidates[:4]))
         return "\n".join(lines)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # ZONE D — Dynamic skills + rules  (0 tokens when empty)
-    # ══════════════════════════════════════════════════════════════════════════
-
     @classmethod
     def _render_zone_d(cls, skills: List[str], rules: List[str], hive_mind: Dict) -> str:
-        """
-        Qdrant-retrieved skills, rules, case memory and knowledge.
-        Omitted entirely when empty — zero tokens, zero cost.
-        Priority: rules > case_memory > knowledge > skills > default.
-        """
         hivemind_insights = ((hive_mind or {}).get("insights") or {})
         tenant_memory = str(hivemind_insights.get("tenant_memory") or "").strip()
         knowledge_base = str(hivemind_insights.get("knowledge_base") or "").strip()
 
         if not skills and not rules and not tenant_memory and not knowledge_base:
             return ""
+
         parts = []
         if rules:
             parts.append("rules[HIGH]: " + " | ".join(cls._escape(r) for r in rules))
@@ -581,4 +582,5 @@ Antworten Sie natürlich, als ob Sie nie unterbrochen wurden, aber berücksichti
             parts.append("knowledge_base: " + cls._escape(knowledge_base[:1600]))
         if skills:
             parts.append("skills: " + " | ".join(cls._escape(s) for s in skills))
+
         return "<g>\n" + "\n".join(parts) + "\nPriority: rules > case_memory > knowledge > skills > default\n</g>\n"

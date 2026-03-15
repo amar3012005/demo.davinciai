@@ -768,6 +768,7 @@ class RAGEngine:
                         unified_start = time.time()
                         
                         # Perform semantic search, or browse latest memories for inventory-style dashboard queries
+                        # Perform semantic search, or browse latest memories for inventory-style dashboard queries
                         if browse_mode:
                             results = await asyncio.wait_for(
                                 self.qdrant.browse_tenant_memory(
@@ -778,13 +779,14 @@ class RAGEngine:
                                 timeout=1.2
                             )
                         else:
+                            # Fetch a larger pool to allow for balanced selection (3/2/1/1 strategy)
                             results = await asyncio.wait_for(
                                 self.qdrant.search_unified_memory(
                                     query_vector=v_raw,
                                     tenant_id=tenant_id,
                                     doc_types=target_types,
-                                    limit=unified_limit,
-                                    score_threshold=0.2,
+                                    limit=30 if not dashboard_mode else unified_limit,
+                                    score_threshold=0.15,
                                     query_text=query
                                 ),
                                 timeout=1.5 # Allow slightly more time for hybrid search
@@ -801,8 +803,41 @@ class RAGEngine:
                             "general_kb": []
                         }
                         
-                        hm_entries = []
+                        # Stratified Selection logic (Only for chat, not dashboard)
+                        raw_categories = {
+                            "Agent_Skill": [],
+                            "Agent_Rule": [],
+                            "Case_Memory": [],
+                            "General_KB": []
+                        }
+
                         for r in results:
+                            dt = r.get("doc_type")
+                            if dt in raw_categories:
+                                raw_categories[dt].append(r)
+
+                        # Filter and slice according to 3/2/1/1 strategy (or 10 for dashboard)
+                        if dashboard_mode:
+                            filtered_results = results[:unified_limit]
+                            logger.info(f"📊 Dashboard retrieval: {len(filtered_results)} total chunks")
+                        else:
+                            # Reserve slots: top 3 KB, top 2 Case, top 1 Skill, top 1 Rule
+                            kb_slice = raw_categories["General_KB"][:3]
+                            case_slice = raw_categories["Case_Memory"][:2]
+                            skill_slice = raw_categories["Agent_Skill"][:1]
+                            rule_slice = raw_categories["Agent_Rule"][:1]
+                            
+                            filtered_results = kb_slice + case_slice + skill_slice + rule_slice
+                            
+                            # Detailed logging of the strata
+                            logger.info(
+                                f"🧠 Stratified retrieval: {len(filtered_results)} final chunks from pool of {len(results)}. "
+                                f"Distribution: KB={len(kb_slice)}, Case={len(case_slice)}, "
+                                f"Skill={len(skill_slice)}, Rule={len(rule_slice)}"
+                            )
+
+                        hm_entries = []
+                        for r in filtered_results:
                             dt = r.get("doc_type")
                             payload = r.get("payload", {})
                             

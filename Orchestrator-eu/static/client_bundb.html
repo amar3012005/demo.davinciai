@@ -572,6 +572,71 @@
         .controls-panel::-webkit-scrollbar-thumb { background: var(--color-dark-gray); }
 
         .hidden { display: none !important; }
+
+        /* Floating Action Button for Start Session - Mobile */
+        .fab-container {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .fab-button {
+            background: var(--color-orange);
+            color: var(--color-white);
+            border: none;
+            border-radius: 24px;
+            padding: 14px 28px;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(242, 86, 35, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: var(--transition);
+        }
+
+        .fab-button:hover:not(:disabled) {
+            background: var(--color-orange-dark);
+            transform: translateX(-50%) scale(1.05);
+            box-shadow: 0 6px 24px rgba(242, 86, 35, 0.5);
+        }
+
+        .fab-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .fab-button.end {
+            background: var(--color-error);
+        }
+
+        .fab-button.end:hover:not(:disabled) {
+            background: #dc2626;
+        }
+
+        @media (min-width: 768px) {
+            .fab-container {
+                position: static;
+                transform: none;
+                flex-direction: row;
+                justify-content: center;
+                margin-bottom: 16px;
+            }
+            .fab-button {
+                width: 100%;
+                justify-content: center;
+            }
+            .fab-button:hover:not(:disabled) {
+                transform: scale(1.05);
+            }
+        }
     </style>
 </head>
 
@@ -600,7 +665,7 @@
                     <div class="empty-state" id="emptyState">
                         <span class="material-icons-round">chat_bubble_outline</span>
                         <h3>Start a conversation</h3>
-                        <p>Click "Start Session" then use the microphone or type a message</p>
+                        <p>Tap the button below to begin</p>
                     </div>
                 </div>
 
@@ -619,58 +684,17 @@
             </div>
         </main>
 
-        <!-- Controls Panel (Collapsible on Mobile) -->
-        <aside class="controls-panel">
-            <div class="panel-section">
-                <h4 class="section-title">Phone Number</h4>
-                <div class="phone-input-row">
-                    <input type="tel" class="session-input" id="phoneNumber" placeholder="+49..." style="flex: 1;" />
-                    <button id="callBtn" class="session-button call-button" style="width: auto; padding: 0 16px;" title="Initiate Outgoing Call">
-                        <span class="material-icons-round">call</span>
-                    </button>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <h4 class="section-title">Session</h4>
-                <button class="session-button start" id="startSession">
-                    <span class="material-icons-round">play_arrow</span>
-                    Start Session
-                </button>
-                <button class="session-button end hidden" id="endSession">
-                    <span class="material-icons-round">stop</span>
-                    End Session
-                </button>
-            </div>
-
-            <div class="panel-section">
-                <h4 class="section-title">Status</h4>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <span class="info-label">State</span>
-                        <span class="info-value" id="currentState">Idle</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Session ID</span>
-                        <span class="info-value" id="sessionId">—</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <h4 class="section-title">Response Language</h4>
-                <div class="language-toggle">
-                    <span class="lang-label" id="langEn">EN</span>
-                    <div class="toggle-switch" id="languageToggle"></div>
-                    <span class="lang-label active" id="langDe">DE</span>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <h4 class="section-title">System Logs</h4>
-                <div class="logs-container" id="logsContainer"></div>
-            </div>
-        </aside>
+        <!-- Floating Action Button for Session Control -->
+        <div class="fab-container">
+            <button class="fab-button" id="startSession">
+                <span class="material-icons-round">play_arrow</span>
+                Start Session
+            </button>
+            <button class="fab-button end hidden" id="endSession">
+                <span class="material-icons-round">stop</span>
+                End Session
+            </button>
+        </div>
     </div>
 
     <script>
@@ -734,14 +758,6 @@
                 this.sendButton = document.getElementById('sendButton');
                 this.startSessionBtn = document.getElementById('startSession');
                 this.endSessionBtn = document.getElementById('endSession');
-                this.currentStateEl = document.getElementById('currentState');
-                this.sessionIdEl = document.getElementById('sessionId');
-                this.logsContainer = document.getElementById('logsContainer');
-                this.languageToggle = document.getElementById('languageToggle');
-                this.langEn = document.getElementById('langEn');
-                this.langDe = document.getElementById('langDe');
-                this.phoneNumberInput = document.getElementById('phoneNumber');
-                this.callBtn = document.getElementById('callBtn');
                 this.vadVisualizer = document.getElementById('vadVisualizer');
 
                 // Initialize VAD bars
@@ -755,22 +771,11 @@
                     }
                 }
 
-                // Load saved phone number
-                const savedPhone = localStorage.getItem('TARA_phone_number');
-                if (savedPhone) {
-                    this.phoneNumberInput.value = savedPhone;
-                }
-
-                this.phoneNumberInput.addEventListener('change', () => {
-                    localStorage.setItem('TARA_phone_number', this.phoneNumberInput.value);
-                });
-
                 // Event listeners
                 this.startSessionBtn.onclick = () => this.connect();
                 this.endSessionBtn.onclick = () => this.endSession();
                 this.micButton.onclick = () => this.toggleMicrophone();
                 this.sendButton.onclick = () => this.sendTextInput();
-                this.callBtn.onclick = () => this.initiateCall();
 
                 this.textInput.onkeydown = (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -784,41 +789,7 @@
                     this.textInput.style.height = Math.min(this.textInput.scrollHeight, 100) + 'px';
                 };
 
-                this.languageToggle.onclick = () => this.toggleLanguage();
-
-                this.updateLanguageUI();
                 this.addLog('Ready to connect', 'info');
-            }
-
-            async initiateCall() {
-                const phone = this.phoneNumberInput.value.trim();
-                if (!phone) {
-                    this.addLog('Please enter a phone number', 'warning');
-                    return;
-                }
-
-                this.addLog(`Initiating call to ${phone}...`, 'info');
-                this.callBtn.disabled = true;
-                this.callBtn.style.opacity = '0.5';
-
-                try {
-                    const response = await fetch('/api/phone/call', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ to: phone })
-                    });
-                    const result = await response.json();
-                    if (result.status === 'success') {
-                        this.addLog(`Call initiated! SID: ${result.call_sid}`, 'success');
-                    } else {
-                        throw new Error(result.detail || 'Failed to start call');
-                    }
-                } catch (e) {
-                    this.addLog(`Call failed: ${e.message}`, 'error');
-                } finally {
-                    this.callBtn.disabled = false;
-                    this.callBtn.style.opacity = '1';
-                }
             }
 
             connect() {
@@ -830,14 +801,7 @@
                 this.updateStatus('connecting', 'Connecting...');
                 this.addLog('Connecting to TARA...', 'info');
 
-                const phone = this.phoneNumberInput.value.trim();
-                let url = WS_URL;
-                if (phone) {
-                    url += (url.includes('?') ? '&' : '?') + `user_id=${encodeURIComponent(phone)}`;
-                    this.addLog(`Identity: ${phone}`, 'info');
-                }
-
-                this.ws = new WebSocket(url);
+                this.ws = new WebSocket(WS_URL);
                 this.ws.binaryType = 'arraybuffer';
 
                 this.ws.onopen = async () => {
@@ -849,7 +813,6 @@
                     this.endSessionBtn.classList.remove('hidden');
                     this.textInput.disabled = false;
                     this.sendButton.disabled = false;
-                    this.phoneNumberInput.disabled = true;
                     this.micButton.disabled = false;
 
                     this.send({
@@ -859,10 +822,10 @@
                             tenant_id: DEFAULT_TENANT_ID,
                             agent_id: DEFAULT_TENANT_ID.toLowerCase(),
                             agent_name: DEFAULT_AGENT_NAME,
-                            user_id: phone || 'anonymous_user',
+                            user_id: 'anonymous_user',
                             stt_mode: 'audio',
                             tts_mode: 'audio',
-                            language: this.fillerLanguage
+                            language: 'de'
                         }
                     });
                     this.addLog(`Session config sent: tenant=${DEFAULT_TENANT_ID}`, 'info');
@@ -920,15 +883,6 @@
                 this.micButton.disabled = true;
                 this.sendButton.disabled = true;
                 this.textInput.disabled = true;
-                this.phoneNumberInput.disabled = false;
-
-                this.sessionIdEl.textContent = '—';
-                this.currentStateEl.textContent = 'Idle';
-                this.currentStateEl.className = 'info-value';
-
-                this.chunkCounter = 0;
-                this.totalLatency = 0;
-                this.successfulResponses = 0;
 
                 // Reset VAD bars
                 if (this.vadVisualizer) {
@@ -940,41 +894,16 @@
                 }
             }
 
-            toggleLanguage() {
-                this.fillerLanguage = this.fillerLanguage === 'de' ? 'en' : 'de';
-                this.updateLanguageUI();
-
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.send({ type: 'change_language', language: this.fillerLanguage });
-                    this.addLog(`Language: ${this.fillerLanguage.toUpperCase()}`, 'info');
-                }
-            }
-
-            updateLanguageUI() {
-                if (this.fillerLanguage === 'en') {
-                    this.languageToggle.classList.remove('active');
-                    this.langEn.classList.add('active');
-                    this.langDe.classList.remove('active');
-                } else {
-                    this.languageToggle.classList.add('active');
-                    this.langEn.classList.remove('active');
-                    this.langDe.classList.add('active');
-                }
-            }
-
             async handleMessage(data) {
                 const { type } = data;
 
                 switch (type) {
                     case 'session_ready':
-                        this.sessionId = data.session_id;
-                        this.sessionIdEl.textContent = this.sessionId.substring(0, 12) + '...';
-                        this.addLog(`Session: ${this.sessionId.substring(0, 16)}...`, 'success');
+                        this.addLog('Session ready', 'success');
                         break;
 
                     case 'state_update':
                         this.state = data.state;
-                        this.updateStateDisplay(data.state);
                         if (data.state === 'thinking' || data.state === 'interrupt' || data.state === 'listening') {
                             this.stopAudioPlayback();
                         }
@@ -1067,14 +996,6 @@
                 }
             }
 
-            updateStateDisplay(state) {
-                this.currentStateEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
-                this.currentStateEl.className = 'info-value';
-                if (state === 'listening') this.currentStateEl.classList.add('state-listening');
-                else if (state === 'speaking') this.currentStateEl.classList.add('state-speaking');
-                else if (state === 'thinking') this.currentStateEl.classList.add('state-thinking');
-            }
-
             addMessage(text, sender) {
                 this.emptyState.classList.add('hidden');
                 const messageDiv = document.createElement('div');
@@ -1156,17 +1077,6 @@
                         }
                     }
                 }
-
-                // Latency tracking
-                if (data.latency_ms) {
-                    this.totalLatency += data.latency_ms;
-                    this.successfulResponses++;
-                    const avg = Math.round(this.totalLatency / this.successfulResponses);
-                    this.addLog(`Latency: ${data.latency_ms}ms (avg: ${avg}ms)`, 'info');
-                }
-
-                this.chunkCount++;
-                if (this.chunkCountDisplay) this.chunkCountDisplay.textContent = this.chunkCount;
             }
 
             async initAudio() {
@@ -1224,7 +1134,6 @@
                     source.connect(this.audioContext.destination);
 
                     const startTime = Math.max(this.nextPlayTime, this.audioContext.currentTime);
-                    source.start(startTime);
                     this.nextPlayTime = startTime + buffer.duration;
 
                     source.onended = () => {
@@ -1334,6 +1243,9 @@
             }
 
             addLog(message, type = 'info') {
+                // Skip logging if logsContainer doesn't exist (e.g., in production UI)
+                if (!this.logsContainer) return;
+
                 const logItem = document.createElement('div');
                 logItem.className = `log-item ${type}`;
                 const time = new Date().toLocaleTimeString();

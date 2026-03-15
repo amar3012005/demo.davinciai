@@ -78,16 +78,25 @@ class ConversationContext:
 class StateManager:
     """
     Simplified FSM for real-time voice conversations.
-    
+
     Manages state transitions with optional Redis persistence.
     """
-    
+
+    # Minimum time (seconds) required in each state before allowing transitions
+    # This prevents rapid state flipping from noise/sensitivity issues
+    MIN_STATE_DURATIONS = {
+        State.SPEAKING: 1.5,    # Must speak for at least 1.5s before barge-in allowed
+        State.THINKING: 0.5,    # Must think for at least 0.5s before timeout
+        State.LISTENING: 0.3,   # Must listen for at least 0.3s before speech_end
+    }
+
     def __init__(self, session_id: str, redis_client=None):
         self.session_id = session_id
         self.redis = redis_client
         self.state = State.IDLE
         self.last_transition_trigger = None  # Track the trigger that caused the last transition
         self._lock = asyncio.Lock()  # Ensure atomic transitions
+        self.state_entered_time = time.time()  # Track when current state was entered
         self.context = ConversationContext(
             session_id=session_id,
             state=State.IDLE.value
@@ -128,21 +137,39 @@ class StateManager:
         except Exception as e:
             logger.warning(f"[{self.session_id}] ⚠️ Redis load failed: {e}")
     
-    async def transition(self, new_state: State, trigger: str, data: Optional[Dict] = None) -> list:
+    async def transition(self, new_state: State, trigger: str, data: Optional[Dict] = None, skip_duration_check: bool = False) -> list:
         """
         Atomic state transition with logging and Redis persistence.
-        
+
         Args:
             new_state: Target state
             trigger: Transition trigger (e.g., "stt_final", "response_ready")
             data: Optional context data
-        
+            skip_duration_check: If True, skip minimum duration check (for emergency transitions)
+
         Returns:
             List of side effects to execute (e.g., ["play_immediate_filler"])
         """
         async with self._lock:
             old_state = self.state
-            
+
+            # Check minimum duration for certain transitions (prevents rapid state flipping)
+            if not skip_duration_check and old_state in self.MIN_STATE_DURATIONS:
+                time_in_state = time.time() - self.state_entered_time
+                min_duration = self.MIN_STATE_DURATIONS[old_state]
+
+                # Special handling for barge-in/interrupt transitions from SPEAKING
+                if old_state == State.SPEAKING and new_state in (State.INTERRUPT, State.LISTENING):
+                    if time_in_state < min_duration:
+                        logger.warning(
+                            f"[{self.session_id}] ⚠️ BLOCKED rapid transition: "
+                            f"{old_state.value.upper()} → {new_state.value.upper()} | "
+                            f"Time in state: {time_in_state:.2f}s < min: {min_duration}s | "
+                            f"trigger: {trigger}"
+                        )
+                        # Allow the transition but log the warning (don't block entirely)
+                        # This is for debugging - we want to see if this is causing issues
+
             # Validate transition
             if new_state not in self.valid_transitions.get(old_state, []):
                 if new_state == State.IDLE and trigger == "error":
@@ -154,25 +181,26 @@ class StateManager:
                         f"(trigger: {trigger})"
                     )
                     return []
-            
+
             # Update state
             self.state = new_state
             self.last_transition_trigger = trigger  # Track the trigger for side effects
             self.context.state = new_state.value
             self.context.last_activity_time = time.time()
-            
+            self.state_entered_time = time.time()  # Reset the timer for the new state
+
             # Update context with data
             if data:
                 if "language" in data:
                     self.context.current_language = data["language"]
                 if "turn_number" in data:
                     self.context.turn_number = data["turn_number"]
-            
+
             logger.info(f"[{self.session_id}] 🔄 {old_state.value.upper()} → {new_state.value.upper()} | {trigger}")
-            
+
             # Persist to Redis
             await self.save_state()
-            
+
             # Return side effects that need to be executed
             contract = StateContract.get(new_state)
             side_effects = contract.get("side_effects", [])
@@ -194,5 +222,29 @@ class StateManager:
             await self.redis.expire(redis_key, 3600)  # 1 hour TTL
         except Exception as e:
             logger.warning(f"[{self.session_id}] ⚠️ Redis save failed: {e}")
+
+    def get_time_in_state(self) -> float:
+        """Returns how long (in seconds) we've been in the current state"""
+        return time.time() - self.state_entered_time
+
+    def is_barge_in_allowed(self) -> bool:
+        """
+        Check if barge-in is allowed based on minimum speaking time.
+        Returns True if we've been in SPEAKING state long enough to allow interruption.
+        """
+        if self.state != State.SPEAKING:
+            return False
+
+        time_in_state = self.get_time_in_state()
+        min_duration = self.MIN_STATE_DURATIONS.get(State.SPEAKING, 1.5)
+
+        if time_in_state < min_duration:
+            logger.debug(
+                f"[{self.session_id}] ⏱️ Barge-in blocked: "
+                f"Time in SPEAKING: {time_in_state:.2f}s < min: {min_duration}s"
+            )
+            return False
+
+        return True
 
 
