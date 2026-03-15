@@ -1182,7 +1182,7 @@
                             <select id="activeTenant" class="viz-select"
                                 style="background: rgba(255,255,255,0.05); border-color: #333; color: white; width: 100%; padding: 10px; border-radius: 8px; font-family: inherit;">
                                 <option value="davinci">Davinci AI</option>
-                                <option value="bundb">BundB</option>
+                                <option value="bundb" selected>BundB</option>
                                 <option value="demo">Demo Environment</option>
                                 <option value="techz">Techz</option>
                                 <option value="tara">Default (Tara)</option>
@@ -2307,6 +2307,7 @@
                     const payload = {
                         query: text,
                         history_context: this.history,
+                        tenant_id: document.getElementById('activeTenant').value,
                         context: {
                             session_id: this.sessionId,
                             tenant_id: document.getElementById('activeTenant').value

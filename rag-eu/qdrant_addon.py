@@ -187,7 +187,8 @@ class QdrantAddon:
 
                 if isinstance(dumped, dict) and dumped:
                     for key in dumped.keys():
-                        if key in {"size", "distance", "on_disk", "datatype", "hnsw_config", "quantization_config"}:
+                        # Exclude internal metadata keys and 'sparse' when looking for dense vector
+                        if key in {"size", "distance", "on_disk", "datatype", "hnsw_config", "quantization_config", "multivector_config", "sparse"}:
                             continue
                         if str(key).strip():
                             vector_name = str(key).strip()
@@ -200,7 +201,7 @@ class QdrantAddon:
                     dumped_vectors = params.get("vectors")
                     if isinstance(dumped_vectors, dict):
                         for key, value in dumped_vectors.items():
-                            if key in {"size", "distance", "on_disk", "datatype", "hnsw_config", "quantization_config"}:
+                            if key in {"size", "distance", "on_disk", "datatype", "hnsw_config", "quantization_config", "multivector_config", "sparse"}:
                                 continue
                             if isinstance(value, dict) or value is not None:
                                 if str(key).strip():
@@ -214,6 +215,37 @@ class QdrantAddon:
         except Exception:
             self._vector_name_cache[cache_key] = None
             return None
+
+    def _check_sparse_exists(self, sync_client, collection_name: str) -> bool:
+        """Check if collection supports sparse vectors named 'sparse'."""
+        cache_key = f"sparse:{id(sync_client)}:{collection_name}"
+        if cache_key in self._vector_name_cache:
+            return bool(self._vector_name_cache[cache_key])
+        try:
+            info = sync_client.get_collection(collection_name)
+            
+            # Check config.params.sparse_vectors
+            config = getattr(info, "config", None)
+            params = getattr(config, "params", None)
+            sparse_vectors = getattr(params, "sparse_vectors", None)
+            
+            exists = False
+            if isinstance(sparse_vectors, dict) and "sparse" in sparse_vectors:
+                exists = True
+            elif sparse_vectors:
+                # If it's a model with dict access
+                try:
+                    dumped = sparse_vectors.model_dump() if hasattr(sparse_vectors, "model_dump") else {}
+                    if "sparse" in dumped:
+                        exists = True
+                except Exception:
+                    pass
+            
+            self._vector_name_cache[cache_key] = exists
+            return exists
+        except Exception:
+            self._vector_name_cache[cache_key] = False
+            return False
 
     @staticmethod
     def _sanitize_tenant(tenant_id: str) -> str:
@@ -234,15 +266,10 @@ class QdrantAddon:
     def _resolve_tenant_qdrant(self, tenant_id: str = "tara") -> Dict[str, Optional[str]]:
         """
         Resolve Qdrant endpoint config per tenant.
-
-        Expected env pattern:
-        - <tenant>_qdrant_url
-        - <tenant>_apikey
-        - <tenant>_collectionname
         """
         url = self._get_tenant_env(tenant_id, "qdrant_url") or self.url
         api_key = self._get_tenant_env(tenant_id, "apikey") or self.api_key
-        collection = self._get_tenant_env(tenant_id, "collectionname") or self.collection_name
+        collection = self._resolve_collection_name(tenant_id)
         return {"url": url, "api_key": api_key, "collection_name": collection}
 
     def _resolve_collection_name(self, tenant_id: str = "tara") -> str:
@@ -261,7 +288,13 @@ class QdrantAddon:
             return collection_name
         lower_key = f"{tenant}_qdrant_collection"
         upper_key = f"{tenant.upper()}_QDRANT_COLLECTION"
-        return os.getenv(lower_key) or os.getenv(upper_key) or self.collection_name
+        # If no explicit config, use the tenant name itself as the collection name (e.g. BUNDB)
+        # instead of falling back to tara_hive for everything.
+        env_fallback = os.getenv(lower_key) or os.getenv(upper_key)
+        if env_fallback:
+            return env_fallback
+            
+        return tenant.upper() if tenant != "tara" else self.collection_name
 
     def _get_clients_for_tenant(self, tenant_id: str = "tara"):
         cfg = self._resolve_tenant_qdrant(tenant_id)
@@ -388,23 +421,27 @@ class QdrantAddon:
             # Generate sparse vector for hybrid search
             sparse_vec = self.sparse_encoder.encode(f"{issue} {solution}")
             dense_name = vector_name or "vector"
+            
+            # Dynamic check for sparse capability
+            has_sparse = self._check_sparse_exists(sync_client, collection_name)
+            
+            vector_config = { dense_name: vector }
+            if has_sparse:
+                vector_config["sparse"] = models.SparseVector(**sparse_vec)
 
             await async_client.upsert(
                 collection_name=collection_name,
                 points=[
                     models.PointStruct(
                         id=point_id,
-                        vector={
-                            dense_name: vector,
-                            "sparse": models.SparseVector(**sparse_vec)
-                        },
+                        vector=vector_config,
                         payload=payload
                     )
                 ]
             )
             logger.info(
                 f"🧠 Learned new case | tenant={tenant_id} collection={collection_name} "
-                f"vector={vector_name or 'default'} user={user_id}"
+                f"vector={dense_name} sparse={has_sparse} user={user_id}"
             )
         except Exception as e:
             logger.error(f"Failed to upsert case: {e}")
@@ -789,6 +826,9 @@ class QdrantAddon:
             else:
                  final_filter = models.Filter(must=must_conditions)
 
+            # We also need the dense vector name (usually 'dense' or 'vector')
+            dense_name = vector_name or "vector"
+
             # Hybrid Search Logic:
             # We use Prefetches to combine Dense and Sparse search results via RRF
             if query_text:
@@ -796,11 +836,12 @@ class QdrantAddon:
                 # Note: We assume the collection has a sparse vector named 'sparse'
                 # If it doesn't, this will gracefully fail or we can catch it.
                 
-                # We also need the dense vector name (usually 'dense' or 'vector')
-                dense_name = vector_name or "vector"
+                # Dynamic check for sparse capability
+                has_sparse = self._check_sparse_exists(sync_client, collection_name)
                 
                 try:
-                    response = await async_client.query_points(
+                    if has_sparse:
+                        response = await async_client.query_points(
                         collection_name=collection_name,
                         prefetch=[
                             models.Prefetch(
@@ -820,12 +861,14 @@ class QdrantAddon:
                         query=models.FusionQuery(fusion=models.Fusion.RRF),
                         limit=limit
                     )
+                    else:
+                        raise ValueError("Collection does not support sparse search")
                 except Exception as e:
                     logger.warning(f"⚠️ Hybrid search failed (fallback to dense): {e}")
                     response = await async_client.query_points(
                         collection_name=collection_name,
                         query=query_vector,
-                        using=vector_name,
+                        using=dense_name,  # Use discovered dense_name
                         query_filter=final_filter,
                         limit=limit,
                         score_threshold=score_threshold
@@ -834,7 +877,7 @@ class QdrantAddon:
                 response = await async_client.query_points(
                     collection_name=collection_name,
                     query=query_vector,
-                    using=vector_name,
+                    using=dense_name,
                     query_filter=final_filter,
                     limit=limit,
                     score_threshold=score_threshold

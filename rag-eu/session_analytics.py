@@ -8,18 +8,18 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Prompt for generating brief session context/summary
-SESSION_CONTEXT_PROMPT = """You are a session summarizer for an AI assistant called TARA.
-Your task is to create a brief, objective summary of what happened in this session.
+SESSION_CONTEXT_PROMPT = """You are a senior analyst for DavinciAI. Summarize the following session.
 
 ### RULES:
-1. **Be concise**: Maximum 2-3 sentences describing the main topic and outcome.
-2. **Focus on substance**: What was the user trying to achieve? Was it resolved?
-3. **Neutral tone**: Objective description without emotional language.
-4. **Key elements**: Mention the main topic, any key actions taken, and the result.
-5. **No PII**: Remove any personal identifiers, names, emails, or specific IDs.
+1. **Focus on Substance**: Distinguish between meaningful business interaction and generic small talk. 
+2. **Main Achievement**: What did the user actually accomplish or ask about in terms of branding, AI, or agency services?
+3. **Outcome**: Was a lead generated? Was a technical question answered? Did the user leave satisfied or frustrated?
+4. **Professionalism**: Use professional, clear, and objective language.
+5. **No Noise**: Do not include 'The user started by...', 'Then they asked...'. Just the facts.
+6. **PiI**: Strictly ensure no personal names or emails are included.
 
 ### OUTPUT FORMAT:
-Provide only the summary text, no JSON, no markdown, no meta-commentary.
+A maximum of 3 sentences. No JSON. No markdown.
 
 ### SESSION TRANSCRIPT:
 {transcript}
@@ -111,7 +111,28 @@ class SessionAnalytics:
             brief_context = await self._generate_brief_context(transcript, reasoning_output.get('session_summary', {}))
         brief_context = self._strip_reasoning_artifacts(brief_context)
         
-        # 6. Extract Final Report for Orchestrator/Backend
+        # 6. Fallback Knowledge Distillation (if primary reasoning found 0 units)
+        distilled_knowledge = reasoning_output.get('distilled_knowledge', [])
+        if not distilled_knowledge and transcript:
+            try:
+                from distillprompt_hivemind_savecase import CaseDistiller
+                logger.info(f"🔄 Primary reasoning found 0 units. running fallback distillation for {session_id}...")
+                fallback_prompt = CaseDistiller.get_prompt(transcript)
+                fallback_res = await self.llm_provider.generate_messages(
+                    messages=[
+                        {"role": "system", "content": "You are a professional knowledge extractor. Output JSON list ONLY."},
+                        {"role": "user", "content": fallback_prompt}
+                    ],
+                    model=self.model_name
+                )
+                fallback_units = CaseDistiller.clean_json_response(str(fallback_res))
+                if fallback_units:
+                    logger.info(f"✅ Fallback distillation extracted {len(fallback_units)} units")
+                    distilled_knowledge = fallback_units
+            except Exception as fe:
+                logger.error(f"Fallback distillation failed: {fe}")
+
+        # 7. Extract Final Report for Orchestrator/Backend
         report = {
             "session_id": session_id,
             "timestamp": datetime.utcnow().isoformat(),
@@ -119,19 +140,20 @@ class SessionAnalytics:
             "metrics": davinci_metrics,
             "business_signals": business_signals,
             "analysis": reasoning_output.get('session_summary', {}),
-            "distilled_knowledge": reasoning_output.get('distilled_knowledge', []),
+            "distilled_knowledge": distilled_knowledge,
             "analysis_quality": {
                 "deterministic_metrics": True,
-                "llm_heuristics_present": True
+                "llm_heuristics_present": True,
+                "fallback_used": (not reasoning_output.get('distilled_knowledge'))
             },
             "processing_time": round(time.time() - start_time, 2)
         }
         
         logger.info(f"Analytics complete for {session_id} in {report['processing_time']}s")
         if report.get("distilled_knowledge"):
-            logger.info(f"🧠 Reasoning extracted {len(report['distilled_knowledge'])} knowledge units")
+            logger.info(f"🧠 Total extracted {len(report['distilled_knowledge'])} knowledge units")
         else:
-            logger.warning(f"⚠️ Reasoning extracted 0 knowledge units for {session_id}")
+            logger.warning(f"⚠️ All extraction passes found 0 knowledge units for {session_id}")
             
         return report
 
@@ -195,9 +217,10 @@ You are the DavinciAI Sentiment Engine. Your goal is to analyze the provided [Tr
 3. **Aspect Separation:** Distinguish between the User's mood vs. the Agent's performance.
 4. **Knowledge Distillation (AGGRESSIVE):** Identify ANY specific customer questions, technical inquiries, branding objections, feature requests, or core requirements that were successfully captured, resolved, or addressed by the Agent. 
    - Extract them as standalone knowledge units (Issue/Requirement/Preference vs Solution/Response pairs).
-   - EVEN IF the question is general (e.g. "What is Blake?"), if the Agent provided a clear, definitive answer, EXTRACT IT. 
+   - EVEN IF the question is general (e.g. "What is your philosophy?"), if the Agent provided a clear, definitive answer, EXTRACT IT. 
    - This knowledge will seed the Hive Mind to help future agents answer similar questions.
-   - Look for: Inquiries about product features, branding philosophy, team members (e.g. Amar), or technical setup.
+   - Look for: Inquiries about product features, branding philosophy (e.g. "Brand DNA", "Markenstimme"), team members (e.g. Amar), or technical setup.
+   - IMPORTANT: If the assistant helped the user form a branding strategy, extract that strategy as a knowledge unit.
 
 ## OUTPUT SCHEMA (JSON)
 {
@@ -296,36 +319,52 @@ Identify any such valuable insights. Return ONLY valid JSON.
 
         correction_keywords = [
             "no", "not what i meant", "wrong", "listen", "again", "stop",
-            "that's not", "not correct", "you misunderstood", "cancel", "interrupt"
+            "that's not", "not correct", "you misunderstood", "cancel", "interrupt",
+            "fail", "error", "didn't work"
+        ]
+        
+        frustration_keywords = [
+            "slow", "wait", "taking long", "taking so long", "hurry", "loading",
+            "annoying", "boring", "useless", "stupid", "bad", "terrible"
         ]
 
-        def has_correction(text: str) -> bool:
-            return any(kw in text for kw in correction_keywords)
+        def has_keyword(text: str, kws: List[str]) -> bool:
+            return any(k in text for k in kws)
 
-        correction_flags = [1 if has_correction(t) else 0 for t in user_turn_texts]
-        corrections = sum(correction_flags)
+        corrections = sum(1 for t in user_turn_texts if has_keyword(t, correction_keywords))
+        frustrations = sum(1 for t in user_turn_texts if has_keyword(t, frustration_keywords))
+        
+        # Sentiment-based penalties (turns with negative sentiment)
+        neg_sentiment_turns = sum(1 for t in analyzed_turns if float(t.get("sentiment_score", 0)) < -0.3)
+
         total_user_turns = len(user_turn_texts)
+        
+        # Multi-factor IQ: Base 1.0, penalties for corrections, frustrations, and sustained negativity
+        # Penalty weights: correction=15% per, frustration=10% per, neg_sentiment=5% per
+        penalty = (corrections * 0.15) + (frustrations * 0.10) + (neg_sentiment_turns * 0.05)
+        agent_iq = max(0.0, 1.0 - penalty)
 
         # Velocity from correction density shift between first and second half.
+        correction_flags = [1 if has_keyword(t, correction_keywords) else 0 for t in user_turn_texts]
         mid = max(1, total_user_turns // 2)
         start_rate = sum(correction_flags[:mid]) / len(correction_flags[:mid])
         end_rate = sum(correction_flags[mid:]) / len(correction_flags[mid:]) if correction_flags[mid:] else start_rate
         velocity_val = start_rate - end_rate  # positive means improving
         
         velocity = "STABLE"
-        if velocity_val < -0.4:
+        if velocity_val < -0.3:
             velocity = "CRITICAL_DEGRADATION"
-        elif velocity_val > 0.4:
+        elif velocity_val > 0.3:
             velocity = "SUCCESSFUL_RECOVERY"
 
-        agent_iq = max(0.0, 1.0 - (corrections / total_user_turns))
         scores = [float(t.get("sentiment_score", 0) or 0) for t in analyzed_turns if isinstance(t.get("sentiment_score", 0), (int, float))]
         
         return {
             "frustration_velocity": velocity,
             "agent_iq": round(agent_iq, 2),
             "avg_sentiment": round(sum(scores) / len(scores), 2) if scores else 0,
-            "correction_count": corrections
+            "correction_count": corrections,
+            "frustration_count": frustrations
         }
 
     def _classify_business_signals(self, summary: Dict[str, Any], metrics: Dict[str, Any], analyzed_turns: List[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -347,24 +386,50 @@ Identify any such valuable insights. Return ONLY valid JSON.
         )
         
         # Hot lead detection: check intent types from LLM analysis
-        hot_intents = {"Purchase", "Interest", "Demo_Request", "Inquiry"}
-        detected_hot_intent = False
-        if analyzed_turns:
+        high_value_intents = {"Purchase", "Demo_Request"}
+        moderate_value_intents = {"Interest", "Inquiry"}
+        
+        detected_high_intent = False
+        detected_moderate_intent = False
+        
+        # Substance check: Ignore short/trivial inquiries (like personal questions)
+        substance_keywords = [
+            "hire", "project", "brand", "agency", "cost", "pricing", "demo",
+            "service", "help", "consult", "ai", "solution", "capability", "davinci"
+        ]
+
+        if analyzed_turns and raw_logs:
+            user_texts = " ".join([str(l.get('content','')).lower() for l in raw_logs if l.get('role') == 'user'])
+            has_substance = any(sk in user_texts for sk in substance_keywords)
+
             for turn in analyzed_turns:
                 intent = turn.get("intent_type", "")
-                if intent in hot_intents:
-                    detected_hot_intent = True
-                    break
+                if intent in high_value_intents:
+                    detected_high_intent = True
+                elif intent in moderate_value_intents:
+                    detected_moderate_intent = True
+            
+            # Stricter Hot Lead Logic:
+            # 1. High intent is always a lead if substance is present
+            if detected_high_intent and has_substance:
+                is_hot_lead = True
+            # 2. Moderate intent requires clear positive sentiment and business substance
+            elif detected_moderate_intent and has_substance and overall_sentiment > 0.2:
+                is_hot_lead = True
+            # 3. Exceptionally high sentiment in a long session (>3 user turns)
+            elif overall_sentiment > 0.5 and len([l for l in raw_logs if l.get('role') == 'user']) > 3:
+                is_hot_lead = True
+            else:
+                is_hot_lead = False
+        else:
+            is_hot_lead = False
         
-        # A user is a hot lead if they showed interest/curiosity AND sentiment is not negative
-        is_hot_lead = detected_hot_intent and overall_sentiment > -0.2 and not is_churn_risk
-        
-        # Even without explicit intent, positive engagement signals interest
-        if not is_hot_lead and overall_sentiment > 0.3 and not is_churn_risk:
-            is_hot_lead = True
+        # Force false for churn risks or highly negative sessions
+        if is_churn_risk or overall_sentiment < -0.3:
+            is_hot_lead = False
         
         return {
             "is_churn_risk": is_churn_risk,
             "is_hot_lead": is_hot_lead,
-            "priority_level": "HIGH" if is_churn_risk else "NORMAL"
+            "priority_level": "HIGH" if is_churn_risk else ("HIGH" if is_hot_lead else "NORMAL")
         }

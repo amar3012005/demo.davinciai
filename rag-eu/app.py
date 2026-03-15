@@ -1903,7 +1903,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
         logger.info(f"📊 FINAL SESSION REPORT: {request.session_id}")
         logger.info(f"   ├─ Brief Context: {clean_brief[:120]}...")
         logger.info(f"   ├─ Sentiment (heuristic): {report['analysis'].get('overall_sentiment', 'N/A')} ({report['analysis'].get('resolution_status', 'Unknown')})")
-        logger.info(f"   ├─ Churn Risk: {report['business_signals'].get('is_churn_risk', 'N/A')} | Priority: {report['business_signals'].get('priority_level', 'NORMAL')}")
+        logger.info(f"   ├─ Churn Risk: {report['business_signals'].get('is_churn_risk', 'N/A')} | Hot Lead: {report['business_signals'].get('is_hot_lead', 'N/A')} | Priority: {report['business_signals'].get('priority_level', 'NORMAL')}")
         logger.info(f"   ├─ Agent IQ (deterministic): {report['metrics'].get('agent_iq', 'N/A')} | Velocity (deterministic): {report['metrics'].get('frustration_velocity', 'STABLE')}")
         logger.info(
             f"   ├─ Hivemind: saved={len(saved_hivemind_chunks)} | "
@@ -2119,16 +2119,29 @@ async def visualize_hive_mind(limit: int = 100, algorithm: str = "tsne", tenant_
                 # Named vectors support: point.vector can be dict{name: list}
                 vec = point.vector
                 if isinstance(vec, dict):
-                    # For hybrid collections, first vector is usually dense, second is sparse
-                    # We want the dense one (usually first in the dict or named 'dense' or 'vector')
+                    # For hybrid collections, we strictly want the dense vector.
+                    # Named vectors support: 'dense', 'vector', or the first non-sparse one.
                     if "dense" in vec:
                         vec = vec["dense"]
                     elif "vector" in vec:
                         vec = vec["vector"]
                     else:
-                        vec = next(iter(vec.values())) if vec else None
+                        # Find a candidate that isn't the sparse vector if possible
+                        candidate = None
+                        for k, v in vec.items():
+                            if k != "sparse" and v is not None:
+                                candidate = v
+                                break
+                        vec = candidate if candidate is not None else next(iter(vec.values())) if vec else None
                 
-                if vec is None:
+                # Convert to flat list and ensure it's not empty
+                try:
+                    if hasattr(vec, "tolist"): vec = vec.tolist()
+                    elif not isinstance(vec, list): vec = list(vec)
+                except:
+                    continue
+
+                if vec is None or len(vec) == 0:
                     continue
                 
                 # Robust Dimension Filtering:

@@ -789,7 +789,7 @@ class RAGEngine:
                                     score_threshold=0.15,
                                     query_text=query
                                 ),
-                                timeout=1.5 # Allow slightly more time for hybrid search
+                                timeout=2.5 # Allow more time for hybrid search on remote cloud
                             )
                         
                         search_time = (time.time() - unified_start) * 1000
@@ -928,7 +928,7 @@ class RAGEngine:
                         return processed, search_time
                         
                     except asyncio.TimeoutError:
-                        logger.warning("⏱️ Unified Qdrant search TIMEOUT (>1.2s) - skipping")
+                        logger.warning("⏱️ Unified Qdrant search TIMEOUT (>2.5s) - skipping")
                     except Exception as e:
                         logger.error(f"❌ Unified Qdrant search error: {e}")
                 else:
