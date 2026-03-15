@@ -104,7 +104,12 @@ class SessionAnalytics:
         davinci_metrics = self._calculate_davinci_metrics(reasoning_output.get('turns', []), raw_logs)
         
         # 4. Classify Business Signals
-        business_signals = self._classify_business_signals(reasoning_output.get('session_summary', {}), davinci_metrics, reasoning_output.get('turns', []))
+        business_signals = self._classify_business_signals(
+            reasoning_output.get('session_summary', {}), 
+            davinci_metrics, 
+            reasoning_output.get('turns', []),
+            raw_logs=raw_logs
+        )
         
         # 5. Generate Brief Context (if not provided)
         if not brief_context:
@@ -367,7 +372,7 @@ Identify any such valuable insights. Return ONLY valid JSON.
             "frustration_count": frustrations
         }
 
-    def _classify_business_signals(self, summary: Dict[str, Any], metrics: Dict[str, Any], analyzed_turns: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _classify_business_signals(self, summary: Dict[str, Any], metrics: Dict[str, Any], analyzed_turns: List[Dict[str, Any]] = None, raw_logs: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Phase 4: Predictive Classification
         Convert math into business value.
