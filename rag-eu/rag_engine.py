@@ -1079,6 +1079,7 @@ class RAGEngine:
             "language": original_language,
             "session_type": "technical_support"
         }
+        user_id = None
         if isinstance(context, dict):
             if context.get("surface"):
                 user_profile["surface"] = str(context.get("surface"))
@@ -1086,6 +1087,8 @@ class RAGEngine:
                 user_profile["dashboard_mode"] = str(context.get("dashboard_mode"))
             if context.get("tenant_id"):
                 user_profile["tenant_id"] = str(context.get("tenant_id"))
+            if context.get("user_id"):
+                user_id = str(context.get("user_id"))
 
         # Build history list
         history_list = []
@@ -1131,6 +1134,7 @@ class RAGEngine:
                 interrupted_text=interrupted_text,
                 interruption_transcripts=interruption_transcripts,
                 interruption_type=interruption_type,
+                user_id=user_id,
             )
         prompt = self._apply_prompt_budget(prompt, active_llm_model)
 
@@ -1154,13 +1158,8 @@ class RAGEngine:
             # Log the full prompt for debugging 0-token issues
             logger.debug(f"DEBUG PROMPT: {prompt}")
             
-            # Force non-stream for GPT-OSS to avoid empty delta-content behavior.
-            llm_model_name = active_llm_model.lower()
-            use_stream = (
-                (not force_non_stream)
-                and ("gpt-oss" not in llm_model_name)
-                and (not self._wants_german(original_language))
-            )
+            # Allow streaming for all models and languages to ensure TTS quality
+            use_stream = not force_non_stream
             result = self.llm.generate(
                 prompt=prompt,
                 stream=use_stream,

@@ -97,6 +97,7 @@ class ContextArchitect:
         interrupted_text: Optional[str] = None,
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """
         Assembles the full prompt for one conversation turn.
@@ -119,6 +120,7 @@ class ContextArchitect:
             interrupted_text: Assistant's response text that was interrupted (barge-in)
             interruption_transcripts: User's interruption transcripts
             interruption_type: Type of interruption ('addon', 'topic_change', 'clarification', 'noise')
+            user_id: Optional user identifier for entity persistence
 
         hive_mind is currently unused but retained for API compatibility.
         Its insights should be passed via retrieved_docs or user_profile.

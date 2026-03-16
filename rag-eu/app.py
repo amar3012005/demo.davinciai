@@ -1292,6 +1292,10 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
         context_data = request_data.context or {}
         if request_data.language:
             context_data['language'] = request_data.language
+        if request_data.user_id:
+            context_data['user_id'] = request_data.user_id
+        if request_data.session_id:
+            context_data['session_id'] = request_data.session_id
             
         # Process query
         is_hivemind_dashboard = context_data.get("surface") == "hivemind_dashboard"
@@ -1514,15 +1518,19 @@ async def stream_query_knowledge_base(request: QueryRequest):
             try:
                 # Build context with language if provided
                 query_context = request.context or {}
-                
+
                 # Map short language codes to full names
                 lang = request.language or "german"
                 if lang.lower() in ("en", "eng"):
                     lang = "english"
                 elif lang.lower() in ("de", "deu", "ger"):
                     lang = "german"
-                
+
                 query_context['language'] = lang
+                if request.user_id:
+                    query_context['user_id'] = request.user_id
+                if request.session_id:
+                    query_context['session_id'] = request.session_id
                 is_hivemind_dashboard = query_context.get("surface") == "hivemind_dashboard"
                 
                 # Process query with streaming callback

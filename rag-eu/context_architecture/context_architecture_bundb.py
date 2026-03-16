@@ -12,9 +12,13 @@ Design goals:
 """
 
 import datetime
+import logging
 import re
 from difflib import SequenceMatcher
 from typing import List, Dict, Optional
+
+# Module-level logger
+logger = logging.getLogger(__name__)
 
 _STATIC_PREFIX_CACHE: Optional[str] = None
 
@@ -132,6 +136,10 @@ def tts_safe(text: str) -> str:
     if not text:
         return text
 
+    # Strip markdown and noisy wrappers BEFORE protection to avoid corrupting tokens.
+    text = re.sub(r"[*`#~]", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
     protected_blob = _protect_segments(text)
     text = protected_blob["text"]
     protected = protected_blob["protected"]
@@ -140,10 +148,6 @@ def tts_safe(text: str) -> str:
     text = text.replace("–", " — ")
     text = text.replace("•", ", ")
     text = re.sub(r"\s+", " ", text)
-
-    # Strip markdown and noisy wrappers.
-    text = re.sub(r"[*_`#~]", "", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
 
     # Stable pronunciation overrides.
     for src, dst in TTS_PRONUNCIATION_OVERRIDES.items():
@@ -260,6 +264,7 @@ class ContextArchitect:
         interrupted_text: Optional[str] = None,
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
@@ -267,6 +272,7 @@ class ContextArchitect:
             interrupted_text=interrupted_text,
             interruption_transcripts=interruption_transcripts,
             interruption_type=interruption_type,
+            user_id=user_id,
         )
         zone_d = cls._render_zone_d(
             skills=agent_skills or [],
@@ -603,6 +609,7 @@ T: Gern. Worum soll es in dem Gespräch ungefähr gehen?
         interrupted_text: Optional[str] = None,
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         lang = cls._detect_lang(query, history, user_profile)
@@ -620,7 +627,7 @@ T: Gern. Worum soll es in dem Gespräch ungefähr gehen?
         else:
             h_lines = "[turn 1]\n"
 
-        entity_memory = cls._build_entity_memory(query, raw_query, history)
+        entity_memory = cls._build_entity_memory(query, raw_query, history, user_id=user_id)
 
         kb = ""
         if docs:
@@ -744,23 +751,48 @@ Kein Neustart. Kein Sorry. Keine Meta-Erklärung über die Unterbrechung.
         return found
 
     @classmethod
-    def _build_entity_memory(cls, query: str, raw_query: str, history: List[Dict]) -> str:
+    def _build_entity_memory(cls, query: str, raw_query: str, history: List[Dict], user_id: Optional[str] = None) -> str:
+        """
+        Build entity memory by extracting entities from current session.
+        Entities exist only for the current session and are not persisted.
+
+        Args:
+            query: The processed query text
+            raw_query: The raw query text
+            history: Conversation history
+            user_id: Optional user ID (kept for API compatibility)
+
+        Returns:
+            Entity memory string for the prompt
+        """
         user_turns = [
             str(turn.get("content", "")).strip()
             for turn in history[-4:]
             if str(turn.get("role", "")).strip() == "user" and str(turn.get("content", "")).strip()
         ]
 
-        explicit_entities: List[str] = []
+        # Extract entities from current session
+        session_entities: List[str] = []
         for turn_text in user_turns:
             for entity in cls._extract_named_entity_signals(turn_text):
-                if entity not in explicit_entities:
-                    explicit_entities.append(entity)
+                if entity not in session_entities:
+                    session_entities.append(entity)
 
-        if not explicit_entities:
+        # Also check current query for entities
+        for entity in cls._extract_named_entity_signals(query):
+            if entity not in session_entities:
+                session_entities.append(entity)
+        for entity in cls._extract_named_entity_signals(raw_query):
+            if entity not in session_entities:
+                session_entities.append(entity)
+
+        if not session_entities:
             return ""
 
-        canonical = explicit_entities[0]
+        # Use the most recent entity from session as canonical
+        canonical = session_entities[0]
+
+        # Build variant candidates from all texts (session + query)
         variant_candidates: List[str] = []
         recent_texts = user_turns + [str(query or "").strip(), str(raw_query or "").strip()]
 
