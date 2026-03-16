@@ -63,6 +63,8 @@ class SessionState:
         self.context_id = str(uuid.uuid4())  # For prosody continuity
         self.is_streaming = False
         self.audio_queue: asyncio.Queue = asyncio.Queue()
+        self.text_queue: Optional[asyncio.Queue] = None
+        self.stream_task: Optional[asyncio.Task] = None
         self.turn_done_event = asyncio.Event()
         self.created_at = time.time()
         self.chunks_sent = 0
@@ -393,10 +395,6 @@ async def websocket_stream(
 
         return final_voice, final_model
     
-    # Text accumulator for streaming
-    text_buffer: list[str] = []
-    stream_task: Optional[asyncio.Task] = None
-    
     async def audio_sender():
         """Background task to send audio from queue to client"""
         while True:
@@ -513,7 +511,7 @@ async def websocket_stream(
                     # Streaming text chunk
                     text_chunk = message.get("text", "")
                     
-                    # Store config for stream_end (capture from first chunk)
+                    # Capture config from chunk if provided
                     if message.get("voice"):
                         session.current_voice = message.get("voice")
                     if message.get("model"):
@@ -522,57 +520,77 @@ async def websocket_stream(
                         session.current_language = message.get("language")
                     if message.get("pronunciation_dict_id"):
                         session.current_dict = message.get("pronunciation_dict_id")
-                        
+                    
                     if text_chunk:
-                        text_buffer.append(text_chunk)
-                        logger.debug(f"[{session_id}] Chunk buffered: '{text_chunk[:30]}...'")
-                
+                        # Initialize streaming turn if not already active
+                        if not session.text_queue:
+                            logger.info(f"[{session_id}] 🚀 Starting real-time stream turn")
+                            session.text_queue = asyncio.Queue()
+                            session.is_streaming = True
+                            
+                            # Define background streaming task
+                            async def run_stream():
+                                try:
+                                    async def text_iter():
+                                        while True:
+                                            chunk = await session.text_queue.get()
+                                            if chunk is None:
+                                                break
+                                            yield chunk
+                                    
+                                    def stream_audio_callback(audio_bytes: bytes, sample_rate: int, metadata: Dict[str, Any]):
+                                        session.audio_queue.put_nowait((audio_bytes, metadata))
+                                    
+                                    turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
+                                    
+                                    stats = await manager.stream_text_to_audio(
+                                        text_iter(),
+                                        stream_audio_callback,
+                                        context_id=turn_ctx_id,
+                                        voice_id=session.current_voice,
+                                        model_id=session.current_model or config.model,
+                                        language=session.current_language,
+                                        pronunciation_dict_id=getattr(session, "current_dict", None),
+                                    )
+                                    
+                                    # Wait for audio sender to finish this turn
+                                    session.turn_done_event.clear()
+                                    await session.audio_queue.put(None)
+                                    await session.turn_done_event.wait()
+                                    
+                                    # Finalize turn
+                                    if stats.get("error"):
+                                        logger.error(f"[{session_id}] Cartesia stream error: {stats['error']}")
+                                        await websocket.send_json({
+                                            "type": "error",
+                                            "message": f"TTS synthesis failed: {stats['error']}"
+                                        })
+                                    
+                                    await websocket.send_json({
+                                        "type": "complete",
+                                        "chunks": stats.get("chunks_received", 0),
+                                        "total_bytes": stats.get("total_audio_bytes", 0),
+                                        "first_chunk_latency_ms": stats.get("first_chunk_latency_ms"),
+                                    })
+                                    
+                                except Exception as e:
+                                    logger.error(f"[{session_id}] Streaming task exception: {e}")
+                                finally:
+                                    session.is_streaming = False
+                                    session.text_queue = None
+                                    session.stream_task = None
+
+                            session.stream_task = asyncio.create_task(run_stream())
+                        
+                        # Feed the queue
+                        session.text_queue.put_nowait(text_chunk)
+                        logger.debug(f"[{session_id}] Chunk queued: '{text_chunk[:20]}...'")
+
                 elif msg_type == "stream_end":
-                    # End of streaming - synthesize buffered text
-                    if text_buffer:
-                        full_text = "".join(text_buffer)
-                        text_buffer.clear()
-                        
-                        logger.info(f"[{session_id}] Stream end, synthesizing {len(full_text)} chars")
-                        session.is_streaming = True
-                        
-                        def audio_callback(audio_bytes: bytes, sample_rate: int, metadata: Dict[str, Any]):
-                            session.audio_queue.put_nowait((audio_bytes, metadata))
-                        
-                        # Renew context
-                        turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
-                        
-                        stats = await manager.stream_text_to_audio(
-                            full_text,
-                            audio_callback,
-                            context_id=turn_ctx_id,
-                            voice_id=session.current_voice,
-                            model_id=session.current_model or config.model,
-                            language=session.current_language,
-                            pronunciation_dict_id=getattr(session, "current_dict", None),
-                        )
-
-                        session.is_streaming = False
-
-                        # Signal turn end and WAIT for audio_sender
-                        session.turn_done_event.clear()
-                        await session.audio_queue.put(None)
-                        await session.turn_done_event.wait()
-
-                        # Log and propagate errors from Cartesia
-                        if stats.get("error"):
-                            logger.error(f"[{session_id}] Cartesia stream error: {stats['error']}")
-                            await websocket.send_json({
-                                "type": "error",
-                                "message": f"TTS synthesis failed: {stats['error']}"
-                            })
-
-                        await websocket.send_json({
-                            "type": "complete",
-                            "chunks": stats.get("chunks_received", 0),
-                            "total_bytes": stats.get("total_audio_bytes", 0),
-                            "first_chunk_latency_ms": stats.get("first_chunk_latency_ms"),
-                        })
+                    # Signaling end of streaming for current turn
+                    if session.text_queue:
+                        logger.info(f"[{session_id}] Stream end received, closing turn")
+                        await session.text_queue.put(None)
                     else:
                         await websocket.send_json({"type": "complete", "chunks": 0})
                 

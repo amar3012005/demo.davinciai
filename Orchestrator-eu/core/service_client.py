@@ -194,10 +194,10 @@ class TTSClient:
         
         # Chunk batching (to prevent detected_unusual_activity from tiny chunks)
         self._chunk_buffer: str = ""
-        # German requires larger chunks for compound words (Markenstimme, Unternehmenskultur, etc.)
-        # Increased from 20/150 to 40/200 to avoid splitting German compounds mid-word
-        self._min_chunk_size: int = 40  # was 20 — buffer more context
-        self._max_chunk_size: int = 200  # was 150 — allow longer compounds
+        # CRITICAL: Increased buffering to prioritize prosody quality.
+        # Sending whole sentences (or ~40 words) ensures Cartesia has enough context for natural intonation.
+        self._min_chunk_size: int = 250  # was 40 — wait for a full thought
+        self._max_chunk_size: int = 1000 # was 200 — allow much longer blocks
         self._flush_task: Optional[asyncio.Task] = None
         self._last_stream_language: str = "de"
         self._last_stream_emotion: str = "helpful"
@@ -238,7 +238,7 @@ class TTSClient:
     }
 
     @staticmethod
-    def _normalize_tts_text(text: str, language: str = "de") -> str:
+    def _normalize_tts_text(text: str, language: str = "de", is_final: bool = True) -> str:
         """Normalize unicode/punctuation that causes character-by-character spelling in TTS."""
         if not text:
             return ""
@@ -249,12 +249,13 @@ class TTSClient:
             "\u202f": " ",
             "\u00ad": "",    # soft hyphen
             "\u2010": "-",   # hyphen
-            "\u2011": "-",   # non-breaking hyphen
+            "\u2011": "-",   # non-breaking hyphen (CRITICAL for spelling J-O-H-N)
             "\u2012": "-",
             "\u2013": "-",   # en dash
-            "\u2014": "-",   # em dash
+            "\u2014": " - ", # em dash (added spaces for prosody)
             "\u2015": "-",   # horizontal bar
             "\u2212": "-",   # minus sign
+            "\u2026": "... ", # ellipsis (added space for prosody)
         }
         for old, new in replacements.items():
             normalized = normalized.replace(old, new)
@@ -289,7 +290,8 @@ class TTSClient:
                 normalized = re.sub(rf"\b{re.escape(acronym)}\b", spoken, normalized, flags=re.IGNORECASE if acronym.isupper() else 0)
 
         # Ensure terminal punctuation (Cartesia needs this for prosody cues)
-        if normalized and not normalized[-1] in '.!?':
+        # ONLY if this is the final chunk of the response.
+        if is_final and normalized and not normalized[-1] in '.!?':
             normalized += '.'
 
         # Clean up multiple spaces
@@ -421,8 +423,7 @@ class TTSClient:
             emotion: Emotion/voice style
             tenant_id: Optional tenant ID for auto-applying pronunciation dictionary
         """
-        # Normalize text with language-aware acronym expansion
-        text = self._normalize_tts_text(text, language)
+        # Store metadata for flushing
         self._last_stream_language = language or self._last_stream_language
         self._last_stream_emotion = emotion or self._last_stream_emotion
         self._last_stream_voice_id = voice_id
@@ -444,21 +445,25 @@ class TTSClient:
                 logger.error("TTS WebSocket not connected and no session_id available")
                 return
 
-        # CRITICAL FIX: Batch small chunks to prevent rate limiting
+        # CRITICAL FIX: Buffer RAW text. Normalization happens during flush to maintain context.
         self._chunk_buffer += text
 
-        # Strip XML tags to see how much actual text we have
-        text_no_tags = re.sub(r'<[^>]+>', '', self._chunk_buffer).strip()
-        str_no_tags = re.sub(r'<[^>]+>', '', text).strip()
+        # Strip XML tags to see how much actual text we have for thresholding
+        text_without_tags = re.sub(r'<[^>]+>', '', self._chunk_buffer).strip()
+        incoming_without_tags = re.sub(r'<[^>]+>', '', text).strip()
 
-        # If buffer is large enough OR chunk is already large, send immediately
-        if len(text_no_tags) >= self._min_chunk_size or len(str_no_tags) >= self._max_chunk_size:
-            await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
+        # QUALITY BOOST: Flush immediately if we see a sentence-ender in the incoming text
+        # Include ellipses and dashes which are common in agent responses.
+        has_punctuation = any(text.endswith(p) for p in ['.', '!', '?', '…']) or \
+                         any(p in text for p in ['. ', '.<', '! ', '? ', '… ', '— '])
+
+        # If buffer is large enough OR incoming chunk is already large OR we hit punctuation, send immediately
+        if len(text_without_tags) >= self._min_chunk_size or len(incoming_without_tags) >= self._max_chunk_size or has_punctuation:
+            await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id, is_final=False)
         else:
             # Schedule delayed flush (small chunks accumulate)
             if self._flush_task and not self._flush_task.done():
                 self._flush_task.cancel()
-            # Schedule a flush or flush immediately
             self._schedule_flush(language, emotion, voice_id, pronunciation_dict_id)
     
     def _schedule_flush(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, delay_ms: float = 50.0):
@@ -470,7 +475,7 @@ class TTSClient:
         await asyncio.sleep(delay_ms / 1000.0)
         await self._flush_chunks(language, emotion, voice_id, pronunciation_dict_id)
     
-    async def _flush_chunks(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None):
+    async def _flush_chunks(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, is_final: bool = False):
         """Send buffered chunks to TTS service.
 
         CRITICAL: Cartesia requires streamed inputs to form valid transcript when joined.
@@ -482,30 +487,32 @@ class TTSClient:
         if not self._chunk_buffer:
             return
 
-        # Split buffer into optimal-sized chunks
-        chunks_to_send = []
-        buffer = self._chunk_buffer
+        # Normalize the whole buffer FIRST to preserve context for abbreviations
+        # But only add terminal period if is_final is True
+        full_text = self._normalize_tts_text(self._chunk_buffer, language, is_final=is_final)
         self._chunk_buffer = ""
 
-        # Split by sentences if possible, otherwise by max size
-        # IMPORTANT: Preserve spacing between chunks for Cartesia continuations
+        if not full_text:
+            return
+
+        # Split normalized text into optimal-sized chunks for streaming
+        chunks_to_send = []
+        buffer = full_text
+
+        # 1. SSML Tag safety: Don't split inside <emotion> or <break> tags
+        # 2. German compound safety: Prefer splitting at sentence boundaries or spaces
         while len(buffer) > self._max_chunk_size:
-            # Try to split at sentence boundary
             split_pos = buffer.rfind('. ', 0, self._max_chunk_size)
             if split_pos == -1:
                 split_pos = buffer.rfind(' ', 0, self._max_chunk_size)
             if split_pos == -1:
                 split_pos = self._max_chunk_size
 
-            # Strip trailing whitespace only - preserve content
             chunk = buffer[:split_pos].rstrip()
             chunks_to_send.append(chunk)
 
-            # CRITICAL: Keep leading space on next chunk for Cartesia continuations
-            # "Hello, world!" + " How are you?" = "Hello, world! How are you?" (valid)
-            # "Hello, world!" + "How are you?" = "Hello, world!How are you?" (INVALID)
+            # CRITICAL: Keep leading space for Cartesia continuity
             buffer = buffer[split_pos:].lstrip()
-            # Now add back single leading space for continuation
             if buffer and not buffer.startswith(' '):
                 buffer = ' ' + buffer
         
@@ -517,15 +524,13 @@ class TTSClient:
             voice_id = voice_config.voice_id if voice_config else "default"
         voice_lang = voice_config.language if voice_config else f"{language}-{language.upper()}"
         
-        # Send each chunk with small delay between them
+        # Send each chunk
         for i, chunk in enumerate(chunks_to_send):
             if i > 0:
-                # Small delay between chunks (already batched, but still pace them)
-                await asyncio.sleep(0.01)  # 10ms between batched chunks
+                await asyncio.sleep(0.01)
             
-            logger.debug(f"TTS stream_chunk: sending '{chunk[:50]}...' ({len(chunk)} chars, lang={language})")
+            logger.debug(f"TTS stream_chunk: sending '{chunk[:50]}...' ({len(chunk)} chars, is_final={is_final and i == len(chunks_to_send)-1})")
             
-            # Retry logic if send fails
             try:
                 await self.ws.send_json({
                     "type": "stream_chunk",
@@ -536,23 +541,8 @@ class TTSClient:
                     "pronunciation_dict_id": pronunciation_dict_id
                 })
             except Exception as e:
-                logger.error(f"TTS stream_chunk send failed: {e}, attempting reconnection...")
-                if self.session_id:
-                    connected = await self.connect(self.session_id)
-                    if connected:
-                        # Retry send after reconnection
-                        await self.ws.send_json({
-                            "type": "stream_chunk",
-                            "text": chunk,
-                            "emotion": emotion,
-                            "voice": voice_id,
-                            "language": voice_lang,
-                            "pronunciation_dict_id": pronunciation_dict_id
-                        })
-                    else:
-                        logger.error("Failed to reconnect TTS WebSocket after stream_chunk error")
-                else:
-                    logger.error("Cannot reconnect: no session_id available")
+                logger.error(f"TTS stream_chunk send failed: {e}")
+                break
 
     async def stream_end(self, flush_buffer: bool = True):
         """
@@ -566,12 +556,13 @@ class TTSClient:
             # Cancel delayed flush task if running
             if self._flush_task and not self._flush_task.done():
                 self._flush_task.cancel()
-            # Get language/emotion from last chunk (or use defaults)
+            # Flush with is_final=True to ensure terminal punctuation
             await self._flush_chunks(
                 self._last_stream_language,
                 self._last_stream_emotion,
                 self._last_stream_voice_id,
                 self._last_stream_pronunciation_dict_id,
+                is_final=True
             )
         
         if not self.ws or self.ws.closed:

@@ -323,6 +323,10 @@ class OrchestratorWSHandler:
             logger.debug(f"Using session language override: {session.stream_out_override}")
             return session.stream_out_override
 
+        # BUNDB-specific: Always use German for the agent's voice to maintain brand identity
+        if session and session.tenant_id and str(session.tenant_id).lower() == "bundb":
+            return "de"
+
         stream_out_raw = self.config.languages.stream_out
         stream_out = stream_out_raw.lower()
 
@@ -1974,11 +1978,11 @@ class OrchestratorWSHandler:
         if session.history_manager.should_escalate():
             logger.warning(
                 f"[{session.session_id}] Session should be escalated: "
-                f"{session.history_manager.interaction_count} interactions "
+                f"{len(session.history_manager)} interactions "
                 f"(max: {session.history_manager.max_turns})"
             )
-            # Optional: Set escalation flag
-            session.history_manager.is_escalated = True
+            # Escalation flag is handled via logs or can be added to session
+            # if session.history_manager doesn't have it, don't set it there
 
         # Update last_activity when processing starts (important for timeout monitor)
         session.last_activity = time.time()
@@ -2044,8 +2048,15 @@ class OrchestratorWSHandler:
         
         # Check if FSM is active OR if user wants to start appointment flow
         if session.fsm_active and session.appointment_fsm:
-            # ---- ACTIVE FSM: Route input via RAG FSM router ----
-            logger.info(f"[{session.session_id}] 📅 FSM ACTIVE: Routing via RAG FSM router")
+            # DISABLED for BUNDB tenant - kill any active FSM immediately
+            if session.tenant_id == "bundb":
+                logger.info(f"[{session.session_id}] 📅 FSM was active but DISABLED for BUNDB - clearing FSM state")
+                session.fsm_active = False
+                session.appointment_fsm = None
+                # Fall through to normal RAG processing
+            else:
+                # ---- ACTIVE FSM: Route input via RAG FSM router ----
+                logger.info(f"[{session.session_id}] 📅 FSM ACTIVE: Routing via RAG FSM router")
             
             # Build FSM context for router
             fsm_context = {
@@ -2155,18 +2166,23 @@ class OrchestratorWSHandler:
         
         elif any(trigger in text.lower() for trigger in APPOINTMENT_TRIGGERS):
             # ---- START FSM: User wants to book appointment ----
-            logger.info(f"[{session.session_id}] 📅 APPOINTMENT TRIGGER DETECTED: Starting FSM")
-            session.metadata["fsm_detour_counts"] = {}
-            session.appointment_fsm = SimpleAppointmentFSM(schema=self._get_fsm_schema())
-            session.fsm_active = True
-            
-            # Get initial FSM response (greeting)
-            fsm_result = session.appointment_fsm.process_input("")  # Empty input triggers INIT
-            fsm_response = fsm_result.get("response", "")
-            
-            if fsm_response:
-                await self._stream_fsm_response(session, fsm_response, output_language)
-            return
+            # DISABLED for BUNDB tenant (B&B brand agent should not use appointment booking FSM)
+            if session.tenant_id == "bundb":
+                logger.info(f"[{session.session_id}] 📅 APPOINTMENT TRIGGER DETECTED but DISABLED for BUNDB tenant")
+                # Fall through to normal RAG processing - do not activate FSM
+            else:
+                logger.info(f"[{session.session_id}] 📅 APPOINTMENT TRIGGER DETECTED: Starting FSM")
+                session.metadata["fsm_detour_counts"] = {}
+                session.appointment_fsm = SimpleAppointmentFSM(schema=self._get_fsm_schema())
+                session.fsm_active = True
+
+                # Get initial FSM response (greeting)
+                fsm_result = session.appointment_fsm.process_input("")  # Empty input triggers INIT
+                fsm_response = fsm_result.get("response", "")
+
+                if fsm_response:
+                    await self._stream_fsm_response(session, fsm_response, output_language)
+                return
         # =====================================================================
         
         # Transition to THINKING and get side effects

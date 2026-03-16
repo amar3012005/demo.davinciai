@@ -114,25 +114,6 @@ class HistoryManager:
 
         return False
 
-        """
-        Add an agent turn to the conversation history.
-
-        Args:
-            text: Agent's response text
-            metadata: Additional context (sources, confidence, etc.)
-        """
-        if not text.strip():
-            return
-
-        turn = Turn(
-            role="assistant",
-            text=text.strip(),
-            metadata=metadata or {}
-        )
-
-        self.turns.append(turn)
-        logger.debug(f"Added agent turn: '{text[:50]}...' ({len(self.turns)} turns total)")
-
     def get_context_window(self, max_turns: Optional[int] = None) -> str:
         """
         Get formatted conversation history for LLM context.

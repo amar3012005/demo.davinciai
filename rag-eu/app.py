@@ -1532,7 +1532,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     streaming_callback=callback,
                     history_context=request.history_context,
                     tenant_id=effective_tenant_id,
-                    force_non_stream=(not is_hivemind_dashboard) and ("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
+                    force_non_stream=False,  # Re-enabled streaming for quality
                     generation_config={
                         "max_tokens": 400,
                         "temperature": 0.6,

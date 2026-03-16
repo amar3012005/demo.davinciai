@@ -38,7 +38,7 @@ class SessionAnalytics:
 
     @staticmethod
     def _strip_reasoning_artifacts(text: str) -> str:
-        """Remove leaked CoT/thinking markup from model output."""
+        """Remove leaked CoT/thinking markup and conversational filler from model output."""
         if not text:
             return ""
         cleaned = text
@@ -46,11 +46,23 @@ class SessionAnalytics:
         cleaned = re.sub(r"<think>.*?</think>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL)
         # Remove standalone think tags
         cleaned = re.sub(r"</?think>", " ", cleaned, flags=re.IGNORECASE)
-        # Trim common reasoning prefaces that leak into final text (broadened)
-        cleaned = re.sub(r"^\s*(okay[, ]+(let's|let me|i will|let us).*?:?)\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
-        cleaned = re.sub(r"^\s*(based on the (transcript|session).*?:?)\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        # Trim common reasoning prefaces that leak into final text
+        prefaces = [
+            r"^\s*(okay[, ]+(let's|let me|i will|let us).*?:?)\s*",
+            r"^\s*(based on the (transcript|session).*?:?)\s*",
+            r"^\s*(here is (a|the) (brief )?summary:?)\s*",
+            r"^\s*(i need to (make|create|generate) (a|the) (concise )?summary:?)\s*",
+            r"^\s*(the session (can be summarized as|summarizes to):?)\s*",
+            r"^\s*(see\.\s+)",
+            r"^\s*(summary:?)\s*"
+        ]
+        for p in prefaces:
+            cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        
         # Collapse whitespace
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        # If the model left "I need to..." at the end
+        cleaned = re.sub(r"(i need to make a concise summary\.?)$", "", cleaned, flags=re.IGNORECASE).strip()
         return cleaned
 
     def format_transcript(self, raw_logs: List[Dict[str, Any]]) -> str:
@@ -330,7 +342,8 @@ Identify any such valuable insights. Return ONLY valid JSON.
         
         frustration_keywords = [
             "slow", "wait", "taking long", "taking so long", "hurry", "loading",
-            "annoying", "boring", "useless", "stupid", "bad", "terrible"
+            "annoying", "boring", "useless", "stupid", "bad", "terrible", "waste of time",
+            "frustrated", "don't like", "disappointing"
         ]
 
         def has_keyword(text: str, kws: List[str]) -> bool:
@@ -347,7 +360,14 @@ Identify any such valuable insights. Return ONLY valid JSON.
         # Multi-factor IQ: Base 1.0, penalties for corrections, frustrations, and sustained negativity
         # Penalty weights: correction=15% per, frustration=10% per, neg_sentiment=5% per
         penalty = (corrections * 0.15) + (frustrations * 0.10) + (neg_sentiment_turns * 0.05)
-        agent_iq = max(0.0, 1.0 - penalty)
+        
+        # Incorporate average sentiment into IQ: if avg sentiment is negative, it directly weighs down the score
+        scores = [float(t.get("sentiment_score", 0) or 0) for t in analyzed_turns if isinstance(t.get("sentiment_score", 0), (int, float))]
+        avg_sentiment = sum(scores) / len(scores) if scores else 0.0
+        
+        # Sentiment-based penalty: up to 30% penalty for deep dissatisfaction
+        sentiment_penalty = max(0.0, -avg_sentiment * 0.3)
+        agent_iq = max(0.0, 1.0 - (penalty + sentiment_penalty))
 
         # Velocity from correction density shift between first and second half.
         correction_flags = [1 if has_keyword(t, correction_keywords) else 0 for t in user_turn_texts]
