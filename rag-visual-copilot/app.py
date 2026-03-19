@@ -764,6 +764,90 @@ async def check_domain_status(request: CheckDomainRequest):
     )
 
 
+# ── Page Index Search ────────────────────────────────────────────────────────
+
+class PageIndexSearchRequest(BaseModel):
+    """Request model for PageIndex deep search."""
+    goal: str = Field(..., description="The user's mission goal")
+    current_url: Optional[str] = Field("", description="Current page URL")
+    current_node_id: Optional[str] = Field(None, description="Optional current node ID override")
+    domain: Optional[str] = Field(None, description="Domain to search (optional)")
+
+
+class PageIndexSearchResponse(BaseModel):
+    """Response model for PageIndex deep search."""
+    found: bool = Field(..., description="Whether a matching node was found")
+    target_node: Optional[Dict[str, Any]] = Field(None, description="Target node details")
+    navigation_path: List[str] = Field(default_factory=list, description="Node IDs to traverse")
+    subgoals: List[str] = Field(default_factory=list, description="Subgoal descriptions")
+    depth: int = Field(0, description="Depth of target node from current")
+    confidence: float = Field(0.0, description="Match confidence score")
+    current_node_id: Optional[str] = Field(None, description="Current node ID")
+    reason: Optional[str] = Field(None, description="Reason if not found")
+
+
+@app.post("/api/v1/page_index_search", response_model=PageIndexSearchResponse)
+async def page_index_search(request: PageIndexSearchRequest):
+    """
+    Search the PageIndex (site map) for the deepest matching node.
+
+    This endpoint performs deep traversal of the site map to find the best
+    matching node for a user's goal, then returns the navigation path and
+    subgoals needed to reach it.
+
+    Example:
+        curl -X POST http://localhost:4015/api/v1/page_index_search \\
+          -H "Content-Type: application/json" \\
+          -d '{
+            "goal": "show me my model token usage in last 7 days",
+            "current_url": "https://console.groq.com/",
+            "domain": "console.groq.com"
+          }'
+    """
+    from visual_copilot.orchestration.stages.pre_decision_stage import (
+        _page_index_available,
+        _page_index_search,
+    )
+
+    logger.info(
+        f"🔍 PageIndex Search | goal='{request.goal[:50]}...' "
+        f"url={request.current_url[:60] if request.current_url else 'none'}"
+    )
+
+    # Check if PageIndex is available
+    if not _page_index_available(request.domain):
+        logger.warning(f"PageIndex not available for domain={request.domain}")
+        return PageIndexSearchResponse(
+            found=False,
+            reason="page_index_not_available",
+        )
+
+    # Perform the search
+    result = await _page_index_search(
+        goal=request.goal,
+        current_url=request.current_url or "",
+        current_node_id=request.current_node_id,
+    )
+
+    logger.info(
+        f"🔍 PageIndex Result | found={result.get('found')} "
+        f"target={result.get('target_node', {}).get('node_id') if result.get('target_node') else 'none'} "
+        f"path={' -> '.join(result.get('navigation_path', []))} "
+        f"depth={result.get('depth')}"
+    )
+
+    return PageIndexSearchResponse(
+        found=result.get("found", False),
+        target_node=result.get("target_node"),
+        navigation_path=result.get("navigation_path", []),
+        subgoals=result.get("subgoals", []),
+        depth=result.get("depth", 0),
+        confidence=result.get("confidence", 0.0),
+        current_node_id=result.get("current_node_id"),
+        reason=result.get("reason"),
+    )
+
+
 # ── Analyze Session ──────────────────────────────────────────────────────────
 
 @app.post("/api/v1/analyze_session", response_model=AnalyzeSessionResponse)

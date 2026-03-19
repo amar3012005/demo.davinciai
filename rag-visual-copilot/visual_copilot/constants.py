@@ -55,6 +55,20 @@ PRE_DECISION_MIN_CONF = float(os.getenv("PRE_DECISION_MIN_CONF", "0.72"))
 PRE_DECISION_CACHE_TTL_MS = int(os.getenv("PRE_DECISION_CACHE_TTL_MS", "3000"))
 PRE_DECISION_MAX_INTERACTIVES = int(os.getenv("PRE_DECISION_MAX_INTERACTIVES", "80"))
 PRE_DECISION_MAX_READABLE = int(os.getenv("PRE_DECISION_MAX_READABLE", "40"))
+
+# ═══════════════════════════════════════════════════════════════════════
+# PageIndex LLM Reasoning Settings
+# ═══════════════════════════════════════════════════════════════════════
+PAGEINDEX_LLM_ENABLED = _env_bool("PAGEINDEX_LLM_ENABLED", False)
+PAGEINDEX_LLM_MODEL = os.getenv("PAGEINDEX_LLM_MODEL", "llama-3.1-8b-instant")
+PAGEINDEX_LLM_TIMEOUT_MS = int(os.getenv("PAGEINDEX_LLM_TIMEOUT_MS", "500"))
+PAGEINDEX_LLM_MIN_CONF = float(os.getenv("PAGEINDEX_LLM_MIN_CONF", "0.75"))
+
+# ═══════════════════════════════════════════════════════════════════════
+# MapGuard: Known Site Mapped Mode Settings
+# ═══════════════════════════════════════════════════════════════════════
+KNOWN_SITE_MAPPED_MODE_ENABLED = _env_bool("KNOWN_SITE_MAPPED_MODE_ENABLED", False)
+KNOWN_SITE_MAPPED_MODE_MIN_CONF = float(os.getenv("KNOWN_SITE_MAPPED_MODE_MIN_CONF", "0.80"))
 DEBUG_TRACE_OUTPUTS = _env_bool("DEBUG_TRACE_OUTPUTS", False)
 _v3_canary_raw = os.getenv("V3_CANARY_DOMAINS")
 if not _v3_canary_raw:

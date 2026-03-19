@@ -1,0 +1,23 @@
+services:
+  # ═══════════════════════════════════════════════════════════
+  # Jina CLIP v1 Multimodal Embeddings (Local Deployment)
+  # ═══════════════════════════════════════════════════════════
+  jina-clip-v1:
+    build:
+      context: ./bindings-eu/jina-clip-v1
+      dockerfile: Dockerfile
+    container_name: jina-clip-local
+    command: "uvicorn app:app --host 0.0.0.0 --port 4007"
+    ports:
+      - "4007:4007"
+    volumes:
+      - hf_cache_jina_clip_local:/root/.cache/huggingface
+    environment:
+      MODEL_NAME: "jinaai/jina-clip-v1"
+      PORT: "4007"
+      HF_HOME: "/root/.cache/huggingface"
+    restart: unless-stopped
+
+volumes:
+  hf_cache_jina_clip_local:
+    name: hf_cache_jina_clip_local

@@ -19,16 +19,10 @@ import logging
 import os
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 import httpx
-
-from visual_copilot.orchestration.stages.page_index import (
-    is_domain_indexed as _page_index_available,
-    traverse_index as _page_index_traverse,
-    load_index as _page_index_load,
-)
 
 from visual_copilot.constants import (
     PRE_DECISION_MODEL,
@@ -39,9 +33,529 @@ from visual_copilot.constants import (
     PRE_DECISION_CACHE_TTL_MS,
     PRE_DECISION_MAX_INTERACTIVES,
     PRE_DECISION_MAX_READABLE,
+    PAGEINDEX_LLM_ENABLED,
+    PAGEINDEX_LLM_MODEL,
+    PAGEINDEX_LLM_TIMEOUT_MS,
+    PAGEINDEX_LLM_MIN_CONF,
 )
 
 logger = logging.getLogger("vc.stage.pre_decision")
+
+# Global PageIndex validator instance (lazy-loaded)
+_page_index_validator: Optional[Any] = None
+
+def _get_page_index_validator() -> Optional[Any]:
+    """Lazy-load the SiteMapValidator for PageIndex operations."""
+    global _page_index_validator
+    if _page_index_validator is None:
+        try:
+            from visual_copilot.navigation.site_map_validator import SiteMapValidator
+            _page_index_validator = SiteMapValidator()
+            # Check if it's actually valid (has nodes)
+            if not getattr(_page_index_validator, 'node_index', None):
+                logger.warning("PageIndex validator loaded but has no nodes")
+                return None
+        except Exception as e:
+            logger.warning(f"Failed to load PageIndex validator: {e}")
+            return None
+    return _page_index_validator
+
+
+def _page_index_available(domain: Optional[str] = None) -> bool:
+    """
+    Check if PageIndex (site map) is available for the given domain.
+
+    Args:
+        domain: Domain to check (e.g., "console.groq.com")
+
+    Returns:
+        True if PageIndex is available and has nodes for this domain
+    """
+    validator = _get_page_index_validator()
+    if validator is None:
+        return False
+
+    # Check domain match if provided
+    if domain:
+        site_metadata = getattr(validator, 'site_map', {}).get('site_metadata', {})
+        site_domain = site_metadata.get('domain', '')
+        if site_domain and domain not in site_domain and site_domain not in domain:
+            logger.debug(f"PageIndex domain mismatch: requested={domain}, have={site_domain}")
+            return False
+
+    return True
+
+
+async def _page_index_search(
+    goal: str,
+    current_url: str = "",
+    current_node_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Search PageIndex for the deepest matching node for a goal.
+
+    Performs deep traversal of the site map to find the best node that matches
+    the user's goal, then computes the navigation path from current position.
+
+    Args:
+        goal: User's goal/query
+        current_url: Current page URL
+        current_node_id: Optional current node ID override
+
+    Returns:
+        Dict with:
+        - found: bool
+        - target_node: Dict with node details (or None)
+        - navigation_path: List of node IDs to traverse
+        - subgoals: List of subgoal descriptions
+        - depth: int (how deep the target is)
+        - confidence: float
+    """
+    validator = _get_page_index_validator()
+    if validator is None:
+        return {"found": False, "reason": "page_index_not_available"}
+
+    # Get current node from URL if not provided
+    current_node = None
+    if current_node_id:
+        current_node = validator.node_id_map.get(current_node_id)
+    if not current_node and current_url:
+        current_node = validator.get_node_for_url(current_url)
+
+    current_node_id = current_node.get('node_id') if current_node else 'root'
+
+    # Find deepest matching node for the goal
+    target_node, match_score = await _find_deepest_node_for_goal(validator, goal)
+
+    if not target_node:
+        return {
+            "found": False,
+            "reason": "no_matching_node",
+            "current_node_id": current_node_id,
+        }
+
+    target_node_id = target_node.get('node_id')
+
+    # Compute navigation path from current to target
+    navigation_path = _compute_navigation_path(validator, current_node_id, target_node_id)
+
+    # Build subgoals from navigation path
+    subgoals = _build_subgoals_from_path(validator, navigation_path, goal)
+
+    return {
+        "found": True,
+        "target_node": {
+            "node_id": target_node_id,
+            "title": target_node.get('title'),
+            "url": target_node.get('url'),
+            "logical_path": target_node.get('logical_path'),
+            "page_type": target_node.get('page_type'),
+        },
+        "navigation_path": navigation_path,
+        "subgoals": subgoals,
+        "depth": len(navigation_path) - 1,  # excluding current
+        "confidence": match_score,
+        "current_node_id": current_node_id,
+    }
+
+
+async def _find_deepest_node_for_goal(validator: Any, goal: str) -> Tuple[Optional[Dict], float]:
+    """
+    Find the deepest site map node that matches the user's goal.
+
+    If PAGEINDEX_LLM_ENABLED, uses LLM reasoning for semantic matching.
+    Otherwise uses keyword-based matching.
+    """
+    goal_lower = goal.lower()
+
+    # Use LLM reasoning if enabled
+    if PAGEINDEX_LLM_ENABLED:
+        return await _find_best_node_with_llm(validator, goal)
+
+    # Fall back to keyword-based matching
+    best_match = None
+    best_depth = -1
+    best_score = 0.0
+
+    for node in validator.node_index:
+        depth = _get_node_depth(node)
+        score = _score_node_match(node, goal_lower, goal_lower)
+
+        if score > 0.3:  # Minimum threshold
+            # Prefer higher scores first, then deeper matches as tiebreaker
+            if score > best_score or (score == best_score and depth > best_depth):
+                best_match = node
+                best_depth = depth
+                best_score = score
+
+    return best_match, best_score
+
+
+async def _find_best_node_with_llm(validator: Any, goal: str) -> Tuple[Optional[Dict], float]:
+    """
+    Use LLM reasoning to find the best matching node for the goal.
+
+    Sends node summaries to LLM and asks it to score relevance.
+    Much smarter than keyword matching for ambiguous queries.
+    """
+    # Build compact node index for LLM
+    node_index = []
+    for node in validator.node_index:
+        node_id = node.get('node_id', '')
+        title = node.get('title', '')
+        summary = node.get('summary_of_contents', '')
+        aliases = node.get('node_aliases', [])
+        page_type = node.get('page_type', '')
+        terminal_caps = node.get('terminal_capabilities', [])
+
+        # Skip root/navigation nodes - focus on actionable pages
+        if page_type in {'dashboard_overview', 'root'} and not terminal_caps:
+            continue
+
+        node_info = {
+            'id': node_id,
+            'title': title,
+            'summary': summary[:150] if summary else '',
+            'aliases': aliases[:3] if aliases else [],
+            'type': page_type,
+            'capabilities': terminal_caps[:3] if terminal_caps else [],
+        }
+        node_index.append(node_info)
+
+    # Build LLM prompt
+    prompt = f"""You are a navigation assistant. Score how relevant each page is to the user's goal.
+
+User Goal: "{goal}"
+
+Pages (JSON array):
+{json.dumps(node_index[:30], indent=2)}
+
+Respond with JSON:
+{{
+  "reasoning": "brief analysis of what the user wants",
+  "matches": [
+    {{"id": "node_id", "score": 0.95, "why": "brief reason"}},
+    {{"id": "node_id", "score": 0.70, "why": "brief reason"}}
+  ]
+}}
+
+Score 0.0-1.0 where:
+- 0.9-1.0 = Perfect match (goal explicitly matches page purpose)
+- 0.7-0.8 = Good match (page can help achieve goal)
+- 0.4-0.6 = Weak match (page somewhat related)
+- 0.0-0.3 = No match
+
+Return ONLY the JSON object."""
+
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("PAGEINDEX_LLM: No API key, falling back to keyword matching")
+        return None, 0.0
+
+    try:
+        timeout_s = PAGEINDEX_LLM_TIMEOUT_MS / 1000.0
+        response = await _call_pageindex_llm(prompt, api_key, timeout_s)
+
+        # Parse response
+        data = _safe_json_parse(response)
+        matches = data.get('matches', [])
+
+        if not matches:
+            logger.warning("PAGEINDEX_LLM: No matches returned")
+            return None, 0.0
+
+        # Sort by score and get best match
+        matches.sort(key=lambda x: x.get('score', 0), reverse=True)
+        best = matches[0]
+
+        best_id = best.get('id')
+        best_score = best.get('score', 0)
+        best_reason = best.get('why', '')
+
+        if best_score < PAGEINDEX_LLM_MIN_CONF:
+            logger.info(f"PAGEINDEX_LLM: Best match {best_id} below threshold ({best_score:.2f} < {PAGEINDEX_LLM_MIN_CONF})")
+            return None, 0.0
+
+        # Find the actual node
+        best_node = validator.node_id_map.get(best_id)
+        if not best_node:
+            logger.warning(f"PAGEINDEX_LLM: Matched node {best_id} not found in validator")
+            return None, 0.0
+
+        logger.info(f"PAGEINDEX_LLM: Selected {best_id} with score {best_score:.2f} - {best_reason}")
+        return best_node, best_score
+
+    except Exception as e:
+        logger.warning(f"PAGEINDEX_LLM: Error during LLM call: {e}")
+        return None, 0.0
+
+
+async def _call_pageindex_llm(prompt: str, api_key: str, timeout: float) -> str:
+    """Call Groq LLM for PageIndex reasoning."""
+    payload = {
+        "model": PAGEINDEX_LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a precise navigation assistant. Respond only with valid JSON."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_completion_tokens": 1500,
+        "response_format": {"type": "json_object"},
+    }
+
+    async with httpx.AsyncClient(timeout=timeout + 2) as client:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        resp = await client.post(GROQ_ENDPOINT, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+
+def _get_node_depth(node: Dict[str, Any]) -> int:
+    """Calculate depth of a node from its logical_path."""
+    logical_path = node.get('logical_path', '')
+    if not logical_path or logical_path == 'root':
+        return 0
+    return logical_path.count('.') + 1
+
+
+def _score_node_match(node: Dict[str, Any], goal: str, goal_lower: str) -> float:
+    """
+    Score how well a node matches the user's goal.
+
+    Uses multi-factor scoring:
+    1. Goal triggers (highest weight - explicit mappings)
+    2. Exact phrase matches in title/aliases
+    3. Keyword overlap in title/aliases
+    4. Page type appropriateness
+    """
+    scores = []
+    goal_words = set(goal_lower.split())
+
+    # ── Factor 1: Goal Triggers (weight: 1.0) ──
+    # These are explicit mappings from goal patterns to nodes
+    goal_triggers = node.get('goal_triggers', {})
+    for trigger_name, trigger_patterns in goal_triggers.items():
+        for pattern in trigger_patterns:
+            pattern_lower = pattern.lower()
+            # Exact match or pattern contained in goal
+            if pattern_lower in goal_lower or goal_lower in pattern_lower:
+                scores.append(1.0)
+                break
+            # Word-level match
+            pattern_words = set(pattern_lower.split())
+            if len(pattern_words) >= 2 and len(pattern_words & goal_words) >= len(pattern_words) * 0.5:
+                scores.append(0.9)
+                break
+
+    # ── Factor 2: Exact Phrase Matches (weight: 0.8) ──
+    title = node.get('title', '').lower()
+    aliases = [a.lower() for a in node.get('node_aliases', [])]
+
+    # Direct substring match
+    if goal_lower in title or any(goal_lower in alias for alias in aliases):
+        scores.append(0.8)
+
+    # ── Factor 3: Title Keyword Overlap (weight: 0.6) ──
+    title_words = set(title.split())
+    if title_words:
+        overlap = len(title_words & goal_words)
+        if overlap > 0:
+            # Higher score for more complete overlap
+            coverage = overlap / max(len(title_words), len(goal_words))
+            scores.append(coverage * 0.6)
+
+    # ── Factor 4: Aliases Matches (weight: 0.5) ──
+    for alias in aliases:
+        alias_words = set(alias.split())
+        if alias_words:
+            overlap = len(alias_words & goal_words)
+            if overlap > 0:
+                coverage = overlap / max(len(alias_words), len(goal_words))
+                scores.append(coverage * 0.5)
+
+    # ── Factor 5: Summary Match (weight: 0.3) ──
+    summary = node.get('summary_of_contents', '').lower()
+    if summary:
+        summary_words = set(summary.split())
+        overlap = len(summary_words & goal_words)
+        if overlap > 0:
+            coverage = overlap / max(len(summary_words), len(goal_words))
+            scores.append(coverage * 0.3)
+
+    # ── Factor 6: Page Type Appropriateness (weight: 0.2) ──
+    page_type = node.get('page_type', '')
+    if page_type == 'dashboard_data' and any(w in goal_lower for w in ['usage', 'token', 'cost', 'spend', 'metrics', 'dashboard']):
+        scores.append(0.2)
+    elif page_type == 'api_key_management' and any(w in goal_lower for w in ['api key', 'apikey', 'key', 'keys']):
+        scores.append(0.2)
+    elif page_type == 'playground' and 'playground' in goal_lower:
+        scores.append(0.2)
+
+    # Return highest score, but require minimum 0.3
+    best_score = max(scores) if scores else 0.0
+    return best_score if best_score >= 0.3 else 0.0
+
+
+def _compute_navigation_path(validator: Any, from_node_id: str, to_node_id: str) -> List[str]:
+    """
+    Compute the shortest navigation path from one node to another.
+
+    Returns list of node IDs to traverse, starting from from_node_id.
+    """
+    if from_node_id == to_node_id:
+        return [from_node_id]
+
+    # Get node paths (root -> node)
+    from_path = _get_node_path_list(validator, from_node_id)
+    to_path = _get_node_path_list(validator, to_node_id)
+
+    # Find common ancestor
+    common_len = 0
+    for i in range(min(len(from_path), len(to_path))):
+        if from_path[i] == to_path[i]:
+            common_len = i + 1
+        else:
+            break
+
+    # Path = go up to common ancestor, then down to target
+    up_steps = len(from_path) - common_len
+    down_steps = to_path[common_len:]
+
+    # Build navigation: first go up (not explicitly tracked, just start from current)
+    # Then go down through the nodes
+    navigation = [from_node_id]
+
+    # If we need to go up, the first step is back to common ancestor
+    if up_steps > 0 and common_len > 0:
+        navigation.append(from_path[common_len - 1])
+
+    # Then go down
+    navigation.extend(down_steps)
+
+    return navigation
+
+
+def _get_node_path_list(validator: Any, node_id: str) -> List[str]:
+    """Get the path from root to the given node as a list of node IDs."""
+    node = validator.node_id_map.get(node_id)
+    if not node:
+        return [node_id] if node_id else []
+
+    # Build path by traversing up via parent_map, then reverse
+    path = [node_id]
+    current = node_id
+    while current in validator.parent_map:
+        parent = validator.parent_map[current]
+        if not parent:
+            break
+        parent_id = parent.get('node_id')
+        if not parent_id or parent_id == current:
+            break
+        path.append(parent_id)
+        current = parent_id
+
+    return list(reversed(path))
+
+
+def _build_subgoals_from_path(
+    validator: Any,
+    path: List[str],
+    original_goal: str,
+    target_terminal_task: Optional[str] = None,
+) -> List[str]:
+    """
+    Convert a navigation path into subgoal descriptions.
+
+    Args:
+        validator: SiteMapValidator instance
+        path: List of node IDs from current to target
+        original_goal: User's original goal
+        target_terminal_task: The specific task to perform at the target node
+            (e.g., "create_api_key" from goal_triggers)
+    """
+    subgoals = []
+
+    if len(path) <= 1:
+        # Already at target, just do last-mile
+        subgoals.append(f"LAST_MILE: {original_goal}")
+        return subgoals
+
+    # All nodes except the current one need navigation actions
+    for i, node_id in enumerate(path[1:], 1):
+        node = validator.node_id_map.get(node_id)
+        if not node:
+            continue
+
+        title = node.get('title', node_id)
+        is_target = (i == len(path) - 1)
+
+        if is_target:
+            # This is the target node - we need to navigate to it first
+            # Check if there's a control group for navigating to this node
+            parent_id = path[i-1] if i > 0 else None
+            parent = validator.node_id_map.get(parent_id) if parent_id else None
+
+            # Find navigation control group that leads to this node
+            nav_action = _find_navigation_action(validator, parent, node_id)
+
+            if nav_action:
+                subgoals.append(f"Navigate: Click '{nav_action}' to go to {title}")
+            else:
+                subgoals.append(f"Navigate to {title}")
+
+            # Then add the last-mile subgoal for the actual task
+            subgoals.append(f"LAST_MILE: {original_goal}")
+        else:
+            # Intermediate node - just navigation
+            parent_id = path[i-1] if i > 0 else None
+            parent = validator.node_id_map.get(parent_id) if parent_id else None
+            nav_action = _find_navigation_action(validator, parent, node_id)
+
+            if nav_action:
+                subgoals.append(f"Navigate: Click '{nav_action}' to go to {title}")
+            else:
+                subgoals.append(f"Navigate to {title}")
+
+    return subgoals
+
+
+def _find_navigation_action(validator: Any, parent_node: Optional[Dict], target_node_id: str) -> Optional[str]:
+    """
+    Find the control/label that navigates from parent to target node.
+
+    Looks through control_groups in parent node to find a label that
+    matches the target node's title or aliases.
+    """
+    if not parent_node:
+        return None
+
+    target = validator.node_id_map.get(target_node_id)
+    if not target:
+        return None
+
+    target_title = target.get('title', '')
+    target_aliases = set(a.lower() for a in target.get('node_aliases', []))
+
+    control_groups = parent_node.get('control_groups', {})
+    for group_name, group in control_groups.items():
+        labels = group.get('labels', [])
+        for label in labels:
+            label_lower = label.lower()
+            # Check if label matches target title or aliases
+            if target_title and target_title.lower() in label_lower:
+                return label
+            if any(alias in label_lower for alias in target_aliases):
+                return label
+            # Also check if label is contained in target aliases (e.g., "API Keys" in "API Keys page")
+            if label_lower in target_aliases:
+                return label
+
+    return None
+
 
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -448,6 +962,7 @@ CRITICAL STRATEGY RULES:
    - Every intermediate subgoal (non-LAST_MILE) SHOULD generally be "Click [LABEL]".
    - KNOWLEDGE-BASE VETO: If the provided HIVE strategy or VISUAL HINTS describe specific navigation steps (labels) that are NOT in the current DOM list, you MUST still include them if they represent a known-good route. Trust the Knowledge Base over your current localized perception for navigation.
    - DATA-DRIVEN NAVIGATION: If Hive says "Click Dashboard -> Click Usage", but you only see "Dashboard", your sequence MUST be: ["Click Dashboard", "Click Usage", "LAST_MILE: ..."]. DO NOT fold "Usage" into LAST_MILE just because it is not visible yet.
+   - DEEP NAVIGATION: When the site_map knows the full path to the target node, include ALL navigation subgoals needed to reach the target page. Do NOT limit to 1-2 steps - go as deep as needed to reach the target. Then call LAST_MILE for the final action.
    - FORBIDDEN in intermediate subgoals:
      a) Observation verbs: "Look at X", "Read X", "Observe X", "Scroll to X", "Find X", "Check X", "View X" — these are NOT clickable!
      b) URL path navigation: "Navigate to /path/here" — the router CANNOT do URL navigation! Only use "Click [label]".
@@ -457,7 +972,7 @@ CRITICAL STRATEGY RULES:
    - BAD:  ["Click Dashboard", "Click Hannover", "LAST_MILE: ..."]  ← if 'Hannover' is not in the DOM lists!
 10. HIVE SUPPORT PROTOCOLS (CRITICAL):
     - FULL OR PARTIAL HIVE (Hints exist): If you see VISUAL HINTS or STRATEGY in the prompt, USE THEM extensively to build a multi-step sequence of CLICKABLE steps leading toward the goal. Do NOT arbitrarily truncate your sequence if the hints tell you how to get there!
-    - ABSOLUTE ZERO-SHOT (No strategy AND No hints): ONLY if there are exactly ZERO hints and ZERO strategy available, you MUST strongly lean towards execution_mode=last_mile and provide AT MOST ONE navigation subgoal before declaring the LAST_MILE entry. Do not hallucinate long paths you cannot see.
+    - ABSOLUTE ZERO-SHOT (No strategy AND No hints): Use site_map knowledge to build the full navigation path. Include ALL clickable steps needed to reach the target page, then LAST_MILE for the final action. Do NOT limit to 1 subgoal - go deep when the path is known from site_map.
 11. ACTION RELEVANCE RANKING (MANDATORY):
     - Before outputting sequence, rank candidate clickable actions by relevance using:
       a) goal-token overlap,
@@ -662,6 +1177,56 @@ async def run_pre_decision_gate(
         logger.info("PRE_DECISION_GATE_FALLBACK: missing API key")
         return None, None
 
+    # ── PAGE INDEX FAST-PATH ────────────────────────────────────────────────
+    # If PageIndex is available, use deep traversal instead of LLM reasoning
+    try:
+        domain = ""
+        try:
+            parsed = urlparse(current_url if "://" in current_url else f"http://{current_url}")
+            domain = (parsed.netloc or "").replace("www.", "").lower()
+        except Exception:
+            pass
+
+        if _page_index_available(domain):
+            pi_result = await _page_index_search(goal, current_url)
+            if pi_result.get("found") and pi_result.get("confidence", 0) >= 0.4:
+                subgoals = pi_result.get("subgoals", [])
+                if subgoals:
+                    # Build strategy sequence from subgoals
+                    strategy_sequence = []
+                    for sg in subgoals[:-1]:  # All but last (navigation subgoals)
+                        strategy_sequence.append(sg)
+                    strategy_sequence.append(subgoals[-1])  # Last mile
+
+                    decision = {
+                        "execution_mode": "mission" if len(strategy_sequence) > 1 else "last_mile",
+                        "route": "current_domain_hive" if len(strategy_sequence) > 1 else "current_domain_last_mile",
+                        "confidence": pi_result.get("confidence", 0.75),
+                        "start_with_strategy": len(strategy_sequence) > 1,
+                        "recommended_strategy_order": strategy_sequence,
+                        "reason": f"PageIndex deep traversal: {pi_result.get('current_node_id')} -> {pi_result.get('target_node', {}).get('node_id')}",
+                        "evidence": {
+                            "visible_goal_signals": 1,
+                            "obvious_controls": len(strategy_sequence),
+                            "hive_support_score": pi_result.get("confidence", 0.75),
+                            "page_index": {
+                                "target_node": pi_result.get("target_node"),
+                                "navigation_path": pi_result.get("navigation_path"),
+                                "depth": pi_result.get("depth"),
+                            },
+                        },
+                    }
+                    latency_ms = int((time.time() - gate_start) * 1000)
+                    logger.info(
+                        f"PRE_DECISION_GATE_RESULT (PageIndex) route={decision['route']} "
+                        f"conf={decision['confidence']:.2f} depth={pi_result.get('depth')} "
+                        f"target={pi_result.get('target_node', {}).get('node_id')} ({latency_ms}ms)"
+                    )
+                    return None, decision
+    except Exception as e:
+        logger.warning(f"PRE_DECISION_PAGEINDEX_ERROR: {e}")
+        # Continue to LLM-based decision
+
     # ── Cache check ──
     domain = ""
     try:
@@ -681,74 +1246,6 @@ async def run_pre_decision_gate(
             f"conf={decision.get('confidence', 0.0):.2f}"
         )
         return None, decision
-
-    # ══════════════════════════════════════════════════════════════
-    # ── PageIndex Fast-Path (Vectorless Reasoning) ──
-    # If the domain has a site_map.json, use deterministic tree
-    # traversal instead of LLM reasoning. This reduces latency
-    # from ~700ms to <5ms while being more accurate.
-    # ══════════════════════════════════════════════════════════════
-    try:
-        from visual_copilot.orchestration.stages.page_index import traverse_index_with_llm as _page_index_traverse_with_llm
-        if _page_index_available(domain):
-            idx_result = _page_index_traverse_with_llm(current_url, goal, nodes)
-            if idx_result.get("has_index") and idx_result.get("confidence", 0.0) >= 0.5:
-                strategy = idx_result.get("recommended_strategy_order", [])
-                conf = idx_result.get("confidence", 0.85)
-                target_node = idx_result.get("target_node") or {}
-                current_node = idx_result.get("current_node") or {}
-
-                # Determine execution mode from strategy length
-                non_lm = [s for s in strategy if not str(s).upper().startswith("LAST_MILE:")]
-                if len(non_lm) == 0:
-                    # Already at target → last_mile
-                    execution_mode = "last_mile"
-                    route = "current_domain_last_mile"
-                else:
-                    execution_mode = "mission"
-                    route = "current_domain_hive"
-
-                decision = {
-                    "execution_mode": execution_mode,
-                    "route": route,
-                    "confidence": conf,
-                    "start_with_strategy": True,
-                    "recommended_strategy_order": strategy,
-                    "reason": f"PageIndex: {idx_result.get('reasoning', 'tree traversal')}",
-                    "reasoning": idx_result.get("reasoning", ""),
-                    "evidence": {
-                        "visible_goal_signals": 1 if target_node else 0,
-                        "obvious_controls": len(non_lm),
-                        "hive_support_score": conf,
-                    },
-                    "page_index": {
-                        "current_node": current_node.get("node_id", ""),
-                        "target_node": target_node.get("node_id", ""),
-                        "traverse_ms": idx_result.get("traverse_ms", 0),
-                    },
-                }
-
-                _cache[cache_key] = decision
-                _cache_ts[cache_key] = now
-
-                latency_ms = int((time.time() - gate_start) * 1000)
-                logger.info(
-                    f"PRE_DECISION_GATE_RESULT (PageIndex) session={session_id} "
-                    f"mode={execution_mode} route={route} conf={conf:.2f} "
-                    f"strategy_len={len(strategy)} "
-                    f"current={current_node.get('node_id', 'none')} "
-                    f"target={target_node.get('node_id', 'none')} "
-                    f"traverse_ms={idx_result.get('traverse_ms', 0)} "
-                    f"total_ms={latency_ms}"
-                )
-                return None, decision
-    except Exception as idx_err:
-        logger.warning(f"PRE_DECISION_GATE: PageIndex fast-path failed: {idx_err}")
-        # Fall through to legacy Hive + LLM path
-
-    # ══════════════════════════════════════════════════════════════
-    # ── Legacy Path: Hive Probe + LLM Reasoning ──
-    # ══════════════════════════════════════════════════════════════
 
     # ── Build compressed context ──
     dom_context = _compress_dom_context(nodes, current_url)

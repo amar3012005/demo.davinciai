@@ -22,6 +22,8 @@ from visual_copilot.constants import (
     ENABLE_VERIFIED_ADVANCE,
     ENABLE_PRE_DECISION_GATE,
     PRE_DECISION_MIN_CONF,
+    KNOWN_SITE_MAPPED_MODE_ENABLED,
+    KNOWN_SITE_MAPPED_MODE_MIN_CONF,
     _TYPE_TAGS,
     _is_v3_feature_enabled,
     _register_v3_pending_drop,
@@ -80,7 +82,9 @@ from visual_copilot.orchestration.completion import (
     check_if_arrived as _check_if_arrived,
     validate_and_end_mission as _validate_and_end_mission,
 )
+from visual_copilot.models.contracts import MappedTerminalContext
 from visual_copilot.routing.read_only_router import run_read_only_terminal as _run_read_only_terminal
+from visual_copilot.navigation.site_map_validator import resolve_current_node
 
 logger = logging.getLogger("vc.orchestration.plan_next_step")
 session_stage_logger = logging.getLogger("vc.stage.session")
@@ -320,19 +324,84 @@ async def ultimate_plan_next_step_impl(
                             
                         idx_result = get_path_to_goal(current_url, goal, site_map_data)
                         strategy_order = idx_result.get("recommended_strategy_order", [f"LAST_MILE: {goal}"])
-                        
+
+                        # ═══════════════════════════════════════════════════════════
+                        # MapGuard: Build MappedTerminalContext for high-confidence PageIndex matches
+                        # ═══════════════════════════════════════════════════════════
+                        mapped_terminal_context = None
+                        target_node = idx_result.get("target_node") or {}
+                        current_node = idx_result.get("current_node") or {}
+                        idx_confidence = float(idx_result.get("confidence", 0.0))
+
+                        if (
+                            KNOWN_SITE_MAPPED_MODE_ENABLED
+                            and target_node
+                            and idx_confidence >= KNOWN_SITE_MAPPED_MODE_MIN_CONF
+                        ):
+                            # Check if we're already at the target (direct last_mile)
+                            current_node_id = current_node.get("node_id", "")
+                            target_node_id = target_node.get("node_id", "")
+
+                            if current_node_id == target_node_id or len(strategy_order) == 1:
+                                # Build control groups from expected_controls
+                                control_groups = {}
+                                expected_controls = target_node.get("expected_controls", []) or []
+                                for ctrl in expected_controls:
+                                    # Group by control type/category if available
+                                    group_key = "default"
+                                    if isinstance(ctrl, dict):
+                                        group_key = ctrl.get("group", "default")
+                                        ctrl_def = ctrl
+                                    else:
+                                        ctrl_def = {"selector": ctrl, "type": "unknown"}
+                                    if group_key not in control_groups:
+                                        control_groups[group_key] = []
+                                    control_groups[group_key].append(ctrl_def)
+
+                                # Extract task_modes and completion_contract from site map node
+                                task_modes = target_node.get("task_modes", []) or []
+                                completion_contract = target_node.get("completion_contract", {}) or {}
+
+                                mapped_terminal_context = MappedTerminalContext(
+                                    mapped_mode=True,
+                                    expected_node_id=target_node_id,
+                                    mapped_terminal_node=target_node.get("title", ""),
+                                    required_controls=expected_controls if isinstance(expected_controls, list) else [],
+                                    control_groups=control_groups,
+                                    task_modes=task_modes,
+                                    completion_contract=completion_contract,
+                                    allowed_terminal_capabilities=target_node.get("terminal_capabilities", []) or [],
+                                )
+                                logger.info(
+                                    f"MAPGUARD_MAPPED_MODE: High-confidence PageIndex match "
+                                    f"target={target_node_id} conf={idx_confidence:.2f} "
+                                    f"controls={len(expected_controls)} modes={task_modes} caps={len(mapped_terminal_context.allowed_terminal_capabilities)}"
+                                )
+                            elif idx_confidence >= KNOWN_SITE_MAPPED_MODE_MIN_CONF:
+                                # Log warning when fuzzy routing would be used despite high-confidence PageIndex
+                                logger.warning(
+                                    f"MAPGUARD_ROUTE_DRIFT: High PageIndex confidence ({idx_confidence:.2f}) "
+                                    f"but fuzzy routing selected. current={current_node_id} target={target_node_id}"
+                                )
+
                         pre_decision = {
                             "execution_mode": "mission" if len(strategy_order) > 1 else "last_mile",
                             "route": "current_domain_hive" if len(strategy_order) > 1 else "current_domain_last_mile",
-                            "confidence": 0.90,
+                            "confidence": idx_confidence if mapped_terminal_context else 0.90,
                             "start_with_strategy": True,
                             "recommended_strategy_order": strategy_order,
                             "reason": "PageIndex LLM Tree Traversal",
                             "evidence": {
-                                "visible_goal_signals": 1 if idx_result.get("target_node") else 0,
+                                "visible_goal_signals": 1 if target_node else 0,
                                 "obvious_controls": len(strategy_order) - 1,
                                 "hive_support_score": 0.90,
                             },
+                            "page_index": {
+                                "current_node": current_node.get("node_id", ""),
+                                "target_node": target_node.get("node_id", ""),
+                                "confidence": idx_confidence,
+                            },
+                            "mapped_terminal_context": mapped_terminal_context.to_dict() if mapped_terminal_context else None,
                         }
                     except Exception as qp_err:
                         logger.warning(f"IndexTraverser quick probe failed: {qp_err}")
@@ -386,6 +455,28 @@ async def ultimate_plan_next_step_impl(
         # If pre-decision gate already fetched nodes, reuse them
         if ENABLE_PRE_DECISION_GATE and 'prefetched_nodes_for_gate' in locals() and prefetched_nodes_for_gate:
             nodes = prefetched_nodes_for_gate
+
+        # ═══════════════════════════════════════════════════════════════════
+        # 🗺️ PER-TURN NODE RESOLUTION: Resolve current site map node every turn
+        # This ensures we always operate against the correct node contract.
+        # Site map is SOURCE OF TRUTH; vision is advisory only.
+        # ═══════════════════════════════════════════════════════════════════
+        current_site_map_node = None
+        if KNOWN_SITE_MAPPED_MODE_ENABLED:
+            try:
+                current_site_map_node = resolve_current_node(current_url, nodes=nodes)
+                if current_site_map_node:
+                    node_id = current_site_map_node.get("node_id", "unknown")
+                    control_groups = current_site_map_node.get("control_groups", {})
+                    task_modes = current_site_map_node.get("task_modes", [])
+                    logger.info(
+                        f"CONTRACT_FIRST: node={node_id} "
+                        f"control_groups={list(control_groups.keys())} "
+                        f"task_modes={task_modes}"
+                    )
+            except Exception as node_res_err:
+                logger.debug(f"Per-turn node resolution failed: {node_res_err}")
+                current_site_map_node = None
 
         pre_decision_strategy_sequence = []
         pre_decision_last_mile_goal = ""
@@ -480,6 +571,16 @@ async def ultimate_plan_next_step_impl(
                         "no_legacy_fallback": True,
                     }
 
+                # Extract site map target node for boosted matching
+                site_map_target = None
+                if pre_decision.get("page_index", {}).get("target_node"):
+                    site_map_target = pre_decision["page_index"]["target_node"]
+                    # Handle both dict and string formats
+                    if isinstance(site_map_target, dict):
+                        logger.info(f"  📍 Site map target: {site_map_target.get('node_id')} - '{site_map_target.get('title')}'")
+                    else:
+                        logger.info(f"  📍 Site map target: {site_map_target}")
+
                 # Build bundled action pipeline from nav_subgoals
                 # Each "Click X" becomes a click_element action with target found via keyword match
                 bundled_actions = []
@@ -492,11 +593,14 @@ async def ultimate_plan_next_step_impl(
                     if label.lower().startswith("click "):
                         label = label[6:].strip()
 
-                    # Find matching clickable node by keyword/token overlap
+                    label_lower = label.lower()
+
+                    # Find matching clickable node by keyword/token overlap with fuzzy fallback
                     best_id = None
                     best_score = 0
-                    label_terms = set(label.lower().split())
-                    
+                    best_match_reason = ""
+                    label_terms = set(label_lower.split())
+
                     for n in nodes:
                         if not getattr(n, "interactive", False):
                             continue
@@ -506,14 +610,47 @@ async def ultimate_plan_next_step_impl(
                         txt = (getattr(n, "text", "") or "").strip().lower()
                         if not txt:
                             continue
-                        
-                        # Score by token overlap
+
+                        score = 0
+                        match_reason = ""
+
+                        # Priority 1: Exact substring match (label is contained in node text or vice versa)
+                        if label_lower in txt or txt in label_lower:
+                            score = 100 + min(len(label_terms), 5)  # Boost for substring match
+                            match_reason = "substring_match"
+
+                        # Priority 2: Token overlap scoring
                         txt_terms = set(txt.split())
                         overlap = len(label_terms & txt_terms)
-                        if overlap > best_score:
-                            best_score = overlap
+                        if overlap > 0:
+                            # Normalize by label length - all label tokens found is perfect
+                            label_coverage = overlap / len(label_terms) if label_terms else 0
+                            token_score = overlap * (1 + label_coverage)
+                            if score == 0 or token_score > score:
+                                score = token_score
+                                match_reason = f"token_overlap_{overlap}"
+
+                        # Priority 3: Site map boost - if node title matches known site map titles
+                        node_title = getattr(n, "title", "") or getattr(n, "text", "")
+                        if node_title:
+                            node_title_lower = node_title.lower()
+                            # Check if label matches start of node title (handles "Usage" vs "Usage and Spend")
+                            if node_title_lower.startswith(label_lower) or label_lower.startswith(node_title_lower.split()[0] if node_title_lower.split() else ""):
+                                score += 50
+                                match_reason = "site_map_prefix_match"
+
+                        # Priority 4: Direct site map target match (from PageIndex)
+                        if site_map_target and isinstance(site_map_target, dict):
+                            target_title = site_map_target.get("title", "").lower()
+                            if target_title and (target_title in txt or txt in target_title):
+                                score += 75
+                                match_reason = "site_map_target_match"
+
+                        if score > best_score:
+                            best_score = score
                             best_id = nid
-                    
+                            best_match_reason = match_reason
+
                     if best_id and best_score > 0:
                         bundled_actions.append({
                             "type": "click",
@@ -522,9 +659,10 @@ async def ultimate_plan_next_step_impl(
                             "speech": f"Clicking {label}...",
                         })
                         excluded_ids.add(best_id)
-                        logger.info(f"  ✓ Mapped '{nav_step}' -> {best_id} (score={best_score})")
+                        logger.info(f"  ✓ Mapped '{nav_step}' -> {best_id} (score={best_score:.1f}, reason={best_match_reason})")
                     else:
-                        logger.warning(f"  ✗ Could not resolve '{nav_step}' in current DOM")
+                        logger.warning(f"  ✗ Could not resolve '{nav_step}' in current DOM - no matching interactive node found")
+                        logger.warning(f"     Label: '{label}' | Available interactive nodes: {[getattr(n, 'text', '') for n in nodes if getattr(n, 'interactive', False) and getattr(n, 'text', '')][:10]}")
                         all_resolved = False
 
                 # Only use bundled navigation if ALL targets are visible
@@ -674,7 +812,28 @@ async def ultimate_plan_next_step_impl(
                 if pre_decision_reasoning:
                     schema.constraints["pre_decision_context"] = pre_decision_reasoning[:2000]  # Increased from 500 to preserve full navigation reasoning
 
+                # ═══════════════════════════════════════════════════════════
+                # MapGuard: Pass mapped_terminal_context to last_mile
+                # ═══════════════════════════════════════════════════════════
+                mapped_ctx_dict = None
+                if isinstance(pre_decision, dict):
+                    mapped_ctx_dict = pre_decision.get("mapped_terminal_context")
+                if mapped_ctx_dict:
+                    schema.constraints["mapped_terminal_context"] = mapped_ctx_dict
+                    logger.info(
+                        f"MAPGUARD_INSTANT_LAST_MILE: Passing mapped_terminal_context "
+                        f"node={mapped_ctx_dict.get('expected_node_id', 'unknown')} "
+                        f"caps={len(mapped_ctx_dict.get('allowed_terminal_capabilities', []))}"
+                    )
+
                 from visual_copilot.mission.last_mile import run_compound_last_mile
+                from visual_copilot.models.contracts import MappedTerminalContext
+
+                # Convert dict to MappedTerminalContext object if available
+                mapped_terminal_ctx = None
+                if mapped_ctx_dict:
+                    mapped_terminal_ctx = MappedTerminalContext.from_dict(mapped_ctx_dict)
+
                 try:
                     compound_result = await run_compound_last_mile(
                         schema=schema,
@@ -683,6 +842,7 @@ async def ultimate_plan_next_step_impl(
                         app=app,
                         session_id=session_id,
                         excluded_ids=excluded_ids or set(),
+                        mapped_terminal_context=mapped_terminal_ctx,
                     )
                 except Exception as e:
                     logger.error(f"INSTANT_LAST_MILE_ERROR: {e}")
@@ -756,6 +916,8 @@ async def ultimate_plan_next_step_impl(
                         if not rep_step and action:
                              rep_step = next((s for s in reversed(action) if isinstance(s, dict) and s.get("type") != "wait"), {})
                         
+                        if mission.last_mile_runtime is None:
+                            mission.last_mile_runtime = {}
                         mission.last_mile_runtime.update({
                             "last_action_type": rep_step.get("type", "action") if rep_step else "action",
                             "last_action_fp": _action_fingerprint(rep_step) if rep_step else "",
@@ -822,7 +984,9 @@ async def ultimate_plan_next_step_impl(
                             await mission_brain.record_action(mission.mission_id, "click", target_id, True)
                             refreshed = await mission_brain._load_mission(mission.mission_id)
                             if refreshed: mission = refreshed
-                        
+
+                        if mission.last_mile_runtime is None:
+                            mission.last_mile_runtime = {}
                         mission.last_mile_runtime.update({
                             "last_action_type": action_type,
                             "last_action_fp": _action_fingerprint(action),
@@ -845,6 +1009,8 @@ async def ultimate_plan_next_step_impl(
                             refreshed = await mission_brain._load_mission(mission.mission_id)
                             if refreshed: mission = refreshed
                         
+                        if mission.last_mile_runtime is None:
+                            mission.last_mile_runtime = {}
                         mission.last_mile_runtime.update({
                             "last_action_type": action_type,
                             "last_action_fp": _action_fingerprint(action),
@@ -860,6 +1026,8 @@ async def ultimate_plan_next_step_impl(
                         }
 
                     if action_type in ("scroll", "wait"):
+                        if mission.last_mile_runtime is None:
+                            mission.last_mile_runtime = {}
                         mission.last_mile_runtime.update({
                             "last_action_type": action_type,
                             "last_action_fp": _action_fingerprint(action),

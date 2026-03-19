@@ -1,0 +1,44 @@
+services:
+  # ═══════════════════════════════════════════════════════════
+  # Jina CLIP v1 Multimodal Embeddings (Internal port 4007 → External 8002)
+  # ═══════════════════════════════════════════════════════════
+  jina-clip-v1:
+    build:
+      context: ./bindings-eu/jina-clip-v1
+      dockerfile: Dockerfile
+    # Note: Using SSL similar to the standard embeddings service
+    command: "uvicorn app:app --host 0.0.0.0 --port 4007 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
+    ports:
+      - "8002:4007"
+    volumes:
+      - /etc/letsencrypt/live/demo.davinciai.eu/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/demo.davinciai.eu/privkey.pem:/certs/privkey.pem:ro
+      - hf_cache_jina_clip:/root/.cache/huggingface
+    environment:
+      MODEL_NAME: ${MODEL_NAME:-jinaai/jina-clip-v1}
+      PORT: "4007"
+      HF_HOME: "/root/.cache/huggingface"
+      COOLIFY_CONTAINER_NAME: jina-clip-v1
+    networks:
+      coolify: null
+      eu-stack: null
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.type=service
+      - coolify.name=jina-clip-v1
+      - coolify.service.subType=application
+      - coolify.service.subName=embeddings
+    env_file:
+      - .env.eu
+
+volumes:
+  hf_cache_jina_clip:
+    name: hf_cache_jina_clip
+
+networks:
+  coolify:
+    external: true
+  eu-stack:
+    external: true
+    name: eu-stack

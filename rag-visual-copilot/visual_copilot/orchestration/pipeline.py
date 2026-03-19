@@ -1,9 +1,9 @@
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from visual_copilot.logging.config import emit_event, get_logger
-from visual_copilot.models.contracts import PlanningContext
+from visual_copilot.models.contracts import PlanningContext, MappedTerminalContext
 from visual_copilot.orchestration.bootstrap import build_context, require_runtime_modules
 from visual_copilot.orchestration.completion import terminal_completion_response
 from visual_copilot.orchestration.plan_next_step_flow import ultimate_plan_next_step_impl
@@ -25,6 +25,7 @@ async def run_pipeline(
     screenshot_b64: str = "",
     pre_decision: Optional[dict] = None,
     route_hint: str = "",
+    mapped_terminal_context: Optional[Dict[str, Any]] = None,
 ):
     trace_id = str(uuid.uuid4())
     ctx: PlanningContext = build_context(
@@ -37,6 +38,7 @@ async def run_pipeline(
         previous_goal=previous_goal,
         mission_id=mission_id,
         trace_id=trace_id,
+        mapped_terminal_context=MappedTerminalContext.from_dict(mapped_terminal_context) if mapped_terminal_context else None,
     )
     t0 = time.time()
     emit_event(

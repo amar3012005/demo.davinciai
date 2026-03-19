@@ -442,6 +442,7 @@ CRITICAL STRATEGY RULES:
    - Every intermediate subgoal (non-LAST_MILE) SHOULD generally be "Click [LABEL]".
    - KNOWLEDGE-BASE VETO: If the provided HIVE strategy or VISUAL HINTS describe specific navigation steps (labels) that are NOT in the current DOM list, you MUST still include them if they represent a known-good route. Trust the Knowledge Base over your current localized perception for navigation.
    - DATA-DRIVEN NAVIGATION: If Hive says "Click Dashboard -> Click Usage", but you only see "Dashboard", your sequence MUST be: ["Click Dashboard", "Click Usage", "LAST_MILE: ..."]. DO NOT fold "Usage" into LAST_MILE just because it is not visible yet.
+   - DEEP NAVIGATION: When the site_map knows the full path to the target node, include ALL navigation subgoals needed to reach the target page. Do NOT limit to 1-2 steps - go as deep as needed to reach the target. Then call LAST_MILE for the final action.
    - FORBIDDEN in intermediate subgoals:
      a) Observation verbs: "Look at X", "Read X", "Observe X", "Scroll to X", "Find X", "Check X", "View X" — these are NOT clickable!
      b) URL path navigation: "Navigate to /path/here" — the router CANNOT do URL navigation! Only use "Click [label]".
@@ -451,7 +452,7 @@ CRITICAL STRATEGY RULES:
    - BAD:  ["Click Dashboard", "Click Hannover", "LAST_MILE: ..."]  ← if 'Hannover' is not in the DOM lists!
 10. HIVE SUPPORT PROTOCOLS (CRITICAL):
     - FULL OR PARTIAL HIVE (Hints exist): If you see VISUAL HINTS or STRATEGY in the prompt, USE THEM extensively to build a multi-step sequence of CLICKABLE steps leading toward the goal. Do NOT arbitrarily truncate your sequence if the hints tell you how to get there!
-    - ABSOLUTE ZERO-SHOT (No strategy AND No hints): ONLY if there are exactly ZERO hints and ZERO strategy available, you MUST strongly lean towards execution_mode=last_mile and provide AT MOST ONE navigation subgoal before declaring the LAST_MILE entry. Do not hallucinate long paths you cannot see.
+    - ABSOLUTE ZERO-SHOT (No strategy AND No hints): Use site_map knowledge to build the full navigation path. Include ALL clickable steps needed to reach the target page, then LAST_MILE for the final action. Do NOT limit to 1 subgoal - go deep when the path is known from site_map.
 11. ACTION RELEVANCE RANKING (MANDATORY):
     - Before outputting sequence, rank candidate clickable actions by relevance using:
       a) goal-token overlap,

@@ -154,8 +154,8 @@ async def investigate(
         DetectiveReport with scored candidates and page analysis
     """
     # Import here to avoid circular dependencies
-    from visual_copilot.semantic_detective import SemanticDetective
-    from visual_copilot.live_graph import LiveGraph
+    from semantic_detective import SemanticDetective
+    from live_graph import LiveGraph
     
     # Get the app state to access the semantic detective
     # This function is called from visual_orchestrator which has access to app.state

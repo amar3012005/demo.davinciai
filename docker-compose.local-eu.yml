@@ -93,6 +93,9 @@ services:
       sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn app:app --host 0.0.0.0 --port 4005'
     ports:
       - "${VC_EU_PORT:-4015}:4005"
+    volumes:
+      - ./rag-visual-copilot:/app
+      - ./rag-visual-copilot/site_map.json:/app/site_map.json:ro
     environment:
       GROQ_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
@@ -108,6 +111,15 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       TENANT_ID: ${TENANT_ID:-tara}
       PORT: "4005"
+
+      # PageIndex LLM Reasoning
+      PAGEINDEX_LLM_ENABLED: ${PAGEINDEX_LLM_ENABLED:-true}
+      PAGEINDEX_LLM_MODEL: ${PAGEINDEX_LLM_MODEL:-llama-3.1-8b-instant}
+      PAGEINDEX_LLM_TIMEOUT_MS: ${PAGEINDEX_LLM_TIMEOUT_MS:-500}
+      PAGEINDEX_LLM_MIN_CONF: ${PAGEINDEX_LLM_MIN_CONF:-0.75}
+      MAPPED_LAST_MILE_ENABLED: ${MAPPED_LAST_MILE_ENABLED:-true}
+      MAPPED_COMPLETION_CONTRACT_ENABLED: ${MAPPED_COMPLETION_CONTRACT_ENABLED:-true}
+      MAPPED_INTENT_GROUP_RESOLUTION_ENABLED: ${MAPPED_INTENT_GROUP_RESOLUTION_ENABLED:-true}
     restart: unless-stopped
     depends_on:
       redis-eu-local:

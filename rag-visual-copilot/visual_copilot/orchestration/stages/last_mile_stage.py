@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 
 from visual_copilot.mission.last_mile import plan_last_mile as modular_plan_last_mile
 from visual_copilot.mission.last_mile import run_compound_last_mile
+from visual_copilot.models.contracts import MappedTerminalContext
 
 LAST_MILE_WAIT_GRACE_MS = int(os.getenv("LAST_MILE_WAIT_GRACE_MS", "1800"))
 LAST_MILE_DEDUP_WINDOW_MS = int(os.getenv("LAST_MILE_DEDUP_WINDOW_MS", "6000"))
@@ -341,6 +342,21 @@ async def handle_last_mile_stage(
             )
 
         try:
+            # ═══════════════════════════════════════════════════════════
+            # MapGuard: Extract mapped_terminal_context from schema constraints
+            # ═══════════════════════════════════════════════════════════
+            mapped_terminal_ctx = None
+            constraints = getattr(schema, "constraints", {}) or {}
+            if constraints and "mapped_terminal_context" in constraints:
+                ctx_dict = constraints.get("mapped_terminal_context")
+                if ctx_dict:
+                    mapped_terminal_ctx = MappedTerminalContext.from_dict(ctx_dict)
+                    logger.info(
+                        f"MAPGUARD_LAST_MILE_STAGE: Loaded mapped_terminal_context "
+                        f"node={mapped_terminal_ctx.expected_node_id} "
+                        f"valid={mapped_terminal_ctx.is_valid_terminal()}"
+                    )
+
             compound_result = await run_compound_last_mile(
                 schema=schema,
                 mission=mission,
@@ -354,6 +370,7 @@ async def handle_last_mile_stage(
                 user_goal=goal,
                 force_vision_bootstrap=force_vision_bootstrap,
                 initial_overlay_ids=set(runtime.get("last_overlay_ids", [])),
+                mapped_terminal_context=mapped_terminal_ctx,
             )
         except Exception as e:
             logger.error(f"COMPOUND_LAST_MILE_ERROR: {e}, falling back to legacy planner")

@@ -9,6 +9,17 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from visual_copilot.constants import _CLICK_ROLES, _CLICK_TAGS, _TYPE_ROLES, _TYPE_TAGS
+from visual_copilot.mission.last_mile_tools import (
+    MappedTaskType,
+    MappedActionStateMachine,
+    MappedFormFillStateMachine,
+    MappedExtractionStateMachine,
+    MappedExtractionState,
+    MappedActionState,
+    MappedTerminalContext,
+    MappedAction,
+    should_fallback_to_exploratory,
+)
 from visual_copilot.navigation.site_map_validator import SiteMapValidator, ValidationResult
 from visual_copilot.routing.action_guard import _is_clickable_node, _is_type_node, _resolve_clickable_by_label_context, _resolve_clickable_target_id
 from visual_copilot.text.tokenization import _tokenize
@@ -63,6 +74,11 @@ LAST_MILE_VISION_POLICY_TRIGGER = os.getenv("LAST_MILE_VISION_POLICY_TRIGGER", "
 LAST_MILE_ONECALL_REASONING_ACTION_ENABLED = os.getenv("LAST_MILE_ONECALL_REASONING_ACTION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 LAST_MILE_ONECALL_JSON_SCHEMA_STRICT = os.getenv("LAST_MILE_ONECALL_JSON_SCHEMA_STRICT", "true").strip().lower() in {"1", "true", "yes", "on"}
 LAST_MILE_ONECALL_INCLUDE_REASONING = os.getenv("LAST_MILE_ONECALL_INCLUDE_REASONING", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Mapped Last-Mile Feature Flag (Deterministic extraction for known sites)
+# ═══════════════════════════════════════════════════════════════════════
+MAPPED_LAST_MILE_ENABLED = os.getenv("MAPPED_LAST_MILE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # Thresholds
 EVIDENCE_RELEVANCE_THRESHOLD = 3  # min goal-term overlap to consider evidence "strong"
@@ -141,6 +157,12 @@ class LastMilePageContext:
     child_titles: List[str]
     expected_controls: List[str]
     terminal_capabilities: List[str]
+    page_type: str
+    control_groups: Dict[str, Any]
+    task_modes: Dict[str, Any]
+    transition_rules: Dict[str, Any]
+    completion_contracts: Dict[str, Any]
+    verification_signals: List[str]
     route_summary: str
 
 @dataclass
@@ -444,6 +466,12 @@ def _build_last_mile_page_context(
         # Get expected controls and terminal capabilities
         expected_controls = current_node.get("expected_controls", []) or []
         terminal_capabilities = current_node.get("terminal_capabilities", []) or []
+        page_type = current_node.get("page_type", "") or ""
+        control_groups = current_node.get("control_groups", {}) or {}
+        task_modes = current_node.get("task_modes", {}) or {}
+        transition_rules = current_node.get("transition_rules", {}) or {}
+        completion_contracts = current_node.get("completion_contracts", {}) or {}
+        verification_signals = current_node.get("verification_signals", []) or []
 
         # Build route summary
         breadcrumb = validator.get_breadcrumb(current_url) if validator else []
@@ -473,6 +501,12 @@ def _build_last_mile_page_context(
             child_titles=child_titles,
             expected_controls=expected_controls,
             terminal_capabilities=terminal_capabilities,
+            page_type=page_type,
+            control_groups=control_groups,
+            task_modes=task_modes,
+            transition_rules=transition_rules,
+            completion_contracts=completion_contracts,
+            verification_signals=verification_signals,
             route_summary=route_summary
         )
 
@@ -486,6 +520,12 @@ def _build_last_mile_page_context(
         child_titles=[],
         expected_controls=[],
         terminal_capabilities=[],
+        page_type="",
+        control_groups={},
+        task_modes={},
+        transition_rules={},
+        completion_contracts={},
+        verification_signals=[],
         route_summary="unknown"
     )
 
@@ -1447,6 +1487,18 @@ def _build_mission_state_context(
                     terminal = current_node.get("terminal_capabilities", [])
                     if terminal:
                         lines.append(f"**Terminal Capabilities:** {', '.join(terminal)}")
+                    page_type = current_node.get("page_type", "")
+                    if page_type:
+                        lines.append(f"**Page Type:** {page_type}")
+                    control_groups = current_node.get("control_groups", {}) or {}
+                    if control_groups:
+                        lines.append(f"**Control Groups:** {', '.join(sorted(control_groups.keys()))}")
+                    task_modes = current_node.get("task_modes", {}) or {}
+                    if task_modes:
+                        lines.append(f"**Task Modes:** {', '.join(sorted(task_modes.keys()))}")
+                    verification_signals = current_node.get("verification_signals", []) or []
+                    if verification_signals:
+                        lines.append(f"**Verification Signals:** {', '.join(verification_signals)}")
                     lines.append("**Logical Verification Rule:** Before calling complete_mission, verify you have landed on the correct logical node defined in the map.")
                     # Backtracking rule
                     lines.append("**Backtracking Rule:** If you are at a leaf node but cannot find the answer, you must backtrack to the parent node to try a different branch instead of halting.")
@@ -1704,6 +1756,12 @@ def _build_last_mile_page_context(current_url: str) -> Optional[LastMilePageCont
             child_titles=child_titles,
             expected_controls=current_node.get("expected_controls", []),
             terminal_capabilities=current_node.get("terminal_capabilities", []),
+            page_type=current_node.get("page_type", ""),
+            control_groups=current_node.get("control_groups", {}) or {},
+            task_modes=current_node.get("task_modes", {}) or {},
+            transition_rules=current_node.get("transition_rules", {}) or {},
+            completion_contracts=current_node.get("completion_contracts", {}) or {},
+            verification_signals=current_node.get("verification_signals", []) or [],
             route_summary=""
         )
     except Exception as e:
@@ -1724,7 +1782,15 @@ def _render_page_context_for_onecall(ctx: Optional[LastMilePageContext]) -> str:
         lines.append(f"- expected controls: {', '.join(ctx.expected_controls)}")
     if ctx.terminal_capabilities:
         lines.append(f"- terminal capabilities: {', '.join(ctx.terminal_capabilities)}")
-    
+    if ctx.page_type:
+        lines.append(f"- page type: {ctx.page_type}")
+    if ctx.control_groups:
+        lines.append(f"- control groups: {', '.join(sorted(ctx.control_groups.keys()))}")
+    if ctx.task_modes:
+        lines.append(f"- task modes: {', '.join(sorted(ctx.task_modes.keys()))}")
+    if ctx.verification_signals:
+        lines.append(f"- verification signals: {', '.join(ctx.verification_signals)}")
+
     route_sum = "You are at the correct leaf node. Prefer in-page controls over sidebar navigation."
     if ctx.child_titles:
         route_sum = "You are at a branch node. Look for navigation links to children."
@@ -2361,6 +2427,7 @@ async def run_compound_last_mile(
     user_goal: str = "",
     force_vision_bootstrap: bool = True,
     initial_overlay_ids: Set[str] = None,
+    mapped_terminal_context: Optional[MappedTerminalContext] = None,
 ) -> Dict[str, Any]:
     """
     Compound Agentic Last-Mile Loop with State Machine.
@@ -2371,6 +2438,11 @@ async def run_compound_last_mile(
     - Progress-aware controls (hard-stop on stall)
     - Policy-triggered vision fallback (not default)
     - Deterministic exit reasons
+
+    NEW: Split execution into mapped vs exploratory paths based on site map coverage.
+    - Mapped path (MAPPED_LAST_MILE_ENABLED): Deterministic extraction with strict
+      invariants requiring entity anchor + metric anchor + numeric value
+    - Exploratory path: Current flexible behavior for unknown sites
 
     Returns a dict with keys:
       action: dict describing the browser action or answer
@@ -2386,6 +2458,77 @@ async def run_compound_last_mile(
         getattr(mission, "main_goal", "")
         or getattr(schema, "raw_utterance", "")
         or getattr(schema, "target_entity", "")
+    )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PATH SPLIT: Mapped vs Exploratory Last-Mile Execution
+    # ═══════════════════════════════════════════════════════════════════════
+    if MAPPED_LAST_MILE_ENABLED:
+        validator = _get_validator()
+        # MapGuard: Prefer passed mapped_terminal_context over validator lookup
+        if mapped_terminal_context and mapped_terminal_context.is_valid_terminal():
+            logger.info(
+                f"MAPPED_LAST_MILE_PATH (MapGuard) mission={getattr(mission, 'mission_id', 'unknown')} "
+                f"node_id={mapped_terminal_context.expected_node_id} "
+                f"url={current_url[:60]}"
+            )
+            return await _run_mapped_last_mile(
+                schema=schema,
+                mission=mission,
+                nodes=nodes,
+                app=app,
+                screenshot_b64=screenshot_b64,
+                session_id=session_id,
+                excluded_ids=excluded_ids,
+                current_url=current_url,
+                goal_url=goal_url,
+                user_goal=user_goal,
+                force_vision_bootstrap=force_vision_bootstrap,
+                initial_overlay_ids=initial_overlay_ids,
+                site_map_node={
+                    "node_id": mapped_terminal_context.expected_node_id,
+                    "title": mapped_terminal_context.mapped_terminal_node,
+                    "expected_controls": mapped_terminal_context.required_controls,
+                    "terminal_capabilities": mapped_terminal_context.allowed_terminal_capabilities,
+                    "page_type": getattr(mapped_terminal_context, "page_type", ""),
+                    "control_groups": getattr(mapped_terminal_context, "control_groups", {}),
+                    "task_modes": getattr(mapped_terminal_context, "task_modes", {}),
+                    "transition_rules": getattr(mapped_terminal_context, "transition_rules", {}),
+                    "completion_contracts": getattr(mapped_terminal_context, "completion_contracts", {}),
+                    "verification_signals": getattr(mapped_terminal_context, "verification_signals", []),
+                },
+                validator=validator,
+            )
+        elif validator:
+            current_node = validator.get_node_for_url(current_url)
+            if current_node:
+                # This is a mapped site - use deterministic extraction
+                logger.info(
+                    f"MAPPED_LAST_MILE_PATH mission={getattr(mission, 'mission_id', 'unknown')} "
+                    f"node_id={current_node.get('node_id', 'unknown')} "
+                    f"url={current_url[:60]}"
+                )
+                return await _run_mapped_last_mile(
+                    schema=schema,
+                    mission=mission,
+                    nodes=nodes,
+                    app=app,
+                    screenshot_b64=screenshot_b64,
+                    session_id=session_id,
+                    excluded_ids=excluded_ids,
+                    current_url=current_url,
+                    goal_url=goal_url,
+                    user_goal=user_goal,
+                    force_vision_bootstrap=force_vision_bootstrap,
+                    initial_overlay_ids=initial_overlay_ids,
+                    site_map_node=current_node,
+                    validator=validator,
+                )
+
+    # Fall through to exploratory path
+    logger.info(
+        f"EXPLORATORY_LAST_MILE_PATH mission={getattr(mission, 'mission_id', 'unknown')} "
+        f"mapped_enabled={MAPPED_LAST_MILE_ENABLED} url={current_url[:60]}"
     )
     user_goal_text = (user_goal or getattr(schema, "raw_utterance", "") or main_goal or "").strip()
     history = getattr(mission, "action_history", [])[-8:] if mission else []
@@ -3883,3 +4026,763 @@ async def run_compound_last_mile(
         "status": "max_iterations",
         "diagnostics": {"last_mile_state": state.to_diagnostic()},
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# MAPPED LAST-MILE EXECUTION (Deterministic for Known Sites)
+# ═══════════════════════════════════════════════════════════════════════
+
+def classify_task_type(user_goal: str, current_node: Dict) -> MappedTaskType:
+    """
+    Classify user goal into task type.
+
+    Imperative verbs → CREATE_ACTION / FORM_FILL
+    "show", "what", "how many" → READ_EXTRACT
+    "confirm", "yes" → CONFIRM_ACTION
+
+    Args:
+        user_goal: The user's stated goal or request
+        current_node: Current site map node (for future context-based classification)
+
+    Returns:
+        MappedTaskType enum value
+    """
+    goal_lower = user_goal.lower()
+
+    # Confirmation patterns (check first - most specific)
+    if any(v in goal_lower for v in ["confirm", "yes delete", "yes remove", "yes,", "i'm sure", "delete this", "remove this"]):
+        return MappedTaskType.CONFIRM_ACTION
+
+    # Action creation patterns
+    if any(v in goal_lower for v in ["create", "add new", "make a", "generate"]):
+        if "api key" in goal_lower or "key" in goal_lower:
+            return MappedTaskType.CREATE_ACTION
+        return MappedTaskType.CREATE_ACTION
+
+    # Form fill patterns
+    if any(v in goal_lower for v in ["update", "edit", "change", "set my", "modify"]):
+        return MappedTaskType.FORM_FILL
+
+    # Extraction patterns (default for questions)
+    if any(v in goal_lower for v in ["show me", "what", "how many", "how much", "usage", "cost", "tell me"]):
+        return MappedTaskType.READ_EXTRACT
+
+    # Default to extraction for unknown
+    return MappedTaskType.READ_EXTRACT
+
+
+async def _run_mapped_last_mile(
+    *,
+    schema: Any,
+    mission: Any,
+    nodes: list,
+    app: Any = None,
+    screenshot_b64: str = "",
+    session_id: str = "",
+    excluded_ids: set = None,
+    current_url: str = "",
+    goal_url: str = "",
+    user_goal: str = "",
+    force_vision_bootstrap: bool = True,
+    initial_overlay_ids: Set[str] = None,
+    site_map_node: Dict[str, Any] = None,
+    validator: Any = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic last-mile extraction for mapped sites.
+
+    Uses a finite-state machine that enforces strict invariants:
+    1. Entity anchor must be found in readable content
+    2. Metric anchor must be found in readable content
+    3. Numeric value must be extracted from readable content
+    4. Evidence must come from page content, NOT URL parameters
+
+    URL evidence may confirm filter scope, never answer truth.
+    Vision may suggest controls, not authorize completion.
+    """
+    from visual_copilot.mission.last_mile_tools import (
+        MappedTerminalContext,
+        MappedExtractionStateMachine,
+        MappedExtractionState,
+        MappedActionStateMachine,
+        MappedFormFillStateMachine,
+        MappedTaskType,
+        should_fallback_to_exploratory,
+    )
+    from visual_copilot.mission.tool_executor import execute_internal_tool
+
+    main_goal = (
+        getattr(mission, "main_goal", "")
+        or getattr(schema, "raw_utterance", "")
+        or getattr(schema, "target_entity", "")
+    )
+
+    # Classify task type and route to appropriate FSM
+    task_type = classify_task_type(main_goal, site_map_node or {})
+
+    # Build mapped terminal context first (needed for logging)
+    context = MappedTerminalContext.from_site_map(
+        url=current_url,
+        nodes=nodes,
+        goal=main_goal,
+        validator=validator,
+    )
+
+    # CONTRACT-LANGUAGE LOGGING
+    logger.info(f"CURRENT_NODE_RESOLVED=node:{context.current_node_id if context.is_mapped else 'none'}")
+    logger.info(f"TASK_MODE_SELECTED={task_type.value}")
+    logger.info(f"GOAL_ENTITY={context.goal_entity}")
+    logger.info(f"GOAL_METRIC={context.goal_metric}")
+    logger.info(f"CONTROL_GROUPS_AVAILABLE={list(context.control_groups.keys()) if context.control_groups else 'none'}")
+
+    logger.info(
+        f"MAPPED_LAST_MILE_START mission={getattr(mission, 'mission_id', 'unknown')} "
+        f"node={context.current_node_id} "
+        f"task_type={task_type.value} "
+        f"goal='{main_goal[:60]}'"
+    )
+
+    # Route to appropriate FSM based on task type
+    if task_type == MappedTaskType.CREATE_ACTION:
+        return await _run_action_fsm(
+            context=context,
+            nodes=nodes,
+            app=app,
+            screenshot_b64=screenshot_b64,
+            session_id=session_id,
+            excluded_ids=excluded_ids,
+            main_goal=main_goal,
+        )
+    elif task_type == MappedTaskType.FORM_FILL:
+        return await _run_form_fill_fsm(
+            context=context,
+            nodes=nodes,
+            app=app,
+            screenshot_b64=screenshot_b64,
+            session_id=session_id,
+            excluded_ids=excluded_ids,
+            main_goal=main_goal,
+        )
+    elif task_type == MappedTaskType.READ_EXTRACT:
+        return await _run_read_extract_fsm(
+            schema=schema,
+            mission=mission,
+            context=context,
+            nodes=nodes,
+            app=app,
+            screenshot_b64=screenshot_b64,
+            session_id=session_id,
+            excluded_ids=excluded_ids,
+            main_goal=main_goal,
+            force_vision_bootstrap=force_vision_bootstrap,
+            current_url=current_url,
+            goal_url=goal_url,
+            user_goal=user_goal or main_goal,
+        )
+    elif task_type == MappedTaskType.CONFIRM_ACTION:
+        # For confirmations, route to action FSM with confirmation mode
+        return await _run_action_fsm(
+            context=context,
+            nodes=nodes,
+            app=app,
+            screenshot_b64=screenshot_b64,
+            session_id=session_id,
+            excluded_ids=excluded_ids,
+            main_goal=main_goal,
+            confirmation_mode=True,
+        )
+
+    # Default to read_extract for unknown task types
+    return await _run_read_extract_fsm(
+        schema=schema,
+        mission=mission,
+        context=context,
+        nodes=nodes,
+        app=app,
+        screenshot_b64=screenshot_b64,
+        session_id=session_id,
+        excluded_ids=excluded_ids,
+        main_goal=main_goal,
+        force_vision_bootstrap=force_vision_bootstrap,
+        current_url=current_url,
+        goal_url=goal_url,
+        user_goal=user_goal or main_goal,
+    )
+
+
+async def _run_read_extract_fsm(
+    *,
+    schema: Any,
+    mission: Any,
+    context: MappedTerminalContext,
+    nodes: list,
+    app: Any = None,
+    screenshot_b64: str = "",
+    session_id: str = "",
+    excluded_ids: set = None,
+    main_goal: str = "",
+    force_vision_bootstrap: bool = True,
+    current_url: str = "",
+    goal_url: str = "",
+    user_goal: str = "",
+) -> Dict[str, Any]:
+    """Read/extract FSM for information retrieval goals like 'Show me Whisper token usage'."""
+    from visual_copilot.mission.tool_executor import execute_internal_tool
+
+    # Initialize extraction state machine
+    machine = MappedExtractionStateMachine(context, max_attempts=15)
+
+    # Vision bootstrap if enabled
+    vision_raw = ""
+    vision_processed = None
+    if force_vision_bootstrap:
+        try:
+            logger.info("👁️ MAPPED_LAST_MILE_VISION_BOOTSTRAP start")
+            _, vision_tool_result, _ = await execute_internal_tool(
+                tool_name="request_vision",
+                args={
+                    "reason": (
+                        f"Mapped extraction bootstrap for '{main_goal}'. "
+                        f"Identify: 1) Expected controls, 2) Entity location, 3) Metric visibility"
+                    ),
+                    "_current_url": current_url,
+                    "_goal_url": goal_url,
+                    "_user_goal": user_goal or main_goal,
+                    "_already_clicked_ids": sorted(excluded_ids or set()),
+                },
+                nodes=nodes,
+                screenshot_b64=screenshot_b64 or None,
+                app=app,
+                session_id=session_id,
+                excluded_ids=excluded_ids or set(),
+            )
+            vision_raw = vision_tool_result
+            # Process vision as advisory (demote from source of truth)
+            from visual_copilot.mission.tool_executor import process_vision_result
+            vision_processed = process_vision_result(vision_raw, context.site_map_node)
+            logger.info("👁️ MAPPED_LAST_MILE_VISION_BOOTSTRAP done")
+        except Exception as e:
+            logger.warning(f"⚠️ MAPPED_LAST_MILE_VISION_BOOTSTRAP failed: {e}")
+
+    # Main mapped extraction loop
+    # Process vision as advisory - site map is truth
+    observation = {
+        "nodes": nodes,
+        "readable_content": _compress_readable_for_compound(nodes),
+        "url_params": _extract_url_params(current_url),
+        "clicked_ids": excluded_ids or set(),
+        "vision_hints": vision_processed,  # Dict with advisory_only flag, not raw string
+        "control_groups": context.control_groups,  # Site map control groups
+        "completion_contract": context.site_map_node.get("completion_contract", {}) if context.site_map_node else {},
+    }
+
+    last_action = None
+    while machine.state != MappedExtractionState.COMPLETE:
+        # ESCAPE HATCH CHECK: Before each transition, check if we should fallback
+        should_fallback, fallback_reason = should_fallback_to_exploratory(
+            observation=observation,
+            context=context,
+            fsm_state=machine.state,
+            attempts=machine.attempts,
+            last_action=last_action,
+        )
+
+        if should_fallback:
+            logger.warning(
+                f"MAPPED_CONTRACT_ESCAPE_HATCH_TRIGGERED reason={fallback_reason} "
+                f"state={machine.state.value} attempts={machine.attempts}"
+            )
+            # Fallback to exploratory last-mile
+            return await _run_exploratory_last_mile(
+                schema=schema,
+                mission=mission,
+                nodes=nodes,
+                app=app,
+                screenshot_b64=screenshot_b64,
+                session_id=session_id,
+                excluded_ids=excluded_ids or set(),
+                current_url=current_url,
+                goal_url=goal_url,
+                user_goal=user_goal or main_goal,
+            )
+
+        action, is_terminal = machine.transition(observation)
+
+        # CONTRACT-LANGUAGE LOGGING: Transition step
+        logger.info(
+            f"MAPPED_LAST_MILE_STATE state={machine.state.value} "
+            f"action={action.tool} attempts={machine.attempts} "
+            f"target_id={action.target_id if action.target_id else 'intent-based'}"
+        )
+
+        if action.type == "escalate":
+            # Escalation - cannot complete mapped extraction
+            return {
+                "action": {
+                    "type": "clarify",
+                    "speech": f"I need help with '{main_goal}' on this mapped page.",
+                    "diagnostics": action.params.get("error_log", []),
+                },
+                "thought": f"Mapped extraction escalated: {action.why}",
+                "iterations": machine.attempts,
+                "status": "mapped_extraction_failed",
+                "diagnostics": {
+                    "mapped_state": machine.state.value,
+                    "error_log": machine.error_log,
+                },
+            }
+
+        if action.type == "complete":
+            # Attempt completion - but validate first!
+            result = machine.build_result()
+
+            # CONTRACT-LANGUAGE LOGGING: Completion contract validation
+            contract_passed = result["status"] == "success"
+            logger.info(f"COMPLETION_CONTRACT_PASS={contract_passed}")
+            if not contract_passed:
+                logger.warning(f"COMPLETION_CONTRACT_FAIL reason={result.get('reason', 'unknown')}")
+
+            if result["status"] == "success":
+                return {
+                    "action": {
+                        "type": "answer",
+                        "status": "success",
+                        "speech": f"{result['entity']} {result['metric']}: {result['value']}",
+                        "text": result["evidence"],
+                        "evidence": result["evidence"],
+                    },
+                    "thought": f"Mapped extraction complete: {result}",
+                    "iterations": machine.attempts,
+                    "status": "complete",
+                    "diagnostics": {
+                        "mapped_state": machine.state.value,
+                        "result": result,
+                    },
+                }
+            else:
+                # Completion validation failed
+                return {
+                    "action": {
+                        "type": "clarify",
+                        "speech": f"I couldn't extract complete data for '{main_goal}' from this page.",
+                    },
+                    "thought": f"Mapped completion validation failed: {result.get('reason', 'unknown')}",
+                    "iterations": machine.attempts,
+                    "status": "mapped_validation_failed",
+                    "diagnostics": {
+                        "mapped_state": machine.state.value,
+                        "error_log": machine.error_log,
+                    },
+                }
+
+        # Execute the action and get new observation
+        if action.tool in {"click_element", "type_text", "scroll_page", "wait_for_ui", "read_page_content"}:
+            try:
+                # Build action args - support both target_id and intent-based formats
+                action_args = {
+                    **action.params,
+                    "_main_goal": main_goal,
+                    "_current_url": current_url,
+                }
+
+                # Prefer intent format if available, otherwise use target_id
+                if hasattr(action, 'intent') and action.intent:
+                    action_args["intent"] = action.intent
+                elif action.target_id:
+                    action_args["target_id"] = action.target_id
+
+                if action.text:
+                    action_args["text"] = action.text
+
+                is_term, tool_result, frontend_action = await execute_internal_tool(
+                    tool_name=action.tool,
+                    args=action_args,
+                    nodes=nodes,
+                    screenshot_b64=screenshot_b64 or None,
+                    app=app,
+                    session_id=session_id,
+                    excluded_ids=excluded_ids or set(),
+                )
+
+                # Update observation based on action type
+                if action.tool == "click_element" and (action.target_id or (action.intent and action.intent.get("text_label"))):
+                    # If we have target_id, add it to excluded_ids
+                    # If we have intent, the execute_internal_tool should have resolved the target_id
+                    if action.target_id:
+                        excluded_ids = (excluded_ids or set()) | {action.target_id}
+                    elif frontend_action and hasattr(frontend_action, 'target_id') and frontend_action.target_id:
+                        excluded_ids = (excluded_ids or set()) | {frontend_action.target_id}
+
+                # Update observation with new state
+                observation["clicked_ids"] = excluded_ids or set()
+                observation["last_tool_result"] = tool_result
+
+            except Exception as e:
+                logger.error(f"MAPPED_LAST_MILE_TOOL_ERROR: {action.tool} failed: {e}")
+                machine.error_log.append(f"{action.tool} failed: {e}")
+
+        last_action = action
+
+        # Safety check - prevent infinite loops
+        if machine.attempts >= machine.max_attempts:
+            break
+
+    # Should not reach here if COMPLETE state is reached properly
+    return {
+        "action": {
+            "type": "clarify",
+            "speech": f"Mapped extraction for '{main_goal}' did not complete.",
+        },
+        "thought": "Mapped extraction exited without reaching COMPLETE state",
+        "iterations": machine.attempts,
+        "status": "mapped_incomplete",
+        "diagnostics": {
+            "mapped_state": machine.state.value,
+            "error_log": machine.error_log,
+        },
+    }
+
+
+async def _run_action_fsm(
+    *,
+    context: MappedTerminalContext,
+    nodes: list,
+    app: Any = None,
+    screenshot_b64: str = "",
+    session_id: str = "",
+    excluded_ids: set = None,
+    main_goal: str = "",
+    confirmation_mode: bool = False,
+) -> Dict[str, Any]:
+    """
+    Action FSM for creation goals like 'Create API key'.
+
+    State progression:
+    validate_node → find_cta → click_cta → verify_modal → fill_fields → confirm → success
+    """
+    from visual_copilot.mission.tool_executor import execute_internal_tool
+
+    # Initialize action FSM
+    machine = MappedActionStateMachine(context, max_attempts=20)
+
+    # Vision bootstrap for action FSM
+    vision_hints = ""
+    if screenshot_b64:
+        try:
+            logger.info("👁️ ACTION_FSM_VISION_BOOTSTRAP start")
+            _, vision_tool_result, _ = await execute_internal_tool(
+                tool_name="request_vision",
+                args={
+                    "reason": (
+                        f"Action bootstrap for '{main_goal}'. "
+                        f"Identify: 1) Primary CTA button, 2) Modal/form elements, 3) Success indicators"
+                    ),
+                    "_user_goal": main_goal,
+                    "_already_clicked_ids": sorted(excluded_ids or set()),
+                },
+                nodes=nodes,
+                screenshot_b64=screenshot_b64 or None,
+                app=app,
+                session_id=session_id,
+                excluded_ids=excluded_ids or set(),
+            )
+            vision_hints = vision_tool_result
+            logger.info("👁️ ACTION_FSM_VISION_BOOTSTRAP done")
+        except Exception as e:
+            logger.warning(f"⚠️ ACTION_FSM_VISION_BOOTSTRAP failed: {e}")
+
+    # Main action FSM loop
+    observation = {
+        "nodes": nodes,
+        "readable_content": _compress_readable_for_compound(nodes),
+        "clicked_ids": excluded_ids or set(),
+        "vision_hints": vision_hints,
+    }
+
+    last_action = None
+    while machine.state != MappedActionState.COMPLETE:
+        action, is_terminal = machine.transition(observation)
+
+        logger.info(
+            f"ACTION_FSM_STATE state={machine.state.value} "
+            f"action={action.tool} attempts={machine.attempts}"
+        )
+
+        if action.type == "escalate":
+            return {
+                "action": {
+                    "type": "clarify",
+                    "speech": f"I need help with '{main_goal}' - encountered an issue.",
+                    "diagnostics": action.params.get("error_log", []),
+                },
+                "thought": f"Action FSM escalated: {action.why}",
+                "iterations": machine.attempts,
+                "status": "action_failed",
+                "diagnostics": {
+                    "fsm_state": machine.state.value,
+                    "error_log": machine.error_log,
+                },
+            }
+
+        if action.type == "complete":
+            return {
+                "action": {
+                    "type": "answer",
+                    "status": "success",
+                    "speech": f"Successfully completed: {main_goal}",
+                },
+                "thought": f"Action FSM complete: {main_goal}",
+                "iterations": machine.attempts,
+                "status": "complete",
+                "diagnostics": {
+                    "fsm_state": machine.state.value,
+                    "filled_fields": list(machine.filled_fields),
+                },
+            }
+
+        # Execute the action
+        if action.tool in {"click_element", "type_text", "wait_for_ui", "read_page_content"}:
+            try:
+                action_args = {
+                    **action.params,
+                    "_main_goal": main_goal,
+                }
+
+                if hasattr(action, 'intent') and action.intent:
+                    action_args["intent"] = action.intent
+                elif action.target_id:
+                    action_args["target_id"] = action.target_id
+
+                if action.text:
+                    action_args["text"] = action.text
+
+                is_term, tool_result, frontend_action = await execute_internal_tool(
+                    tool_name=action.tool,
+                    args=action_args,
+                    nodes=nodes,
+                    screenshot_b64=screenshot_b64 or None,
+                    app=app,
+                    session_id=session_id,
+                    excluded_ids=excluded_ids or set(),
+                )
+
+                # Update excluded_ids after click
+                if action.tool == "click_element":
+                    if action.target_id:
+                        excluded_ids = (excluded_ids or set()) | {action.target_id}
+                    elif frontend_action and hasattr(frontend_action, 'target_id') and frontend_action.target_id:
+                        excluded_ids = (excluded_ids or set()) | {frontend_action.target_id}
+
+                observation["clicked_ids"] = excluded_ids or set()
+                observation["last_tool_result"] = tool_result
+
+                # Refresh readable content after actions
+                if action.tool in {"click_element", "wait_for_ui"}:
+                    observation["readable_content"] = _compress_readable_for_compound(nodes)
+
+            except Exception as e:
+                logger.error(f"ACTION_FSM_TOOL_ERROR: {action.tool} failed: {e}")
+                machine.error_log.append(f"{action.tool} failed: {e}")
+
+        last_action = action
+
+        if machine.attempts >= machine.max_attempts:
+            break
+
+    return {
+        "action": {
+            "type": "clarify",
+            "speech": f"Action for '{main_goal}' did not complete.",
+        },
+        "thought": "Action FSM exited without reaching COMPLETE state",
+        "iterations": machine.attempts,
+        "status": "action_incomplete",
+        "diagnostics": {
+            "fsm_state": machine.state.value,
+            "error_log": machine.error_log,
+        },
+    }
+
+
+async def _run_form_fill_fsm(
+    *,
+    context: MappedTerminalContext,
+    nodes: list,
+    app: Any = None,
+    screenshot_b64: str = "",
+    session_id: str = "",
+    excluded_ids: set = None,
+    main_goal: str = "",
+) -> Dict[str, Any]:
+    """
+    Form fill FSM for goals like 'Update my profile'.
+
+    State progression:
+    validate_node → locate_form → fill_field (loop) → validate_form → submit_form → verify_success → complete
+    """
+    from visual_copilot.mission.tool_executor import execute_internal_tool
+
+    # Initialize form fill FSM
+    machine = MappedFormFillStateMachine(context, max_attempts=20)
+
+    # Main form fill FSM loop
+    observation = {
+        "nodes": nodes,
+        "readable_content": _compress_readable_for_compound(nodes),
+        "clicked_ids": excluded_ids or set(),
+    }
+
+    last_action = None
+    while machine.state != MappedFormFillState.COMPLETE:
+        action, is_terminal = machine.transition(observation)
+
+        logger.info(
+            f"FORM_FILL_FSM_STATE state={machine.state.value} "
+            f"action={action.tool} attempts={machine.attempts}"
+        )
+
+        if action.type == "escalate":
+            return {
+                "action": {
+                    "type": "clarify",
+                    "speech": f"I need help with '{main_goal}' - encountered an issue.",
+                    "diagnostics": action.params.get("error_log", []),
+                },
+                "thought": f"Form fill FSM escalated: {action.why}",
+                "iterations": machine.attempts,
+                "status": "form_fill_failed",
+                "diagnostics": {
+                    "fsm_state": machine.state.value,
+                    "error_log": machine.error_log,
+                },
+            }
+
+        if action.type == "complete":
+            return {
+                "action": {
+                    "type": "answer",
+                    "status": "success",
+                    "speech": f"Successfully completed: {main_goal}",
+                },
+                "thought": f"Form fill FSM complete: {main_goal}",
+                "iterations": machine.attempts,
+                "status": "complete",
+                "diagnostics": {
+                    "fsm_state": machine.state.value,
+                    "filled_fields": list(machine.filled_fields),
+                },
+            }
+
+        # Execute the action
+        if action.tool in {"click_element", "type_text", "wait_for_ui", "read_page_content"}:
+            try:
+                action_args = {
+                    **action.params,
+                    "_main_goal": main_goal,
+                }
+
+                if action.target_id:
+                    action_args["target_id"] = action.target_id
+                if action.text:
+                    action_args["text"] = action.text
+
+                is_term, tool_result, frontend_action = await execute_internal_tool(
+                    tool_name=action.tool,
+                    args=action_args,
+                    nodes=nodes,
+                    screenshot_b64=screenshot_b64 or None,
+                    app=app,
+                    session_id=session_id,
+                    excluded_ids=excluded_ids or set(),
+                )
+
+                if action.tool == "click_element":
+                    if action.target_id:
+                        excluded_ids = (excluded_ids or set()) | {action.target_id}
+                    elif frontend_action and hasattr(frontend_action, 'target_id') and frontend_action.target_id:
+                        excluded_ids = (excluded_ids or set()) | {frontend_action.target_id}
+
+                observation["clicked_ids"] = excluded_ids or set()
+                observation["last_tool_result"] = tool_result
+
+            except Exception as e:
+                logger.error(f"FORM_FILL_FSM_TOOL_ERROR: {action.tool} failed: {e}")
+                machine.error_log.append(f"{action.tool} failed: {e}")
+
+        last_action = action
+
+        if machine.attempts >= machine.max_attempts:
+            break
+
+    return {
+        "action": {
+            "type": "clarify",
+            "speech": f"Form fill for '{main_goal}' did not complete.",
+        },
+        "thought": "Form fill FSM exited without reaching COMPLETE state",
+        "iterations": machine.attempts,
+        "status": "form_fill_incomplete",
+        "diagnostics": {
+            "fsm_state": machine.state.value,
+            "error_log": machine.error_log,
+        },
+    }
+
+
+def _extract_url_params(url: str) -> Dict[str, str]:
+    """Extract URL query parameters as dict."""
+    from urllib.parse import urlparse, parse_qs
+    try:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        # Flatten single-value params
+        return {k: v[0] if len(v) == 1 else v for k, v in params.items()}
+    except Exception:
+        return {}
+
+
+# Renamed the original exploratory function
+async def _run_exploratory_last_mile(
+    *,
+    schema: Any,
+    mission: Any,
+    nodes: list,
+    app: Any = None,
+    screenshot_b64: str = "",
+    session_id: str = "",
+    excluded_ids: set = None,
+    current_url: str = "",
+    goal_url: str = "",
+    user_goal: str = "",
+    force_vision_bootstrap: bool = True,
+    initial_overlay_ids: Set[str] = None,
+) -> Dict[str, Any]:
+    """
+    Exploratory last-mile extraction for unknown sites (fallback implementation).
+
+    This delegates to run_compound_last_mile with mapped mode disabled,
+    ensuring the exploratory path is taken even on mapped sites.
+    """
+    global MAPPED_LAST_MILE_ENABLED
+
+    # Temporarily disable mapped mode to force exploratory path
+    original_mapped_enabled = MAPPED_LAST_MILE_ENABLED
+    try:
+        MAPPED_LAST_MILE_ENABLED = False
+        return await run_compound_last_mile(
+            schema=schema,
+            mission=mission,
+            nodes=nodes,
+            app=app,
+            screenshot_b64=screenshot_b64,
+            session_id=session_id,
+            excluded_ids=excluded_ids or set(),
+            current_url=current_url,
+            goal_url=goal_url,
+            user_goal=user_goal,
+            force_vision_bootstrap=force_vision_bootstrap,
+            initial_overlay_ids=initial_overlay_ids,
+            mapped_terminal_context=None,  # Force exploratory path
+        )
+    finally:
+        MAPPED_LAST_MILE_ENABLED = original_mapped_enabled
