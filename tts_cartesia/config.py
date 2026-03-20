@@ -30,13 +30,13 @@ class CartesiaConfig:
     api_version: str = "2024-06-10"  # Cartesia API version
 
     # Audio format settings
-    sample_rate: int = field(default_factory=lambda: int(os.getenv("CARTESIA_SAMPLE_RATE", "44100")))
-    output_format: str = field(default_factory=lambda: os.getenv("CARTESIA_OUTPUT_FORMAT", "pcm_f32le").strip())  # pcm_s16le, pcm_f32le, pcm_mulaw, pcm_alaw
+    sample_rate: int = field(default_factory=lambda: int(os.getenv("CARTESIA_SAMPLE_RATE", "16000")))  # 16kHz for real-time voice (was 44100)
+    output_format: str = field(default_factory=lambda: os.getenv("CARTESIA_OUTPUT_FORMAT", "pcm_s16le").strip())  # 16-bit for browser compatibility (was pcm_f32le)
     container: str = "raw"  # raw or mp3
 
     # Voice settings
     language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "de").strip())  # Default to German for EU deployment
-    speed: float = field(default_factory=lambda: float(os.getenv("CARTESIA_SPEED", "0.9")))  # Speed: 0.9 for German clarity (range: 0.5-2.0)
+    speed: float = field(default_factory=lambda: float(os.getenv("CARTESIA_SPEED", "0.95")))  # Speed: 0.95 for German clarity (range: 0.5-2.0, was 0.9)
 
     # Pronunciation dictionary for tenant-specific brand names
     pronunciation_dict_id: Optional[str] = field(default_factory=lambda: os.getenv("CARTESIA_PRONUNCIATION_DICT_ID", "").strip() or None)
@@ -91,10 +91,8 @@ class CartesiaConfig:
             logger.warning(f"Invalid output_format '{self.output_format}', forcing 'pcm_f32le'")
             self.output_format = "pcm_f32le"
 
-        # FORCE F32LE for Orchestrator compatibility
-        if self.output_format == "pcm_s16le":
-            logger.warning("⚠️ Detected 'pcm_s16le', upgrading to 'pcm_f32le' for high-quality playback")
-            self.output_format = "pcm_f32le"
+        # Note: pcm_s16le is now the default for browser compatibility
+        # No forced upgrade needed
 
         # Log configuration
         masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
@@ -102,8 +100,9 @@ class CartesiaConfig:
         logger.info(f"🎤 Model: {self.model} ({'multilingual' if 'multilingual' in self.model.lower() or 'sonic-3' in self.model.lower() or 'sonic-4' in self.model.lower() else 'english-only'})")
         logger.info(f"🔊 Voice ID: {self.voice_id} (German-native)")
         logger.info(f"🌐 Language: {self.language} (for multilingual models)")
-        logger.info(f"⚡ Speed: {self.speed} (0.9 recommended for German)")
-        logger.info(f"📊 Sample rate: {self.sample_rate}Hz")
+        logger.info(f"⚡ Speed: {self.speed} (0.95 optimized for German clarity)")
+        logger.info(f"📊 Sample rate: {self.sample_rate}Hz (16kHz real-time optimized)")
+        logger.info(f"🔄 Encoding: {self.output_format} (16-bit for browser compatibility)")
         logger.info(f"🔄 Connection pool size: {self.pool_size}")
         if self.pronunciation_dict_id:
             logger.info(f"📖 Pronunciation Dictionary: {self.pronunciation_dict_id}")

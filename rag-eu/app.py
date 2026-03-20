@@ -92,6 +92,9 @@ class QueryRequest(BaseModel):
     context: Optional[Dict[str, Any]] = Field(None, description="Context from intent service")
     enable_streaming: Optional[bool] = Field(None, description="Enable streaming response")
     history_context: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Conversation history for context-aware responses")
+    session_summary_window: Optional[str] = Field(None, description="Layered session summary text from orchestrator")
+    session_summary_revision: int = Field(0, description="Monotonic revision for the session summary window")
+    recent_turns: Optional[List[Dict[str, Any]]] = Field(None, description="Minimal recent raw turns for phrasing continuity")
     language: Optional[str] = Field("german", description="Response language: 'english' or 'german'")
     tenant_id: Optional[str] = Field("tara", description="Tenant/Agent identifier for cache isolation")
     session_id: Optional[str] = Field(None, description="Session identifier from orchestrator")
@@ -110,6 +113,19 @@ class QueryResponse(BaseModel):
     timing_breakdown: Dict[str, float] = Field(..., description="Timing metrics")
     cached: bool = Field(..., description="Whether result was served from cache")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+
+class SessionSummaryWindowRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    tenant_id: str = Field(..., min_length=1)
+    language: str = Field("de")
+    previous_summary: Optional[str] = Field(None)
+    user_text: str = Field(..., min_length=1)
+    assistant_text: str = Field(..., min_length=1)
+
+
+class SessionSummaryWindowResponse(BaseModel):
+    summary_text: str
 
 
 class HealthResponse(BaseModel):
@@ -140,7 +156,6 @@ class SaveCaseRequest(BaseModel):
     issue: Optional[str] = Field(None, description="The problem that was resolved")
     solution: Optional[str] = Field(None, description="How the problem was solved")
     history_context: Optional[str] = Field(None, description="Conversation history to distill")
-    tenant_id: str = Field("tara", description="Tenant identifier")
     tenant_id: str = Field("tara", description="Tenant identifier")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
 
@@ -352,6 +367,13 @@ async def lifespan(app: FastAPI):
 
         # Create RAG engine
         rag_engine = RAGEngine(config)
+
+        # Warm the first-turn path so the first real query does not pay cold-start cost.
+        try:
+            warmup_tenants = [os.getenv("TENANT_ID", "tara"), "bundb"]
+            await rag_engine.warmup(warmup_tenants)
+        except Exception as warmup_error:
+            logger.warning(f"⚠️ RAG warmup failed: {warmup_error}")
 
         # Log Qdrant (Hive Mind) status
         if rag_engine.qdrant and rag_engine.qdrant.enabled:
@@ -682,6 +704,22 @@ class RetrieveResponse(BaseModel):
     history_context: str
 
 
+@app.post("/api/v1/session_summary_window", response_model=SessionSummaryWindowResponse)
+async def session_summary_window(request: SessionSummaryWindowRequest):
+    try:
+        summary_text = await app.state.rag_engine.generate_session_summary_window(
+            previous_summary=request.previous_summary or "",
+            user_text=request.user_text,
+            assistant_text=request.assistant_text,
+            language=request.language,
+            tenant_id=request.tenant_id,
+        )
+        return SessionSummaryWindowResponse(summary_text=summary_text)
+    except Exception as e:
+        logger.error(f"Session summary window generation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Session summary generation failed: {str(e)}")
+
+
 @app.post("/api/v1/retrieve", response_model=RetrieveResponse)
 async def retrieve_only(request: QueryRequest):
     """
@@ -699,7 +737,7 @@ async def retrieve_only(request: QueryRequest):
         result = await app.state.rag_engine.retrieve_context(
             request.query,
             context,
-            history_context=request.history_context
+            history_context=request.session_summary_window or request.history_context
         )
         
         return RetrieveResponse(**result)
@@ -1231,6 +1269,13 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
     returns retrieval context only.
     """
     try:
+        effective_agent_name = (request_data.agent_name or "unknown").strip()
+        effective_tenant_id = _resolve_effective_tenant_id(
+            request_data.tenant_id,
+            effective_agent_name,
+            default="tara",
+        )
+
         # Check if we should skip generation (detected by middleware)
         skip_generation = getattr(request.state, "skip_generation", False)
         
@@ -1244,27 +1289,33 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             result = await app.state.rag_engine.retrieve_context(
                 request_data.query,
                 context_data,
-                history_context=request_data.history_context
+                history_context=request_data.history_context,
+                tenant_id=effective_tenant_id,
             )
             return result
 
         # Original query logic proceeds...
-        effective_agent_name = (request_data.agent_name or "unknown").strip()
-        effective_tenant_id = _resolve_effective_tenant_id(
-            request_data.tenant_id,
-            effective_agent_name,
-            default="tara",
-        )
-
-        # Generate cache key with tenant + org + context to avoid cross-brand cache bleed.
+        # Generate cache key with tenant + org + context/history to avoid cross-brand cache bleed.
         lang_suffix = f":{request_data.language}" if request_data.language else ""
         tenant_prefix = f"{effective_tenant_id}:"
         org_slug = str(getattr(app.state.rag_engine.config, "organization_name", "org")).strip().lower()
+        history_hash = hashlib.md5(
+            json.dumps(
+                {
+                    "history": request_data.history_context or "",
+                    "summary": request_data.session_summary_window or "",
+                    "summary_revision": request_data.session_summary_revision or 0,
+                    "recent_turns": request_data.recent_turns or [],
+                },
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()[:8]
         context_hash = hashlib.md5(
             json.dumps(request_data.context or {}, sort_keys=True, default=str).encode()
         ).hexdigest()[:8]
         query_hash = hashlib.md5(request_data.query.encode()).hexdigest()
-        cache_key = f"rag:{tenant_prefix}{org_slug}:{query_hash}:{context_hash}{lang_suffix}"
+        cache_key = f"rag:{tenant_prefix}{org_slug}:{query_hash}:{history_hash}:{context_hash}{lang_suffix}"
         
         # Check Redis cache (only if connected and TTL > 0)
         cached = None
@@ -1304,6 +1355,9 @@ async def query_knowledge_base(request_data: QueryRequest, request: Request):
             context_data,
             streaming_callback=None,  # Streaming handled separately if needed
             history_context=request_data.history_context,
+            session_summary_window=request_data.session_summary_window,
+            session_summary_revision=request_data.session_summary_revision,
+            recent_turns=request_data.recent_turns,
             tenant_id=effective_tenant_id,
             force_non_stream=(not is_hivemind_dashboard) and ("gpt-oss" in str(getattr(app.state.rag_engine.config, "llm_model", "")).lower()),
             generation_config={
@@ -1416,6 +1470,17 @@ async def stream_query_knowledge_base(request: QueryRequest):
         history_hash = hashlib.md5(
             json.dumps(request.history_context or "", sort_keys=True, default=str).encode()
         ).hexdigest()[:8]
+        interruption_hash = hashlib.md5(
+            json.dumps(
+                {
+                    "interrupted_text": request.interrupted_text or "",
+                    "interruption_transcripts": request.interruption_transcripts or [],
+                    "interruption_type": request.interruption_type or "",
+                },
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()[:8]
         context_hash = hashlib.md5(
             json.dumps(request.context or {}, sort_keys=True, default=str).encode()
         ).hexdigest()[:8]
@@ -1423,7 +1488,7 @@ async def stream_query_knowledge_base(request: QueryRequest):
         tenant_prefix = f"{effective_tenant_id}:"
         org_slug = str(getattr(app.state.rag_engine.config, "organization_name", "org")).strip().lower()
         query_hash = hashlib.md5(request.query.encode()).hexdigest()
-        cache_key = f"rag:{tenant_prefix}{org_slug}:{query_hash}:{history_hash}:{context_hash}{lang_suffix}"
+        cache_key = f"rag:{tenant_prefix}{org_slug}:{query_hash}:{history_hash}:{interruption_hash}:{context_hash}{lang_suffix}"
 
         # Check Redis cache (only if connected)
         cached = None
@@ -1510,8 +1575,9 @@ async def stream_query_knowledge_base(request: QueryRequest):
             import re
             cleaned_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Remove **bold**
             cleaned_text = re.sub(r'\*([^*]+)\*', r'\1', cleaned_text)  # Remove *italic*
-            # Apply German TTS post-processing (umlauts, numbers, loanwords)
-            cleaned_text = tts_safe(cleaned_text)
+            # NOTE: tts_safe is intentionally NOT applied to individual streaming tokens here.
+            # tts_safe operates on complete text (loanwords, number expansion, segment protection)
+            # and will corrupt partial tokens. It is applied to the final assembled answer only.
             q.put_nowait((cleaned_text, is_final))
             
         async def run_query():
@@ -1539,6 +1605,9 @@ async def stream_query_knowledge_base(request: QueryRequest):
                     query_context,
                     streaming_callback=callback,
                     history_context=request.history_context,
+                    session_summary_window=request.session_summary_window,
+                    session_summary_revision=request.session_summary_revision,
+                    recent_turns=request.recent_turns,
                     tenant_id=effective_tenant_id,
                     force_non_stream=False,  # Re-enabled streaming for quality
                     generation_config={

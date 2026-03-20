@@ -147,6 +147,16 @@ class PerformanceConfig:
 
 
 @dataclass
+class PolicyConfig:
+    """Tenant-aware strategic policy controls."""
+    enable_strategic_policy: bool = False
+    enable_live_memory_extraction: bool = False
+    enable_stage_aware_retrieval: bool = False
+    enable_micro_reasoning: bool = False
+    policy_mode_default: str = "sales"
+
+
+@dataclass
 class FSMConfig:
     """FSM (Finite State Machine) configuration for appointment booking"""
     appointment_schema_json: str = ""  # JSON schema for appointment fields
@@ -167,6 +177,7 @@ class OrchestratorConfig:
     dialogue: Dict[str, Dict[str, List[Dict[str, Any]]]] = field(default_factory=dict)
     session: SessionConfig = field(default_factory=SessionConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    policy: PolicyConfig = field(default_factory=PolicyConfig)
     fsm: FSMConfig = field(default_factory=FSMConfig)
 
 
@@ -383,6 +394,19 @@ class ConfigLoader:
                 max_concurrent_sessions=int(os.getenv("MAX_CONCURRENT_SESSIONS", perf_data.get("max_concurrent_sessions", 100))),
                 enable_fillers=os.getenv("ENABLE_FILLERS", str(perf_data.get("enable_fillers", "true"))).lower() == "true"
             )
+
+        policy_data = data.get("policy", {})
+        policy_mode_default = os.getenv("POLICY_MODE_DEFAULT", policy_data.get("policy_mode_default", "sales")).strip().lower()
+        if policy_mode_default not in {"sales", "clinical"}:
+            logger.warning(f"Invalid POLICY_MODE_DEFAULT '{policy_mode_default}', defaulting to 'sales'")
+            policy_mode_default = "sales"
+        config.policy = PolicyConfig(
+            enable_strategic_policy=os.getenv("ENABLE_STRATEGIC_POLICY", str(policy_data.get("enable_strategic_policy", False))).lower() == "true",
+            enable_live_memory_extraction=os.getenv("ENABLE_LIVE_MEMORY_EXTRACTION", str(policy_data.get("enable_live_memory_extraction", False))).lower() == "true",
+            enable_stage_aware_retrieval=os.getenv("ENABLE_STAGE_AWARE_RETRIEVAL", str(policy_data.get("enable_stage_aware_retrieval", False))).lower() == "true",
+            enable_micro_reasoning=os.getenv("ENABLE_MICRO_REASONING", str(policy_data.get("enable_micro_reasoning", False))).lower() == "true",
+            policy_mode_default=policy_mode_default,
+        )
 
         # FSM config (with env var overrides)
         fsm_data = data.get("fsm", {})

@@ -251,7 +251,7 @@ async def transcribe_stream(websocket: WebSocket, session_id: str = None):
     if session_id in active_sessions:
         logger.warning(f"⚠️ Session {session_id} already exists - cleaning up")
         try:
-            await active_sessions[session_id].stop()
+            await active_sessions[session_id].stop(flush_pending_audio=False)
             del active_sessions[session_id]
         except Exception as e:
             logger.warning(f"⚠️ Error cleaning up existing session: {e}")

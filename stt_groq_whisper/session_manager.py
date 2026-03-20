@@ -83,10 +83,13 @@ class GroqWhisperSession:
         self.speech_active = False
         self.last_speech_time = 0.0
         self.silence_start_time: Optional[float] = None
+        self.speech_candidate_start_time: Optional[float] = None
+        self.speech_segment_start_time: Optional[float] = None
         
         # Accumulated transcript for current speech segment
         self.current_utterance = ""
         self.partial_text = ""
+        self._active_utterance_id = 0
         
         # Processing state
         self.is_processing = False
@@ -112,6 +115,25 @@ class GroqWhisperSession:
         while self.pre_speech_bytes > max_pre_bytes and self.pre_speech_chunks:
             removed = self.pre_speech_chunks.popleft()
             self.pre_speech_bytes -= len(removed)
+
+    def _resolved_language(self) -> str:
+        """Use a normalized per-session language, defaulting to German."""
+        return self.config.resolve_language(self.config.language)
+
+    def _is_likely_sentence_continuation(self, text: str) -> bool:
+        sample = (text or "").strip().lower()
+        if not sample:
+            return False
+        if sample.endswith((
+            " and", " or", " but", " because", " with", " for", " to", " the",
+            " und", " oder", " aber", " weil", " mit", " fuer", " für", " zu",
+        )):
+            return True
+        return sample.endswith((",", ":", ";", "-", "/"))
+
+    def _is_stale_utterance(self, utterance_id: int) -> bool:
+        """Drop finals from interrupted or cleaned-up utterances."""
+        return not self._running or utterance_id != self._active_utterance_id
     
     async def start(self) -> bool:
         """Start session and initialize Groq client"""
@@ -167,18 +189,28 @@ class GroqWhisperSession:
             self.consecutive_silent_chunks = 0
             self.last_speech_time = now
             self.silence_start_time = None
+            if self.speech_candidate_start_time is None:
+                self.speech_candidate_start_time = now
             
             # Emit SPEECH_START if not already active
             if not self.speech_active:
-                self.speech_active = True
-                # Seed full buffer with a short pre-roll to avoid clipping initial phonemes.
-                if not self.config.enable_micro_chunking and self.pre_speech_chunks:
-                    self.full_audio_buffer = bytearray(b"".join(self.pre_speech_chunks))
-                    self._just_seeded_from_preroll = True
-                await self._emit_speech_event("SPEECH_START")
-                logger.info(f"🎤 [{self.session_id}] Speech started (energy={energy})")
+                speech_candidate_ms = (now - self.speech_candidate_start_time) * 1000.0
+                if speech_candidate_ms >= self.config.speech_start_trigger_ms:
+                    self.speech_active = True
+                    self.speech_segment_start_time = now
+                    self._active_utterance_id += 1
+                    # Seed full buffer with a short pre-roll to avoid clipping initial phonemes.
+                    if not self.config.enable_micro_chunking and self.pre_speech_chunks:
+                        self.full_audio_buffer = bytearray(b"".join(self.pre_speech_chunks))
+                        self._just_seeded_from_preroll = True
+                    await self._emit_speech_event("SPEECH_START")
+                    logger.info(
+                        f"🎤 [{self.session_id}] Speech started "
+                        f"(energy={energy}, debounce={speech_candidate_ms:.0f}ms)"
+                    )
         else:
             self.consecutive_silent_chunks += 1
+            self.speech_candidate_start_time = None
             
             if self.silence_start_time is None:
                 self.silence_start_time = now
@@ -211,11 +243,15 @@ class GroqWhisperSession:
                 # Process chunk if speech is active (or we are within the configurable
                 # post-speech silence window before considering the utterance complete).
                 silence_ms = self._current_silence_ms()
-                if self.speech_active or silence_ms < self.config.min_silence_duration_ms:
+                if self.speech_active or silence_ms < self._speech_end_threshold_ms():
                     asyncio.create_task(self._process_chunk(chunk_to_process))
 
         # Check for speech end (both modes)
-        if self.speech_active and self._current_silence_ms() >= self.config.min_silence_duration_ms:
+        if self.speech_active and self._current_silence_ms() >= self._speech_end_threshold_ms():
+            if self._is_likely_sentence_continuation(self.current_utterance or self.partial_text):
+                # Give the speaker a little more room if the transcript looks incomplete.
+                self.silence_start_time = now
+                return
             await self._handle_speech_end()
 
     def _current_silence_ms(self) -> float:
@@ -223,6 +259,52 @@ class GroqWhisperSession:
         if self.silence_start_time is None:
             return 0.0
         return (time.time() - self.silence_start_time) * 1000.0
+
+    def _speech_duration_ms(self) -> float:
+        """Return the approximate duration of the active speech segment."""
+        if self.speech_segment_start_time is None:
+            return 0.0
+        return max(0.0, (time.time() - self.speech_segment_start_time) * 1000.0)
+
+    def _speech_end_threshold_ms(self) -> float:
+        """
+        Use a faster baseline silence threshold, then add a small continuation
+        buffer for longer utterances so brief internal pauses do not finalize too early.
+        """
+        threshold = float(self.config.min_silence_duration_ms)
+        if not self.config.adaptive_endpointing or not self.speech_active:
+            return threshold
+
+        utterance_text = (self.current_utterance or self.partial_text or "").strip()
+        utterance_words = re.findall(r"[a-zA-Z0-9']+", utterance_text)
+        utterance_text_lower = utterance_text.lower()
+        if (
+            len(utterance_words) >= self.config.continuation_word_threshold
+            or self._speech_duration_ms() >= self.config.continuation_min_duration_ms
+        ):
+            threshold += float(self.config.continuation_silence_bonus_ms)
+
+        # If the utterance looks syntactically incomplete, wait longer before finalizing.
+        if utterance_text_lower.endswith((
+            " and", " or", " but", " because", " with", " for", " to", " the",
+            " und", " oder", " aber", " weil", " mit", " fuer", " für", " zu",
+        )):
+            threshold += 300.0
+        elif utterance_text and utterance_text[-1] in {",", ":", ";", "-"}:
+            threshold += 200.0
+
+        if utterance_words:
+            last_word = utterance_words[-1].lower()
+            if last_word in {
+                "and", "or", "but", "because", "with", "for", "to", "the",
+                "und", "oder", "aber", "weil", "mit", "fuer", "für", "zu",
+            }:
+                threshold += 120.0
+
+        if len(utterance_words) >= 10:
+            threshold += 120.0
+
+        return threshold
     
     async def _process_chunk(self, audio_bytes: bytes):
         """
@@ -245,7 +327,7 @@ class GroqWhisperSession:
             result = await self.groq_client.transcribe(
                 audio_bytes=audio_bytes,
                 prompt=context_prompt,
-                language=self.config.language
+                language=self._resolved_language()
             )
             
             if result and not result.is_empty:
@@ -297,7 +379,7 @@ class GroqWhisperSession:
     
     def _build_context_prompt(self) -> Optional[str]:
         """Build context prompt from recent transcriptions"""
-        if self.config.is_german_language(self.config.language):
+        if self.config.is_german_language(self._resolved_language()):
             # Context chaining can reinforce an accidental English normalization across chunks.
             # For German-first sessions, prefer clean native-language transcription over chain continuity.
             return None
@@ -345,7 +427,10 @@ class GroqWhisperSession:
         if not self.speech_active:
             return
         
+        closing_utterance_id = self._active_utterance_id
         self.speech_active = False
+        self.speech_candidate_start_time = None
+        self.speech_segment_start_time = None
         
         # FULL TRANSCRIPTION MODE: Transcribe entire buffer at once
         if not self.config.enable_micro_chunking and self.full_audio_buffer:
@@ -354,16 +439,21 @@ class GroqWhisperSession:
             
             logger.info(f"📤 [{self.session_id}] Full transcription mode: sending {len(audio_to_transcribe)} bytes ({audio_duration_ms:.0f}ms)")
             
-            # Build prompt with base prompt if configured
-            prompt = self.config.base_prompt if self.config.base_prompt else None
-            
+            # In full mode, let the Groq client build the strict language-aware prompt.
+            # Passing a prebuilt prompt here would get wrapped again and can exceed Groq's prompt limit.
+            forced_language = self._resolved_language()
+
             # Transcribe full audio buffer
             result = await self.groq_client.transcribe(
                 audio_bytes=audio_to_transcribe,
-                prompt=prompt,
-                language=self.config.language
+                prompt=None,
+                language=forced_language
             )
             
+            if self._is_stale_utterance(closing_utterance_id):
+                logger.info(f"🧹 [{self.session_id}] Dropping stale full-transcription result after interruption/cleanup")
+                return
+
             if result and not result.is_empty:
                 final_text = result.text.strip()
                 if self._should_filter_full_result(result, final_text):
@@ -390,8 +480,11 @@ class GroqWhisperSession:
         
         # MICRO-CHUNKING MODE: Emit accumulated utterance as final
         else:
-            # Wait for any pending processing to complete
-            await asyncio.sleep(0.1)
+            # Give the last in-flight chunk a short chance to finish without
+            # keeping speech end blocked for a full fixed sleep.
+            wait_deadline = time.time() + (self.config.finalization_wait_ms / 1000.0)
+            while self.is_processing and time.time() < wait_deadline:
+                await asyncio.sleep(0.01)
             
             # Emit final transcript (accumulated utterance from chunks)
             final_text = self.current_utterance.strip() if self.current_utterance else self.partial_text.strip()
@@ -411,6 +504,10 @@ class GroqWhisperSession:
                 self.transcripts_emitted += 1
                 logger.info(f"✅ [{self.session_id}] Final: '{final_text[:80]}...'")
         
+        if self._is_stale_utterance(closing_utterance_id):
+            logger.info(f"🧹 [{self.session_id}] Skipping stale speech_end cleanup after interruption/cleanup")
+            return
+
         # Emit SPEECH_END event
         await self._emit_speech_event("SPEECH_END")
         logger.info(f"🔇 [{self.session_id}] Speech ended")
@@ -446,11 +543,11 @@ class GroqWhisperSession:
         Check if transcription contains the prompt itself.
         This happens when Groq receives silence/noise and returns the prompt as transcription.
         """
-        if not text or not self.config.base_prompt:
+        if not text:
             return False
 
         # Build the full prompt that would be sent to Groq
-        full_prompt = self.config.build_transcription_prompt(language=self.config.language)
+        full_prompt = self.config.build_transcription_prompt(language=self._resolved_language())
         if not full_prompt:
             return False
 
@@ -479,6 +576,12 @@ class GroqWhisperSession:
             logger.warning(f"🚫 [{self.session_id}] Prompt hallucination detected: '{final_text[:80]}...'")
             return True
 
+        if self.config.is_german_language(self._resolved_language()):
+            result_language = (result.language or "").strip().lower()
+            if result_language.startswith("en"):
+                logger.warning(f"🚫 [{self.session_id}] Filtering English result during German-forced session: '{final_text[:80]}...'")
+                return True
+
         return result.is_hallucination or result.is_low_quality
     
     async def _emit_transcript(
@@ -504,8 +607,8 @@ class GroqWhisperSession:
                     "request_id": f"{self.session_id}_{int(time.time() * 1000)}",
                     "timestamp": time.time(),
                     "source": "groq_whisper",
-                    "language": self.config.language or "de",
-                    "language_code": self.config.language or "de",
+                    "language": self._resolved_language(),
+                    "language_code": self._resolved_language(),
                 }
             }
             
@@ -539,15 +642,15 @@ class GroqWhisperSession:
                 await self.orchestrator_ws.send_transcript(
                     text=text,
                     is_final=is_final,
-                    language=self.config.language or "de",
-                    language_code=self.config.language or "de",
+                    language=self._resolved_language(),
+                    language_code=self._resolved_language(),
                     words=words,
                     latency_ms=latency_ms
                 )
             
             # Send to client callback
             try:
-                await asyncio.wait_for(self.callback(message), timeout=2.0)
+                await asyncio.wait_for(self.callback(message), timeout=self.config.callback_timeout_seconds)
             except asyncio.TimeoutError:
                 logger.error(f"❌ [{self.session_id}] Timeout delivering transcript to callback")
             except Exception as e:
@@ -577,7 +680,7 @@ class GroqWhisperSession:
             
             # Send to client callback
             try:
-                await asyncio.wait_for(self.callback(message), timeout=2.0)
+                await asyncio.wait_for(self.callback(message), timeout=self.config.callback_timeout_seconds)
             except asyncio.TimeoutError:
                 logger.error(f"❌ [{self.session_id}] Timeout delivering speech event")
             except Exception as e:
@@ -586,13 +689,25 @@ class GroqWhisperSession:
         except Exception as e:
             logger.error(f"❌ Error emitting speech event: {e}")
     
-    async def stop(self):
+    async def stop(self, flush_pending_audio: bool = True):
         """Stop session and cleanup"""
         self._running = False
+        self._active_utterance_id += 1
         
-        # Flush any pending audio
-        if self.speech_active and self.current_utterance:
+        # Flush any pending audio only for intentional shutdowns.
+        if flush_pending_audio and self.speech_active and (self.current_utterance or self.full_audio_buffer):
             await self._handle_speech_end()
+        else:
+            self.speech_active = False
+            self.speech_candidate_start_time = None
+            self.speech_segment_start_time = None
+            self.current_utterance = ""
+            self.partial_text = ""
+            self.full_audio_buffer.clear()
+            self.context_window.clear()
+            self.pre_speech_chunks.clear()
+            self.pre_speech_bytes = 0
+            self._just_seeded_from_preroll = False
         
         # Close Groq client
         if self.groq_client:

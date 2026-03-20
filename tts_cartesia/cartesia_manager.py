@@ -421,9 +421,17 @@ class CartesiaManager:
                             stream_start_time = time.time()
                         
                         await conn.send(message)
-                    
-                    logger.info(f"[{ctx_id[:8]}] Send complete")
-                    
+
+                    # CRITICAL: Send final close signal with continue=False
+                    # This tells Cartesia "no more input is coming"
+                    close_message = {
+                        "context_id": ctx_id,
+                        "transcript": "",  # Empty transcript signals context close
+                        "continue": False,  # CRITICAL: False tells Cartesia stream is ending
+                    }
+                    await conn.send(close_message)
+                    logger.info(f"[{ctx_id[:8]}] Stream closed with continue=False signal")
+
                 except Exception as e:
                     logger.error(f"[{ctx_id[:8]}] Send error: {e}")
                 finally:

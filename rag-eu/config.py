@@ -112,6 +112,11 @@ class RAGConfig:
     
     # Retrieval flags
     enable_local_retrieval: bool = False
+    enable_stage_aware_retrieval: bool = False
+    enable_micro_reasoning: bool = False
+    policy_mode_default: str = "sales"
+    enable_startup_warmup: bool = True
+    startup_warmup_timeout: float = 8.0
     
     # Organization context
     organization_name: str = "Organization"
@@ -373,6 +378,11 @@ class RAGConfig:
             
             # Local retrieval flag
             enable_local_retrieval=get_env_bool("ENABLE_LOCAL_RETRIEVAL", True),
+            enable_stage_aware_retrieval=get_env_bool("ENABLE_STAGE_AWARE_RETRIEVAL", False),
+            enable_micro_reasoning=get_env_bool("ENABLE_MICRO_REASONING", False),
+            policy_mode_default=(os.getenv("POLICY_MODE_DEFAULT", "sales").strip().lower() or "sales"),
+            enable_startup_warmup=get_env_bool("RAG_ENABLE_STARTUP_WARMUP", True),
+            startup_warmup_timeout=get_env_float("RAG_STARTUP_WARMUP_TIMEOUT", 8.0),
             
             # Organization context
             organization_name=os.getenv("ORGANIZATION_NAME", "Organization") or "Organization",
@@ -393,6 +403,11 @@ class RAGConfig:
             log_queries=os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG",
             verbose=os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG",
         )
+        if config.policy_mode_default not in {"sales", "clinical"}:
+            logger.warning(
+                f"Invalid POLICY_MODE_DEFAULT '{config.policy_mode_default}', defaulting to 'sales'"
+            )
+            config.policy_mode_default = "sales"
         # Debug prints for Qdrant
         logger.info(f"DEBUG: Config Qdrant URL: {config.qdrant_url}")
         logger.info(f"DEBUG: Config Enable Hive Mind: {config.enable_hive_mind}")

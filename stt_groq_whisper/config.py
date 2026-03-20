@@ -43,12 +43,18 @@ class GroqWhisperConfig:
     # Higher energy threshold = less sensitive (reduces false positives from ambient noise/echo)
     vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "850"))  # RMS energy threshold (default: 850, range: 500-1000)
     min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "500"))  # Minimum speech length in ms (default: 500ms)
-    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "1200"))  # Silence before speech_end in ms (default: 1200ms)
-    final_silence_padding_ms: int = int(os.getenv("FINAL_SILENCE_PADDING_MS", "1150"))
-    pre_speech_padding_ms: int = int(os.getenv("PRE_SPEECH_PADDING_MS", "520"))
+    speech_start_trigger_ms: int = int(os.getenv("SPEECH_START_TRIGGER_MS", "160"))  # Debounce speech start to reduce false VAD triggers
+    min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "1050"))  # Baseline silence before speech_end in ms
+    final_silence_padding_ms: int = int(os.getenv("FINAL_SILENCE_PADDING_MS", "900"))
+    finalization_wait_ms: int = int(os.getenv("FINALIZATION_WAIT_MS", "40"))  # Wait briefly for the last in-flight chunk before finalizing
+    pre_speech_padding_ms: int = int(os.getenv("PRE_SPEECH_PADDING_MS", "640"))
+    adaptive_endpointing: bool = os.getenv("STT_ADAPTIVE_ENDPOINTING", "true").lower() == "true"
+    continuation_silence_bonus_ms: int = int(os.getenv("CONTINUATION_SILENCE_BONUS_MS", "520"))
+    continuation_word_threshold: int = int(os.getenv("CONTINUATION_WORD_THRESHOLD", "5"))
+    continuation_min_duration_ms: int = int(os.getenv("CONTINUATION_MIN_DURATION_MS", "1200"))
     
     # Groq API parameters
-    language: Optional[str] = os.getenv("GROQ_LANGUAGE", "")  # ISO-639-1 for faster processing
+    language: Optional[str] = os.getenv("GROQ_LANGUAGE", "de")  # ISO-639-1 for faster processing
     response_format: str = os.getenv("GROQ_RESPONSE_FORMAT", "verbose_json")  # json, verbose_json, text
     temperature: float = float(os.getenv("GROQ_TEMPERATURE", "0.0"))
     include_word_timestamps: bool = os.getenv("GROQ_WORD_TIMESTAMPS", "true").lower() == "true"
@@ -70,6 +76,7 @@ class GroqWhisperConfig:
     
     # Timeout settings
     api_timeout_seconds: float = float(os.getenv("GROQ_API_TIMEOUT", "5.0"))
+    callback_timeout_seconds: float = float(os.getenv("STT_CALLBACK_TIMEOUT_SECONDS", "0.75"))
     max_retries: int = int(os.getenv("GROQ_MAX_RETRIES", "3"))
     
     @property
@@ -87,32 +94,44 @@ class GroqWhisperConfig:
         """Get the transcription endpoint URL"""
         return f"{self.base_url}/audio/transcriptions"
 
+    def resolve_language(self, preferred: Optional[str] = None) -> str:
+        """Normalize and force a stable language choice for transcription requests."""
+        lang = (preferred or self.language or "de").strip().lower()
+        if lang in {"de", "deu", "ger", "german", "deutsch"}:
+            return "de"
+        if lang in {"en", "eng", "english"}:
+            return "en"
+        return "de"
+
     def build_transcription_prompt(self, extra_prompt: Optional[str] = None, language: Optional[str] = None) -> Optional[str]:
         """
         Build a strict no-translation transcription prompt.
         This reduces Whisper's tendency to normalize non-English speech into English.
         """
-        lang = (language or self.language or "").strip().lower()
+        lang = self.resolve_language(language)
         parts = []
         if self.base_prompt:
             parts.append(self.base_prompt.strip())
-        if lang in {"de", "deu", "ger", "german", "deutsch"}:
+        if self.is_german_language(lang):
             parts.append(
                 "Transcribe the spoken audio exactly in German using normal German orthography. "
                 "Do not translate, summarize, paraphrase, or normalize it into English. "
                 "Preserve names, brands, German compounds, umlauts (ae/oe/ue where spoken as ä/ö/ü only if clearly necessary), "
                 "and the Eszett (ß) when appropriate. Keep acronyms and product names as spoken. "
-                "Do not spell words letter by letter unless the speaker explicitly spells them."
+                "Do not spell words letter by letter unless the speaker explicitly spells them. "
+                "If audio is unclear, transcribe only the clearly spoken German words and omit uncertain fragments rather than guessing."
             )
-        elif lang in {"en", "eng", "english"}:
+        elif lang == "en":
             parts.append(
                 "Transcribe the spoken audio exactly in English. Do not translate, summarize, or paraphrase. "
-                "Preserve names, brands, and phrasing as spoken."
+                "Preserve names, brands, and phrasing as spoken. "
+                "If audio is unclear, transcribe only the clearly spoken words and omit uncertain fragments rather than guessing."
             )
         else:
             parts.append(
                 "Transcribe the spoken audio verbatim in the original spoken language. "
-                "Do not translate, summarize, or paraphrase."
+                "Do not translate, summarize, or paraphrase. "
+                "If audio is unclear, transcribe only clearly spoken words and omit uncertain fragments rather than inventing them."
             )
         if extra_prompt:
             parts.append(extra_prompt.strip())
@@ -148,6 +167,8 @@ class GroqWhisperConfig:
         masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
         logger.info(f"🔑 Groq API key configured: {masked_key}")
         
+        self.language = self.resolve_language(self.language)
+
         if self.model not in ["whisper-large-v3-turbo", "whisper-large-v3"]:
             logger.warning(f"Unknown model '{self.model}', using 'whisper-large-v3-turbo'")
             self.model = "whisper-large-v3-turbo"
@@ -166,6 +187,15 @@ class GroqWhisperConfig:
         
         if self.base_prompt:
             logger.info(f"📝 Base prompt: '{self.base_prompt[:50]}...'")
+
+        # Keep the trailing pad within the speech-end threshold.
+        self.final_silence_padding_ms = max(0, min(self.final_silence_padding_ms, self.min_silence_duration_ms))
+
+        # Guard against values that would make speech start feel delayed.
+        self.speech_start_trigger_ms = max(0, min(self.speech_start_trigger_ms, self.min_speech_duration_ms))
+        self.continuation_silence_bonus_ms = max(0, self.continuation_silence_bonus_ms)
+        self.continuation_word_threshold = max(1, self.continuation_word_threshold)
+        self.continuation_min_duration_ms = max(self.min_speech_duration_ms, self.continuation_min_duration_ms)
     
     @staticmethod
     def from_env() -> "GroqWhisperConfig":

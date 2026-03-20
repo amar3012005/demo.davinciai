@@ -704,15 +704,49 @@
 
         const MIC_SAMPLE_RATE = 16000;
         const PLAYBACK_SAMPLE_RATE = 44100;
-        const WS_URL = window.location.protocol === 'https:'
-            ? `wss://${window.location.host}/ws`
-            : `ws://${window.location.host}/ws`;
-        const DEFAULT_TENANT_ID = (window.TARA_ENV && window.TARA_ENV.TENANT_ID)
-            ? window.TARA_ENV.TENANT_ID
-            : 'bundb';
+        const URL_PARAMS = new URLSearchParams(window.location.search);
+        const DEFAULT_POLICY_MODE = URL_PARAMS.get('mode') === 'clinical' ? 'clinical' : 'sales';
+        const DEFAULT_TENANT_ID = URL_PARAMS.get('tenant')
+            || ((window.TARA_ENV && window.TARA_ENV.TENANT_ID)
+                ? window.TARA_ENV.TENANT_ID
+                : 'bundb');
         const DEFAULT_AGENT_NAME = (window.TARA_ENV && window.TARA_ENV.AGENT_NAME)
             ? window.TARA_ENV.AGENT_NAME
             : 'TARA';
+        const WS_URL = (() => {
+            const base = window.location.protocol === 'https:'
+                ? `wss://${window.location.host}/ws`
+                : `ws://${window.location.host}/ws`;
+            const params = new URLSearchParams({
+                tenant_id: DEFAULT_TENANT_ID,
+                agent_id: DEFAULT_TENANT_ID.toLowerCase(),
+                session_type: 'webcall',
+                user_id: 'anonymous_user',
+                agent_name: DEFAULT_AGENT_NAME
+            });
+            return `${base}?${params.toString()}`;
+        })();
+        const START_FLOW_CONFIG = DEFAULT_POLICY_MODE === 'clinical'
+            ? {
+                policy_mode: 'clinical',
+                conversation_policy: 'clinical',
+                policy_flags: {
+                    enable_strategic_policy: true,
+                    enable_stage_aware_retrieval: true,
+                    enable_micro_reasoning: true
+                },
+                intro_in_primary_lang: 'Hallo, ich bin TARA. Ich stelle Ihnen jetzt gezielte Fragen, damit ich Ihre Beschwerden strukturiert verstehen kann.',
+                intro_in_secondary_lang: 'Hello, I am TARA. I will ask a few structured questions so I can understand your symptoms properly.'
+            }
+            : {
+                policy_mode: 'sales',
+                conversation_policy: 'sales',
+                policy_flags: {
+                    enable_strategic_policy: true,
+                    enable_stage_aware_retrieval: true,
+                    enable_micro_reasoning: true
+                }
+            };
 
         class TARAClient {
             constructor() {
@@ -830,7 +864,12 @@
                     });
                     this.addLog(`Session config sent: tenant=${DEFAULT_TENANT_ID}`, 'info');
 
-                    this.send({ type: 'start_session', timestamp: Date.now() / 1000 });
+                    this.send({
+                        type: 'start_session',
+                        flow_config: START_FLOW_CONFIG,
+                        timestamp: Date.now() / 1000
+                    });
+                    this.addLog(`Policy flow enabled: ${DEFAULT_POLICY_MODE}`, 'info');
                     this.sessionActive = true;
                 };
 

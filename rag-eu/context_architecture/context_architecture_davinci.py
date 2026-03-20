@@ -41,7 +41,10 @@ LANGUAGE RULES (fixed):
 """
 
 import datetime
+import logging
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Module-level singleton — survives across requests in same process.
 # Groq cache requires byte-identical prefix on every request.
@@ -128,22 +131,29 @@ class ContextArchitect:
         user_profile: Dict,
         agent_skills: Optional[List[str]] = None,
         agent_rules: Optional[List[str]] = None,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """
-        Assemble one turn. hive_mind accepted for backward compatibility —
-        pass its insights via retrieved_docs for Zone C injection.
+        Assemble one turn.
 
         Order (Groq prefix-cache optimised):
           [CACHED]  Zone A — persona + AIDA + sales rules
           [CACHED]  Zone B — 3 seed examples
-          [DYNAMIC] Zone C — history + docs + query + lang directive
+          [DYNAMIC] Zone C — history + docs + hive_mind + policy + query + lang directive
           [DYNAMIC] Zone D — skills + rules (omitted if empty)
         """
         static = cls._get_static_prefix()
         zone_c = cls._render_zone_c(
-            query, raw_query, retrieved_docs, history, user_profile
+            query, raw_query, retrieved_docs, history, user_profile, hive_mind,
+            interrupted_text=interrupted_text,
+            interruption_transcripts=interruption_transcripts,
+            interruption_type=interruption_type,
+            user_id=user_id,
         )
-        zone_d = cls._render_zone_d(agent_skills or [], agent_rules or [])
+        zone_d = cls._render_zone_d(agent_skills or [], agent_rules or [], hive_mind=hive_mind or {})
         return f"{static}\n{zone_c}{zone_d}"
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -288,14 +298,16 @@ T: Natürlich! Wie viele Kundenanrufe bearbeitet Ihr Team aktuell pro Monat?
         docs: List[Dict],
         history: List[Dict],
         user_profile: Dict,
+        hive_mind: Optional[Dict] = None,
+        interrupted_text: Optional[str] = None,
+        interruption_transcripts: Optional[List[str]] = None,
+        interruption_type: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """
         Zone C: per-turn dynamic content. Never cached.
-        Optimisations:
-          - history: last 4 turns, U:/T: prefix only, no timestamps, no XML wrapping
-          - docs: max 2, sorted by relevance, 900 chars each
-          - lang directive: explicit, positioned last (highest model attention)
-          - profile: compact inline string
+        Includes: history, retrieved docs, hive_mind KB, policy block,
+        interruption context, query, and language directive.
         """
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         lang = cls._detect_lang(query, history, user_profile)
@@ -329,6 +341,61 @@ T: Natürlich! Wie viele Kundenanrufe bearbeitet Ihr Team aktuell pro Monat?
                 txt = cls._escape(d.get("text", d.get("content", "")))[:900]
                 kb += f"[{src}] {txt}\n"
 
+        # HiveMind KB (tenant memory + knowledge base)
+        hivemind_kb = ""
+        hive_mind = hive_mind or {}
+        hivemind_insights = (hive_mind.get("insights") or {})
+        tenant_memory = hivemind_insights.get("tenant_memory") or ""
+        knowledge_base = hivemind_insights.get("knowledge_base") or ""
+        if tenant_memory:
+            hivemind_kb += cls._escape(str(tenant_memory))[:6000]
+        if knowledge_base:
+            if hivemind_kb:
+                hivemind_kb += "\n"
+            hivemind_kb += cls._escape(str(knowledge_base))[:6000]
+
+        # Policy block (from hive_mind.variables.policy, set by orchestrator)
+        policy_block = ""
+        policy = (hive_mind.get("variables") or {}).get("policy") or {}
+        if policy:
+            policy_lines = []
+            if policy.get("policy_mode"):
+                policy_lines.append(f"mode={cls._escape(str(policy['policy_mode']))}")
+            if policy.get("conversation_stage"):
+                policy_lines.append(f"stage={cls._escape(str(policy['conversation_stage']))}")
+            if policy.get("response_act"):
+                policy_lines.append(f"response_act={cls._escape(str(policy['response_act']))}")
+            hypotheses = policy.get("hypotheses") or []
+            if hypotheses:
+                policy_lines.append("hypotheses=" + " | ".join(cls._escape(str(h)) for h in hypotheses[:3]))
+            missing_slots = policy.get("missing_slots") or []
+            if missing_slots:
+                policy_lines.append("missing_slots=" + " | ".join(cls._escape(str(s)) for s in missing_slots[:4]))
+            policy_metadata = policy.get("policy_metadata") or {}
+            if isinstance(policy_metadata, dict) and policy_metadata.get("next_question_focus"):
+                policy_lines.append(
+                    "next_question_focus=" + cls._escape(str(policy_metadata["next_question_focus"]))
+                )
+            if policy_lines:
+                policy_block = "<policy>\n" + "\n".join(policy_lines) + "\n</policy>\n"
+
+        # Interruption context
+        interruption_block = ""
+        if interrupted_text and interruption_transcripts:
+            transcripts_str = " | ".join(cls._escape(t) for t in interruption_transcripts)
+            int_type = cls._escape(interruption_type or "unknown")
+            interruption_block = (
+                f"<interruption>\n"
+                f"<was_interrupted>true</was_interrupted>\n"
+                f"<interrupted_response>{cls._escape(interrupted_text)}</interrupted_response>\n"
+                f"<interruption_transcripts>{transcripts_str}</interruption_transcripts>\n"
+                f"<interruption_type>{int_type}</interruption_type>\n"
+                f"<instruction>User interrupted your previous response. "
+                f"For addon: weave it in naturally. For new topic: address it directly. "
+                f"No restart. No apology. No meta-comment.</instruction>\n"
+                f"</interruption>\n"
+            )
+
         # Unambiguous language directive — last line = highest attention weight
         if lang == "de":
             lang_line = "LANGUAGE=DE. Every word German. 'Sie' always. No English words."
@@ -336,11 +403,15 @@ T: Natürlich! Wie viele Kundenanrufe bearbeitet Ihr Team aktuell pro Monat?
             lang_line = "LANGUAGE=EN. Full English. Switch to German only if user writes German."
 
         kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
+        hivemind_block = f"<hm>\n{hivemind_kb.strip()}\n</hm>\n" if hivemind_kb.strip() else ""
 
         return (
             f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
             f"<h>\n{h_lines.strip()}\n</h>\n"
             f"{kb_block}"
+            f"{hivemind_block}"
+            f"{policy_block}"
+            f"{interruption_block}"
             f"<original_query>{cls._escape(raw_query)}</original_query>\n"
             f"<translated_query_for_search>{cls._escape(query)}</translated_query_for_search>\n"
             f"INSTRUCTION: Always respond based on original_query, not translated_query_for_search.\n"
@@ -354,11 +425,12 @@ T: Natürlich! Wie viele Kundenanrufe bearbeitet Ihr Team aktuell pro Monat?
     # ══════════════════════════════════════════════════════════════════════════
 
     @classmethod
-    def _render_zone_d(cls, skills: List[str], rules: List[str]) -> str:
+    def _render_zone_d(cls, skills: List[str], rules: List[str], hive_mind: Optional[Dict] = None) -> str:
         """
         Qdrant-retrieved skills and compliance rules.
         Omitted entirely when empty — zero tokens, zero cost.
         Priority: rules (compliance) > skills (techniques) > default.
+        hive_mind accepted for API compatibility with bundb architecture.
         """
         if not skills and not rules:
             return ""

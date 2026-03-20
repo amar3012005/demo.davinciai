@@ -11,6 +11,7 @@ import logging
 import aiohttp
 import ssl
 import unicodedata
+import time
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from dataclasses import dataclass
 import re
@@ -260,16 +261,6 @@ class TTSClient:
         for old, new in replacements.items():
             normalized = normalized.replace(old, new)
 
-        # Dot-separated tokens should stay punctuation-like, not be read out literally.
-        # Replacing with a soft sentence break helps TTS pause instead of saying "dot".
-        normalized = re.sub(r"(?<=\w)\.(?=\w)", ", ", normalized)
-
-        # Avoid clipped acronym-hyphen compounds like "KI-gestützt" getting spelled out.
-        normalized = re.sub(r"\b([A-ZÄÖÜ]{2,})-(?=\w)", r"\1 ", normalized)
-
-        # German-specific: Replace slashes with "oder" for better TTS pronunciation
-        normalized = re.sub(r"\s*/\s*", " oder ", normalized)
-
         # German-specific: Handle common abbreviations that TTS might mispronounce
         abbreviation_replacements = {
             r"\bz\.B\.": "zum Beispiel",
@@ -281,6 +272,16 @@ class TTSClient:
         }
         for pattern, replacement in abbreviation_replacements.items():
             normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+
+        # Dot-separated tokens should stay punctuation-like, not be read out literally.
+        # Replacing with a soft sentence break helps TTS pause instead of saying "dot".
+        normalized = re.sub(r"(?<=\w)\.(?=\w)", ", ", normalized)
+
+        # Avoid clipped acronym-hyphen compounds like "KI-gestützt" getting spelled out.
+        normalized = re.sub(r"\b([A-ZÄÖÜ]{2,})-(?=\w)", r"\1 ", normalized)
+
+        # German-specific: Replace slashes with "oder" for better TTS pronunciation
+        normalized = re.sub(r"\s*/\s*", " oder ", normalized)
 
         # CRITICAL: Expand acronyms that Cartesia reads letter-by-letter
         # Only apply for German language
@@ -320,7 +321,12 @@ class TTSClient:
                 
                 ssl_context = False if self.skip_ssl else None
                 self.ws = await asyncio.wait_for(
-                    self.session.ws_connect(ws_url, ssl=ssl_context),
+                    self.session.ws_connect(
+                        ws_url,
+                        ssl=ssl_context,
+                        heartbeat=20.0,
+                        autoping=True,
+                    ),
                     timeout=10.0
                 )
                 
@@ -369,18 +375,18 @@ class TTSClient:
         text = self._normalize_tts_text(text, language)
         self._last_stream_language = language or self._last_stream_language
         self._last_stream_emotion = emotion or self._last_stream_emotion
-        self._last_stream_voice_id = voice_id
 
         # Auto-apply tenant-specific pronunciation dictionary if not provided
         if not pronunciation_dict_id and tenant_id:
             pronunciation_dict_id = self._get_tenant_pronunciation_dict_id(tenant_id)
-        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
 
         # Get voice config for language
         voice_config = self.config.voices.get(language)
         if voice_id is None:
             voice_id = voice_config.voice_id if voice_config else "default"
         voice_lang = voice_config.language if voice_config else f"{language}-{language.upper()}"
+        self._last_stream_voice_id = voice_id
+        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
 
         # Retry logic if send fails
         try:
@@ -426,12 +432,10 @@ class TTSClient:
         # Store metadata for flushing
         self._last_stream_language = language or self._last_stream_language
         self._last_stream_emotion = emotion or self._last_stream_emotion
-        self._last_stream_voice_id = voice_id
 
         # Auto-apply tenant-specific pronunciation dictionary if not provided
         if not pronunciation_dict_id and tenant_id:
             pronunciation_dict_id = self._get_tenant_pronunciation_dict_id(tenant_id)
-        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
 
         # Ensure connection exists and is open
         if not self.ws or self.ws.closed:
@@ -444,6 +448,12 @@ class TTSClient:
             else:
                 logger.error("TTS WebSocket not connected and no session_id available")
                 return
+
+        voice_config = self.config.voices.get(language)
+        if voice_id is None:
+            voice_id = voice_config.voice_id if voice_config else "default"
+        self._last_stream_voice_id = voice_id
+        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
 
         # CRITICAL FIX: Buffer RAW text. Normalization happens during flush to maintain context.
         self._chunk_buffer += text
@@ -523,6 +533,10 @@ class TTSClient:
         if voice_id is None:
             voice_id = voice_config.voice_id if voice_config else "default"
         voice_lang = voice_config.language if voice_config else f"{language}-{language.upper()}"
+        self._last_stream_language = language or self._last_stream_language
+        self._last_stream_emotion = emotion or self._last_stream_emotion
+        self._last_stream_voice_id = voice_id
+        self._last_stream_pronunciation_dict_id = pronunciation_dict_id
         
         # Send each chunk
         for i, chunk in enumerate(chunks_to_send):
@@ -585,6 +599,16 @@ class TTSClient:
             logger.error(f"TTS stream_end send failed: {e}")
             # Don't retry stream_end - it's not critical if it fails
 
+    def reset_buffer(self) -> None:
+        """Clear buffered text without closing connection.
+
+        Use this between batch-mode turns to avoid reconnect latency.
+        Only call abort_stream() for true barge-in/interrupt scenarios.
+        """
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
+        self._chunk_buffer = ""
+
     async def abort_stream(self):
         """
         Abort current TTS generation immediately without flushing buffered text.
@@ -612,15 +636,36 @@ class TTSClient:
             Dict with 'type', 'data' (base64 audio), and other metadata
         """
         if not self.ws:
-            logger.error("TTS WebSocket not connected")
-            return
+            # Startup race: the receive loop can start before the initial
+            # websocket connect has finished. Wait briefly instead of
+            # tearing down the loop and forcing a reconnect cycle.
+            wait_started = time.time()
+            while not self.ws and self.session and (time.time() - wait_started) < 5.0:
+                await asyncio.sleep(0.05)
+            if not self.ws:
+                logger.error("TTS WebSocket not connected")
+                return
         
         try:
             while True:
                 current_ws = self.ws
                 if not current_ws or current_ws.closed:
-                    logger.info("TTS WebSocket unavailable during receive loop; stopping audio receive")
-                    break
+                    if not self.session_id:
+                        logger.info("TTS WebSocket unavailable during receive loop; stopping audio receive")
+                        break
+
+                    logger.warning("TTS WebSocket unavailable during receive loop; attempting to recover connection")
+                    try:
+                        await self.connect(self.session_id)
+                    except Exception as reconnect_error:
+                        logger.debug(f"TTS receive reconnect attempt failed: {reconnect_error}")
+                        await asyncio.sleep(0.25)
+                        continue
+
+                    if not self.ws or self.ws.closed:
+                        await asyncio.sleep(0.25)
+                        continue
+                    current_ws = self.ws
                 try:
                     msg = await asyncio.wait_for(
                         current_ws.receive(),
@@ -749,6 +794,9 @@ class RAGClient:
                             language: str = "en",
                             context: Optional[Dict[str, Any]] = None,
                             history_context: Optional[str] = None,
+                            session_summary_window: Optional[str] = None,
+                            session_summary_revision: int = 0,
+                            recent_turns: Optional[List[Dict[str, Any]]] = None,
                             base_url: Optional[str] = None,
                             tenant_id: Optional[str] = None,
                             interrupted_text: Optional[str] = None,
@@ -792,6 +840,11 @@ class RAGClient:
                     logger.debug(f"Sending to RAG with history_context: {len(history_context)} chars, language: {language}")
                 else:
                     logger.debug(f"Sending to RAG without history_context, language: {language}")
+                if session_summary_window:
+                    payload["session_summary_window"] = session_summary_window
+                    payload["session_summary_revision"] = session_summary_revision
+                if recent_turns:
+                    payload["recent_turns"] = recent_turns
 
                 # Add interruption context for barge-in handling
                 if interrupted_text:
@@ -842,6 +895,45 @@ class RAGClient:
         
         except Exception as e:
             logger.error(f"RAG streaming error: {e}")
+
+    async def summarize_session_window(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        language: str,
+        previous_summary: str,
+        user_text: str,
+        assistant_text: str,
+        base_url: Optional[str] = None,
+    ) -> str:
+        try:
+            async with aiohttp.ClientSession() as session:
+                ssl_context = False if self.skip_ssl else None
+                url = base_url if base_url else self.config.url
+                summary_url = f"{url}/api/v1/session_summary_window"
+                payload = {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "language": language,
+                    "previous_summary": previous_summary,
+                    "user_text": user_text,
+                    "assistant_text": assistant_text,
+                }
+                async with session.post(
+                    summary_url,
+                    json=payload,
+                    ssl=ssl_context,
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Session summary request failed: HTTP {resp.status}")
+                        return previous_summary
+                    data = await resp.json()
+                    return str(data.get("summary_text") or previous_summary or "")
+        except Exception as e:
+            logger.error(f"Session summary request failed: {e}")
+            return previous_summary
 
     async def visual_orchestrate(self,
                                query: str,

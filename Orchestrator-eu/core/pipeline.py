@@ -51,9 +51,13 @@ class ProcessingPipeline:
                            session_id: str,
                            user_id: Optional[str] = None,
                            agent_name: Optional[str] = None,
+                           context_data: Optional[Dict[str, Any]] = None,
                            stt_metadata: Optional[Dict[str, Any]] = None,
                            language: Optional[str] = None,
                            history_context: Optional[str] = None,
+                           session_summary_window: Optional[str] = None,
+                           session_summary_revision: int = 0,
+                           recent_turns: Optional[List[Dict[str, Any]]] = None,
                            form_data: Optional[Dict[str, Any]] = None,
                            rag_url: Optional[str] = None,
                            tenant_id: Optional[str] = None,
@@ -113,6 +117,11 @@ class ProcessingPipeline:
                 context = {"form_data": form_data}
             else:
                 context = {**context, "form_data": form_data}
+        if context_data:
+            if context is None:
+                context = dict(context_data)
+            else:
+                context = {**context, **context_data}
         
         # Step 3: RAG query with streaming
         try:
@@ -129,6 +138,9 @@ class ProcessingPipeline:
                 language=language,
                 context=context,
                 history_context=history_context,
+                session_summary_window=session_summary_window,
+                session_summary_revision=session_summary_revision,
+                recent_turns=recent_turns,
                 base_url=rag_url,
                 tenant_id=tenant_id,
                 interrupted_text=interrupted_text,
@@ -151,7 +163,13 @@ class ProcessingPipeline:
                     "timestamp": time.time()
                 }
             
-            complete_answer = "".join(full_answer)
+            # Reconstruct with whitespace safety: tokens may or may not carry leading spaces
+            complete_answer_parts: list = []
+            for t in full_answer:
+                if complete_answer_parts and t and not complete_answer_parts[-1][-1:].isspace() and not t[:1].isspace():
+                    complete_answer_parts.append(" ")
+                complete_answer_parts.append(t)
+            complete_answer = "".join(complete_answer_parts)
             logger.info(f"[{session_id}] ✅ RAG streaming complete: {token_count} tokens | Response: {complete_answer[:100]}...")
             
             # Signal completion with usage metadata
@@ -186,6 +204,7 @@ class ProcessingPipeline:
                                          query: str,
                                          session_id: str,
                                          user_id: Optional[str] = None,
+                                         context_data: Optional[Dict[str, Any]] = None,
                                          stt_metadata: Optional[Dict[str, Any]] = None,
                                          language: Optional[str] = None,
                                          form_data: Optional[Dict[str, Any]] = None,
@@ -230,6 +249,11 @@ class ProcessingPipeline:
                 context = {"form_data": form_data}
             else:
                 context = {**context, "form_data": form_data}
+        if context_data:
+            if context is None:
+                context = dict(context_data)
+            else:
+                context = {**context, **context_data}
         
         # RAG query
         try:
@@ -267,4 +291,3 @@ class ProcessingPipeline:
                 "confidence": 0.0,
                 "error": str(e)
             }
-

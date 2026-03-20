@@ -33,46 +33,15 @@ PROTECTED_WORDS: List[str] = [
 ]
 
 # Spoken expansions for terms that often sound better in German TTS.
-# Comprehensive abbreviation expansion for native German pronunciation.
+# Keep this deliberately small and safe.
 TTS_EXPAND: Dict[str, str] = {
-    # Brand names (protected)
     "BLAIQ": "Blaiq",
-    "B&B.": "B und B",
-
-    # Abbreviations (doctor, professor, etc.)
-    "Dr.": "Doktor",
-    "Prof.": "Professor",
-    "Ltd.": "Limited",
-    "GmbH": "Gesellschaft mit beschränkter Haftung",
-    "AG": "Aktiengesellschaft",
-    "e.V.": "eingetragener Verein",
-    "z.B.": "zum Beispiel",
-    "usw.": "und so weiter",
-    "etc.": "et cetera",
-    "Nr.": "Nummer",
-    "Art.": "Artikel",
-
-    # Acronyms & tech terms
     "KI": "künstliche Intelligenz",
-    "AI": "künstliche Intelligenz",
     "DSGVO": "Datenschutz-Grundverordnung",
     "UX": "User Experience",
     "UI": "User Interface",
     "FAQ": "häufig gestellte Fragen",
     "CRM": "Kundenmanagement-System",
-    "SEO": "Suchmaschinen-Optimierung",
-    "API": "Schnittstelle",
-    "URL": "Web-Adresse",
-    "HTTP": "Hypertext Transfer Protokoll",
-    "SSL": "Secure Sockets Layer",
-    "PDF": "Portable Document Format",
-
-    # Business terms (German-specific)
-    "B2B": "Business to Business",
-    "B2C": "Business to Consumer",
-    "ROI": "Return on Investment",
-    "SLA": "Service Level Agreement",
-    "KPI": "Leistungsindikator",
 }
 
 # Terms that should be pronounced in a more stable spoken form.
@@ -200,16 +169,6 @@ def tts_safe(text: str) -> str:
     text = re.sub(r"([,;:])(?=\S)", r"\1 ", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
 
-    # Add SSML breaks for natural pacing (German loves pauses)
-    # Short pause after commas
-    text = re.sub(r",(\s+)", r',<break time="400ms"/>\1', text)
-    # Medium pause after semicolons and colons
-    text = re.sub(r";(\s+)", r';<break time="600ms"/>\1', text)
-    text = re.sub(r":(\s+)", r':<break time="500ms"/>\1', text)
-    # Longer pause after periods and question marks (sentence boundaries)
-    text = re.sub(r"\.(\s+)(?=[A-ZÄÖÜ])", r'.<break time="800ms"/>\1', text)
-    text = re.sub(r"\?(\s+)", r'?<break time="800ms"/>\1', text)
-
     return _restore_segments(text, protected).strip()
 
 
@@ -322,7 +281,6 @@ class ContextArchitect:
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
         user_id: Optional[str] = None,
-        session_summary_window: Optional[str] = None,
     ) -> str:
         policy = ((hive_mind or {}).get("variables") or {}).get("policy") or {}
         policy_mode = str(policy.get("policy_mode") or "").strip().lower()
@@ -333,7 +291,6 @@ class ContextArchitect:
             interruption_transcripts=interruption_transcripts,
             interruption_type=interruption_type,
             user_id=user_id,
-            session_summary_window=session_summary_window,
         )
         zone_d = cls._render_zone_d(
             skills=agent_skills or [],
@@ -731,7 +688,6 @@ T: Gern. Worum soll es in dem Gespräch ungefähr gehen?
         interruption_transcripts: Optional[List[str]] = None,
         interruption_type: Optional[str] = None,
         user_id: Optional[str] = None,
-        session_summary_window: Optional[str] = None,
     ) -> str:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         lang = cls._detect_lang(query, history, user_profile)
@@ -742,17 +698,14 @@ T: Gern. Worum soll es in dem Gespräch ungefähr gehen?
         )
 
         h_lines = ""
-        history_window = 1 if (session_summary_window or "").strip() else 3
         if history:
-            for turn in history[-history_window:]:
+            for turn in history[-3:]:
                 role = "U" if turn.get("role") == "user" else "T"
                 h_lines += f"{role}: {cls._escape(turn.get('content', ''))}\n"
         else:
             h_lines = "[turn 1]\n"
 
-        entity_memory = ""
-        if not (session_summary_window or "").strip():
-            entity_memory = cls._build_entity_memory(query, raw_query, history, user_id=user_id)
+        entity_memory = cls._build_entity_memory(query, raw_query, history, user_id=user_id)
 
         kb = ""
         if docs:
@@ -791,9 +744,6 @@ T: Gern. Worum soll es in dem Gespräch ungefähr gehen?
         kb_block = f"<kb>\n{kb.strip()}\n</kb>\n" if kb else ""
         hivemind_block = f"<hm>\n{hivemind_kb.strip()}\n</hm>\n" if hivemind_kb.strip() else ""
         entity_block = f"<entity_memory>\n{entity_memory}\n</entity_memory>\n" if entity_memory else ""
-        summary_block = ""
-        if (session_summary_window or "").strip():
-            summary_block = f"<session_summary>\n{cls._escape(str(session_summary_window).strip())}\n</session_summary>\n"
         policy_block = ""
         policy = ((hive_mind or {}).get("variables") or {}).get("policy") or {}
         policy_mode = str(policy.get("policy_mode") or "").strip().lower()
@@ -867,7 +817,6 @@ Kein Neustart. Kein Sorry. Keine Meta-Erklärung über die Unterbrechung.
         return (
             f'<ctx t="{current_time}" lang="{lang}" p="{profile_str}">\n'
             f"<h>\n{h_lines.strip()}\n</h>\n"
-            f"{summary_block}"
             f"{entity_block}"
             f"{kb_block}"
             f"{hivemind_block}"
@@ -891,9 +840,6 @@ Kein Neustart. Kein Sorry. Keine Meta-Erklärung über die Unterbrechung.
             f"\n"
             f"Nutze konkrete Informationen aus <hm> und <kb> vor allgemeinem Wissen.\n"
             f"Wenn Informationen zu B&B. oder internen Themen nicht sicher belegt sind, sage das offen.\n"
-            f"\n"
-            f"Wenn ein <session_summary>-Block vorhanden ist, nutze ihn als kanonischen Gesprächskontext über die ganze Sitzung.\n"
-            f"Nutze <h> nur für die unmittelbare sprachliche Anschlussfähigkeit der letzten Wendung.\n"
             f"\n"
             f"{behavior_block}\n"
             f"\n"

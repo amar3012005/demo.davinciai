@@ -10,7 +10,8 @@ import hashlib
 import re
 import asyncio
 import importlib
-from typing import Dict, Any, Optional, List, Callable, Union
+import inspect
+from typing import Dict, Any, Optional, List, Callable, Union, Set
 import numpy as np
 faiss = None
 def _missing_dep(*args, **kwargs):
@@ -101,6 +102,7 @@ class RAGEngine:
         """
         self.config = config
         self._tenant_architect_cache: Dict[str, Any] = {}
+        self._warmed_tenants: Set[str] = set()
         
         # Initialize Embeddings if Local Retrieval OR Hive Mind is enabled
         if self.config.enable_local_retrieval or self.config.enable_hive_mind:
@@ -246,6 +248,35 @@ class RAGEngine:
                 "priority": 0
             }
         }
+
+    def _prime_prompt_path(self, tenant_id: Optional[str]) -> None:
+        tenant = self._sanitize_tenant(tenant_id)
+        if tenant in self._warmed_tenants:
+            return
+
+        architect_cls = self._resolve_context_architect(tenant)
+        modes = ["sales"]
+        default_mode = str(getattr(self.config, "policy_mode_default", "sales") or "sales").strip().lower()
+        if default_mode and default_mode not in modes:
+            modes.append(default_mode)
+
+        for mode in modes:
+            architect_cls.assemble_prompt(
+                query="warmup",
+                raw_query="warmup",
+                retrieved_docs=[],
+                history=[],
+                hive_mind={"insights": {}, "variables": {"policy": {"policy_mode": mode}}},
+                user_profile={"language": "english", "tenant_id": tenant},
+                agent_skills=[],
+                agent_rules=[],
+                interrupted_text=None,
+                interruption_transcripts=None,
+                interruption_type=None,
+                user_id=None,
+            )
+
+        self._warmed_tenants.add(tenant)
     
     def load_index(self) -> bool:
         """Deprecated: Local FAISS index loading removed. Relying on Qdrant Hivemind."""
@@ -377,7 +408,9 @@ class RAGEngine:
     ) -> str:
         """Dedicated system prompt for enterprise HiveMind dashboard chats."""
         lang = (language or "german").strip().lower()
-        normalized_system_prompt = (system_prompt or "").strip()
+        normalized_system_prompt = ""
+        if system_prompt:
+            logger.warning("Ignoring request-scoped HiveMind dashboard system_prompt to preserve tenant-safe prompt boundaries")
 
         history_lines = []
         for turn in history[-8:]:
@@ -435,7 +468,6 @@ class RAGEngine:
             "- When the user proposes a new skill, rule, or knowledge item, rewrite it into a clean reusable entry suitable for saving into HiveMind.\n"
             "- Keep answers concise, operational, and enterprise-facing.\n"
             "- If evidence is weak, say that briefly and stop. Do not pad the answer with process advice unless the user asks what to do next.\n"
-            f"{normalized_system_prompt}\n\n"
             f"Conversation history:\n{history_block}\n\n"
             f"Retrieved customer insight memory:\n{cases_block}\n\n"
             f"Retrieved static docs:\n{docs_block}\n\n"
@@ -496,6 +528,62 @@ class RAGEngine:
                 capped += "."
         return capped or text
 
+    def _apply_policy_retrieval_profile(
+        self,
+        context: Optional[Dict[str, Any]],
+        case_memories: List[Dict[str, Any]],
+        agent_skills: List[Dict[str, Any]],
+        agent_rules: List[Dict[str, Any]],
+        general_kb: List[Dict[str, Any]],
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        stage_aware_enabled = bool(getattr(self.config, "enable_stage_aware_retrieval", False))
+        if isinstance(context, dict) and "enable_stage_aware_retrieval" in context:
+            stage_aware_enabled = bool(context.get("enable_stage_aware_retrieval"))
+        if not isinstance(context, dict) or not stage_aware_enabled:
+            return case_memories, agent_skills, agent_rules, general_kb
+
+        profile = str(context.get("retrieval_profile") or "").strip().lower()
+        if not profile:
+            return case_memories, agent_skills, agent_rules, general_kb
+
+        if profile == "sales_objection":
+            return case_memories[:6], agent_skills[:4], agent_rules[:4], general_kb[:2]
+        if profile == "sales_close":
+            return case_memories[:3], agent_skills[:5], agent_rules[:5], general_kb[:3]
+        if profile == "clinical_red_flag":
+            return case_memories[:5], agent_skills[:2], agent_rules[:6], general_kb[:4]
+        if profile == "clinical_summary":
+            return case_memories[:6], agent_skills[:2], agent_rules[:3], general_kb[:2]
+        if profile == "clinical_intake":
+            return case_memories[:5], agent_skills[:4], agent_rules[:4], general_kb[:3]
+        if profile == "sales_discovery":
+            return case_memories[:4], agent_skills[:4], agent_rules[:3], general_kb[:4]
+        return case_memories, agent_skills, agent_rules, general_kb
+
+    @staticmethod
+    def _build_policy_rule_texts(context: Optional[Dict[str, Any]]) -> List[str]:
+        if not isinstance(context, dict) or not context.get("policy_mode"):
+            return []
+
+        rules = [
+            f"policy_mode={context.get('policy_mode', 'sales')}",
+            f"conversation_stage={context.get('conversation_stage', 'general')}",
+            f"response_act={context.get('response_act', 'answer')}",
+        ]
+        hypotheses = context.get("hypotheses") or []
+        if hypotheses:
+            rules.append("hypotheses=" + " | ".join(str(item)[:120] for item in hypotheses[:3]))
+        missing_slots = context.get("missing_slots") or []
+        if missing_slots:
+            rules.append("missing_slots=" + " | ".join(str(item)[:80] for item in missing_slots[:4]))
+        policy_metadata = context.get("policy_metadata") or {}
+        if isinstance(policy_metadata, dict):
+            if policy_metadata.get("active_listening_summary"):
+                rules.append("active_listening_summary=" + str(policy_metadata.get("active_listening_summary"))[:240])
+            if policy_metadata.get("next_question_focus"):
+                rules.append("next_question_focus=" + str(policy_metadata.get("next_question_focus"))[:120])
+        return rules
+
     async def _enforce_response_language(self, answer: str, language: Optional[str]) -> str:
         text = (answer or "").strip()
         if not text:
@@ -531,6 +619,154 @@ class RAGEngine:
         except Exception as e:
             logger.error(f"German response enforcement failed: {e}")
         return text
+
+    def _compose_policy_answer(self, answer: str, context: Optional[Dict[str, Any]]) -> str:
+        text = (answer or "").strip()
+        if not text or not isinstance(context, dict):
+            return text
+
+        policy_mode = str(context.get("policy_mode") or "").strip().lower()
+        response_act = str(context.get("response_act") or "").strip().lower()
+        micro_reasoning_enabled = bool(getattr(self.config, "enable_micro_reasoning", False))
+        if "enable_micro_reasoning" in context:
+            micro_reasoning_enabled = bool(context.get("enable_micro_reasoning"))
+        policy_metadata = context.get("policy_metadata") or {}
+        next_question_focus = ""
+        if isinstance(policy_metadata, dict):
+            next_question_focus = str(policy_metadata.get("next_question_focus") or "").strip().lower()
+
+        if policy_mode == "clinical" and response_act in {"probe", "escalate"}:
+            # Ensure the answer contains a question — append one from the policy focus if missing
+            if "?" not in text:
+                follow_up_question = self._build_clinical_follow_up_question(next_question_focus)
+                if follow_up_question:
+                    text = f"{text} {follow_up_question}".strip()
+            # If there is an active listening summary but the response is just a bare question,
+            # prepend a brief reflection to match the "reflect then ask" format
+            active_summary = ""
+            if isinstance(policy_metadata, dict):
+                active_summary = str(policy_metadata.get("active_listening_summary") or "").strip()
+            bare_question_starters = (
+                "Haben", "Wie", "Wann", "Wo", "Was", "Gibt", "Können", "Wer",
+                "Warum", "Welche", "Welchen", "Welches", "Würden", "Ist", "Do ", "What ", "Who ",
+            )
+            if active_summary and text.lstrip().startswith(bare_question_starters):
+                # Bare question without reflection — extract problem area and build reflection
+                problem_area = active_summary.split(";")[0].replace("brand problem area:", "").strip()
+                if problem_area:
+                    text = f"Das klingt nach einem Thema rund um {problem_area}. {text}".strip()
+        if response_act in {"confirm", "probe", "clarify"}:
+            max_chars = 320 if micro_reasoning_enabled else 360
+            return RAGEngine._cap_answer_sentences(text, max_sentences=2, max_chars=max_chars)
+        if response_act == "escalate":
+            return RAGEngine._cap_answer_sentences(text, max_sentences=2, max_chars=300)
+        if response_act == "summarize":
+            max_chars = 360 if micro_reasoning_enabled else 420
+            return RAGEngine._cap_answer_sentences(text, max_sentences=3, max_chars=max_chars)
+        return text
+
+    @staticmethod
+    def _build_clinical_follow_up_question(next_question_focus: str) -> str:
+        """Build the next strategic probing question for brand consulting intake.
+
+        Uses a structured dx-based approach: the policy layer identifies the most
+        likely brand problem hypothesis and the most discriminating missing fact.
+        This method maps that to a natural German spoken question.
+        """
+        # Slot-based fallbacks (when no differential is available)
+        _slot_map = {
+            "red_flag_screen": "Gibt es gerade einen konkreten Anlass — eine Präsentation, einen Launch oder eine Deadline?",
+            "brand_trigger": "Was hat dieses Gespräch jetzt ausgelöst — gibt es einen konkreten Anlass?",
+            "timeline": "Haben Sie eine bestimmte Deadline oder ein Zeitfenster im Kopf?",
+            "urgency_level": "Wie dringend ist das für Sie gerade — gibt es einen festen Termin?",
+            "context_trigger": "Was passiert gerade bei Ihnen — Wachstum, Neuausrichtung oder etwas anderes?",
+            "existing_assets": "Was haben Sie im Bereich Marke oder Kommunikation schon?",
+            "clarify_pattern": "Was genau meinen Sie damit — können Sie das kurz konkretisieren?",
+            "summary": "Gibt es noch einen Aspekt, der Ihnen besonders wichtig ist?",
+        }
+
+        # Brand-strategy dx-driven question map
+        # Key format: {dx}:{feature}
+        _dx_question_map = {
+            # Brand positioning — unclear USP (danger 9)
+            "unclear_USP:no_audience_defined": "Wer ist Ihre konkrete Zielgruppe — wen wollen Sie mit der Marke ansprechen?",
+            "unclear_USP:generic_claims": "Was würden Sie sagen, macht Ihr Angebot für genau diese Zielgruppe einzigartig?",
+            "unclear_USP:everyone_is_target": "Wenn Sie nur einen einzigen Kundentyp beschreiben könnten — wer wäre das?",
+            "unclear_USP:low_conversion": "Woran scheitern Interessenten meistens — was bremst die Entscheidung?",
+            # Brand positioning — wrong target audience (danger 8)
+            "wrong_target_audience:message_resonates_nobody": "Bei wem zieht Ihre aktuelle Kommunikation am stärksten — und bei wem gar nicht?",
+            "wrong_target_audience:high_churn": "Welche Kunden bleiben langfristig, und welche gehen schnell wieder?",
+            "wrong_target_audience:wrong_inquiries": "Was für Anfragen kommen rein — passen die zu dem, was Sie eigentlich anbieten?",
+            # Brand positioning — me-too (danger 7)
+            "me_too_positioning:competitors_say_same_thing": "Was sagen Ihre drei direkten Wettbewerber über sich — klingt das ähnlich wie bei Ihnen?",
+            "me_too_positioning:price_only_differentiator": "Wenn Preis keine Rolle spielen würde — warum würde jemand trotzdem zu Ihnen kommen?",
+            "me_too_positioning:commodity_market": "Was können Sie, das andere in Ihrem Markt nicht können oder nicht so gut?",
+            # Brand messaging — inconsistent voice (danger 8)
+            "inconsistent_voice:multiple_authors": "Wer schreibt aktuell Ihre Texte — gibt es eine Person, die den Ton definiert?",
+            "inconsistent_voice:no_guidelines": "Haben Sie schriftlich festgehalten, wie Ihre Marke kommuniziert und klingt?",
+            "inconsistent_voice:different_tone_everywhere": "Klingt Ihre Website anders als Ihre Social-Media-Posts oder Ihre Angebote?",
+            # Brand messaging — too complex (danger 7)
+            "too_complex_message:confused_customer_responses": "Wenn jemand Ihre Website liest — versteht er sofort, was Sie anbieten und für wen?",
+            "too_complex_message:long_explanation_needed": "Wie lange brauchen Sie normalerweise, um jemandem zu erklären, was Sie machen?",
+            # Brand messaging — too generic (danger 6)
+            "too_generic_message:no_emotional_hook": "Was ist der eine Satz, den Ihre Kunden über Sie sagen, wenn sie Sie weiterempfehlen?",
+            "too_generic_message:feature_list_only": "Welche Emotion oder welches Ergebnis steht im Mittelpunkt Ihrer Kommunikation?",
+            # Brand identity — no coherent identity (danger 8)
+            "no_coherent_identity:no_guidelines": "Haben Sie eine Brandguide oder festgelegte Designvorgaben — oder entscheidet das jedes Mal neu jemand?",
+            "no_coherent_identity:inconsistent_across_channels": "Sieht Ihre Marke auf der Website, in Social Media und in Dokumenten gleich aus?",
+            "no_coherent_identity:multiple_logos": "Wie viele verschiedene Logo-Varianten oder Versionen sind gerade im Einsatz?",
+            # Brand identity — misaligned with positioning (danger 7)
+            "identity_misaligned_with_positioning:premium_brand_with_cheap_design": "Wie soll Ihre Marke wirken — eher hochwertig, zugänglich, modern oder etwas anderes?",
+            # Brand identity — outdated (danger 5)
+            "outdated_identity:created_over_five_years_ago": "Wann wurde die aktuelle Markenidentität das letzte Mal überarbeitet?",
+            "outdated_identity:competitors_look_more_modern": "Haben Sie das Gefühl, dass Ihre Wettbewerber visuell moderner oder professioneller wirken?",
+            # Brand awareness — wrong channels (danger 8)
+            "wrong_channels:audience_active_elsewhere": "Wo sind Ihre Kunden wirklich aktiv — und sind Sie dort auch präsent?",
+            "wrong_channels:low_engagement_all_channels": "Auf welchem Kanal haben Sie die stärkste Resonanz — und auf welchem kaum?",
+            # Brand awareness — inconsistent presence (danger 7)
+            "inconsistent_presence:no_content_plan": "Gibt es einen festen Rhythmus für Ihre Kommunikation — oder geht es eher nach Gefühl?",
+            "inconsistent_presence:sporadic_posts": "Wie regelmäßig kommuniziert Ihre Marke gerade nach außen?",
+            # Brand trust — no proof of expertise (danger 9)
+            "no_proof_of_expertise:no_case_studies": "Haben Sie konkrete Beispiele oder Referenzen, die zeigen, was Sie leisten?",
+            "no_proof_of_expertise:generic_claims_only": "Was würde ein potenzieller Kunde auf Ihrer Website finden, das Vertrauen aufbaut?",
+            # Brand trust — negative reputation (danger 8)
+            "negative_online_reputation:bad_reviews_visible": "Wie ist Ihr aktuelles Bild online — gibt es Bewertungen oder Feedback, das Sie beschäftigt?",
+            # Brand trust — authority mismatch (danger 6)
+            "authority_mismatch:positioned_as_expert_but_shallow_content": "Welche Inhalte teilen Sie, die Ihre Expertise konkret zeigen?",
+            # Growth strategy — funnel disconnected (danger 8)
+            "brand_funnel_disconnected:ads_not_matching_brand": "Fühlt sich Ihre Werbung und Ihre Marke wie ein kohärentes Bild an — oder klaffen die auseinander?",
+            # Growth strategy — unclear value proposition (danger 8)
+            "value_proposition_unclear_to_buyer:long_sales_cycle": "An welcher Stelle im Gespräch verlieren Sie Interessenten meistens?",
+            "value_proposition_unclear_to_buyer:frequent_price_objections": "Was ist der häufigste Einwand, den Sie von Interessenten hören?",
+            # Growth strategy — wrong segment (danger 7)
+            "wrong_segment_targeted:lots_of_leads_no_conversion": "Was passiert mit den Anfragen, die reinkommen — konvertieren die oder nicht?",
+            # Competitive pressure — undifferentiated (danger 9)
+            "undifferentiated_in_crowded_market:no_clear_reason_to_choose_us": "Warum sollte jemand Sie gegenüber einem direkten Wettbewerber wählen — was ist der entscheidende Unterschied?",
+            "undifferentiated_in_crowded_market:price_only_differentiator": "Haben Sie schon mal einen Auftrag verloren, weil jemand günstiger war — wie oft passiert das?",
+            # Competitive pressure — being copied (danger 7)
+            "being_copied:competitors_copying_positioning": "Haben Sie das Gefühl, dass Wettbewerber Ihre Positionierung oder Sprache übernehmen?",
+            # General probes
+            "general:existing_assets": "Was haben Sie im Bereich Marke schon — Logo, Texte, Richtlinien oder anderes?",
+        }
+
+        focus = (next_question_focus or "").strip()
+
+        # Handle structured keys: dx_confirm:DX:FEATURE, dx_discriminate:AvB:FEATURE, dx_probe:DX:FEATURE
+        if ":" in focus:
+            parts = focus.split(":", 2)
+            if len(parts) >= 3:
+                prefix, dx_part, feature = parts[0], parts[1], parts[2]
+                if prefix == "dx_discriminate" and "vs" in dx_part:
+                    top_dx = dx_part.split("vs")[0]
+                    lookup = f"{top_dx}:{feature}"
+                else:
+                    lookup = f"{dx_part}:{feature}"
+                if lookup in _dx_question_map:
+                    return _dx_question_map[lookup]
+                if feature in _slot_map:
+                    return _slot_map[feature]
+
+        return _slot_map.get(focus, "Was ist dabei der wichtigste Aspekt, den Sie angehen möchten?")
 
     def _resolve_context_architect(self, tenant_id: Optional[str]):
         """
@@ -597,6 +833,76 @@ class RAGEngine:
         self._tenant_architect_cache[tenant] = architect_cls
         return architect_cls
 
+    def _fast_local_mode_enabled(self) -> bool:
+        env_value = os.getenv("RAG_FAST_LOCAL_MODE", "").strip().lower()
+        if env_value in {"1", "true", "yes", "on"}:
+            return True
+        llm_model = str(getattr(self.config, "llm_model", "") or "").strip().lower()
+        return llm_model in {"openai/gpt-oss-20b", "openai/gpt-oss-8b", "llama-3.1-8b-instant"}
+
+    async def warmup(self, tenant_ids: Optional[List[str]] = None) -> None:
+        """
+        Warm up tenant-specific context architecture and the LLM provider.
+
+        This is intentionally tiny: it primes the first-turn code path without
+        affecting user-visible output.
+        """
+        if not getattr(self.config, "enable_startup_warmup", True):
+            return
+
+        warmup_tenants: List[str] = []
+        for tenant in (tenant_ids or []):
+            normalized = self._sanitize_tenant(tenant)
+            if normalized and normalized not in warmup_tenants:
+                warmup_tenants.append(normalized)
+
+        if not warmup_tenants:
+            default_tenant = self._sanitize_tenant(os.getenv("TENANT_ID", "tara"))
+            warmup_tenants = [default_tenant]
+
+        try:
+            await asyncio.wait_for(
+                self._warmup_impl(warmup_tenants),
+                timeout=max(1.0, float(getattr(self.config, "startup_warmup_timeout", 8.0) or 8.0)),
+            )
+            logger.info(f"✅ RAG warmup completed for tenants={','.join(warmup_tenants)}")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ RAG warmup timed out")
+        except Exception as exc:
+            logger.warning(f"⚠️ RAG warmup skipped or failed: {exc}")
+
+    async def _warmup_impl(self, warmup_tenants: List[str]) -> None:
+        for tenant in warmup_tenants:
+            try:
+                self._prime_prompt_path(tenant)
+            except Exception as exc:
+                logger.debug(f"Warmup prompt cache skipped for tenant={tenant}: {exc}")
+
+        if self.embeddings:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: self.embeddings.embed_query("startup warmup"))
+
+        if self.llm is None:
+            return
+
+        warmup_prompt = (
+            "<zone_a_system_configuration>\n"
+            "You are TARA. Reply with exactly OK.\n"
+            "</zone_a_system_configuration>\n"
+            "User: startup warmup"
+        )
+        result = self.llm.generate(
+            prompt=warmup_prompt,
+            stream=False,
+            temperature=0.0,
+            max_tokens=4,
+            include_reasoning=False,
+            reasoning_effort="low",
+            model=self.config.llm_model,
+        )
+        if asyncio.iscoroutine(result):
+            await result
+
     async def _do_local_rag(self, query: str, context: Dict, boost_categories: list, max_chars: int, precomputed_embedding: Optional[np.ndarray] = None) -> tuple:
         """Deprecated: Local FARSS index retrieval removed. Always returns empty docs."""
         return [], {"embedding_ms": 0, "search_ms": 0}
@@ -615,8 +921,19 @@ class RAGEngine:
         start_time = time.time()
         timing = {}
         dashboard_mode = isinstance(context, dict) and context.get("surface") == "hivemind_dashboard"
-        unified_limit = 10 if dashboard_mode else 8
+        fast_local_mode = self._fast_local_mode_enabled()
+        unified_limit = 10 if dashboard_mode else (4 if fast_local_mode else 8)
         browse_mode = dashboard_mode and self._is_hivemind_browse_query(query)
+        policy_mode = str((context or {}).get("policy_mode") or self.config.policy_mode_default or "").strip().lower()
+        conversation_stage = str((context or {}).get("conversation_stage") or "").strip().lower()
+        skip_heavy_retrieval = fast_local_mode and policy_mode in {"sales", "clinical"} and conversation_stage in {
+            "sales.discovery",
+            "sales.qualify",
+            "clinical.intake",
+            "clinical.triage",
+        }
+        if skip_heavy_retrieval:
+            logger.info(f"⚡ Fast local policy mode: skipping embedding/Qdrant retrieval for stage={conversation_stage}")
         
         # 1. High-Speed Detection & Translation Layer
         query_english = query
@@ -634,7 +951,10 @@ class RAGEngine:
                 original_language = 'telugu'
         
         # Async Translation if needed (skip for obvious English)
-        if original_language in ['de', 'german', 'deutsch'] and self.groq_client:
+        # Skip translation for sales/clinical modes: paraphrase-multilingual-MiniLM-L12-v2 handles German natively,
+        # so the Groq round-trip (~200ms) is pure latency overhead for those modes.
+        _translation_needed = policy_mode not in {"sales", "clinical"}
+        if original_language in ['de', 'german', 'deutsch'] and self.groq_client and not fast_local_mode and _translation_needed:
             try:
                 # Only translate if it doesn't look like English
                 if not any(e in query.lower() for e in ['what', 'how', 'who', 'pricing', 'install', 'tara']):
@@ -674,7 +994,7 @@ class RAGEngine:
         history_context = str(history_context) if history_context else ""
         
         # SLIDING WINDOW: Limit context
-        MAX_HISTORY_CHARS = 4000
+        MAX_HISTORY_CHARS = 2000 if fast_local_mode else 4000
         if len(history_context) > MAX_HISTORY_CHARS:
             cutoff = len(history_context) - MAX_HISTORY_CHARS
             trunc_index = history_context.find('\n', cutoff)
@@ -688,7 +1008,7 @@ class RAGEngine:
         
         # 2.6 Contextual Query Rewriting (The "Follow-up" Fix)
         # If the user asks "what about that?", we MUST rewrite it using history before retrieval.
-        if is_context_dependent and self.groq_client and history_context:
+        if is_context_dependent and self.groq_client and history_context and not fast_local_mode:
             try:
                 rw_start = time.time()
                 # Use a very fast model for rewriting
@@ -724,7 +1044,7 @@ class RAGEngine:
         
         # PRE-COMPUTE EMBEDDING ONCE (Optimization: save CPU and prevent redundant work)
         shared_vector = None
-        if self.embeddings and (self.config.enable_local_retrieval or (self.qdrant and self.qdrant.enabled)):
+        if not skip_heavy_retrieval and self.embeddings and (self.config.enable_local_retrieval or (self.qdrant and self.qdrant.enabled)):
             v_start = time.time()
             v_list = self.embeddings.embed_query(query_english)
             shared_vector = np.array(v_list, dtype=np.float32).reshape(1, -1)
@@ -789,7 +1109,7 @@ class RAGEngine:
                                     score_threshold=0.15,
                                     query_text=query
                                 ),
-                                timeout=2.5 # Allow more time for hybrid search on remote cloud
+                                timeout=1.0 if not dashboard_mode else 2.5  # Tight timeout for chat; dashboard can afford more
                             )
                         
                         search_time = (time.time() - unified_start) * 1000
@@ -985,12 +1305,115 @@ class RAGEngine:
             "history_context": history_context
         }
 
+    @staticmethod
+    def _normalize_recent_turns(raw_turns: Optional[Union[str, List[Dict[str, Any]]]]) -> List[Dict[str, Any]]:
+        if not raw_turns:
+            return []
+        if isinstance(raw_turns, list):
+            normalized: List[Dict[str, Any]] = []
+            for turn in raw_turns:
+                if not isinstance(turn, dict):
+                    continue
+                role = str(turn.get("role") or "user").strip()
+                content = str(turn.get("content") or turn.get("text") or "").strip()
+                if not content:
+                    continue
+                normalized.append({"role": role, "content": content})
+            return normalized
+        text = str(raw_turns).strip()
+        return [{"role": "user", "content": text}] if text else []
+
+    @classmethod
+    def _format_recent_turns_for_summary(cls, recent_turns: Optional[List[Dict[str, Any]]]) -> str:
+        turns = cls._normalize_recent_turns(recent_turns)
+        if not turns:
+            return ""
+        lines: List[str] = []
+        for turn in turns:
+            role = "User" if turn.get("role") == "user" else "Assistant"
+            lines.append(f"{role}: {str(turn.get('content') or '').strip()}")
+        return "\n".join(lines)
+
+    @classmethod
+    def _build_retrieval_history_context(
+        cls,
+        *,
+        session_summary_window: Optional[str],
+        recent_turns: Optional[List[Dict[str, Any]]],
+        history_context: Optional[Union[str, List[Dict[str, Any]]]],
+    ) -> str:
+        parts: List[str] = []
+        summary = str(session_summary_window or "").strip()
+        if summary:
+            parts.append(f"Session Summary:\n{summary}")
+        recent = cls._format_recent_turns_for_summary(recent_turns)
+        if recent:
+            parts.append(f"Recent Turns:\n{recent}")
+        if not parts and history_context:
+            if isinstance(history_context, list):
+                fallback = cls._format_recent_turns_for_summary(history_context)
+            else:
+                fallback = str(history_context).strip()
+            if fallback:
+                parts.append(fallback)
+        return "\n\n".join(parts).strip()
+
+    async def generate_session_summary_window(
+        self,
+        *,
+        previous_summary: str,
+        user_text: str,
+        assistant_text: str,
+        language: str,
+        tenant_id: str,
+    ) -> str:
+        lang = "en" if str(language).lower().startswith("en") else "de"
+        system_prompt = (
+            "Update a compact layered session summary.\n"
+            "Use plain text only, no JSON.\n"
+            "Keep the headings in this order: Current Context, Entity Summary, Confirmed Facts And Values, Goals And Constraints, Unresolved Questions, Latest Delta.\n"
+            "Preserve names, brand names, companies, dates, numbers, budgets, URLs, preferences, constraints, and unresolved intent.\n"
+            "Omit filler, repeated greetings, uncertainty, and transcript noise.\n"
+            "Keep older stable facts in the upper sections and put the newest change only in Latest Delta.\n"
+            "Make the summary small enough for prompt reuse and future policy extraction.\n"
+        )
+        if lang == "de":
+            system_prompt += "Write in German unless the session is explicitly English-first.\n"
+        else:
+            system_prompt += "Write in English.\n"
+
+        user_prompt = (
+            f"Tenant: {tenant_id}\n\n"
+            f"Previous Summary:\n{previous_summary.strip() or '[none]'}\n\n"
+            f"Latest User Turn:\n{user_text.strip()}\n\n"
+            f"Latest Assistant Turn:\n{assistant_text.strip()}\n\n"
+            "Rewrite the full summary window now."
+        )
+
+        result = self.llm.generate(
+            prompt=f"{system_prompt}\n\n{user_prompt}",
+            stream=False,
+            temperature=0.2,
+            max_tokens=260,
+            include_reasoning=False,
+            reasoning_effort="low",
+            model="openai/gpt-oss-20b",
+        )
+        if asyncio.iscoroutine(result):
+            summary = await result
+        else:
+            summary = str(result)
+        return str(summary or previous_summary or "").strip()
+
     async def process_query(
         self,
         query: str,
         context: Optional[Dict[str, Any]] = None,
         streaming_callback: Optional[Callable[[str, bool], None]] = None,
         history_context: Optional[str] = None,
+        session_summary_window: Optional[str] = None,
+        session_summary_revision: int = 0,
+        recent_turns: Optional[List[Dict[str, Any]]] = None,
         tenant_id: str = "tara",
         force_non_stream: bool = False,
         generation_config: Optional[Dict[str, Any]] = None,
@@ -1028,9 +1451,18 @@ class RAGEngine:
                 "llm_usage": {},
                 "metadata": {"method": "error", "reason": "llm_not_initialized"},
             }
+
+        # Keep the first request for each tenant on the compact prompt path by
+        # resolving and priming the architect before retrieval/generation work.
+        self._prime_prompt_path(tenant_id)
         
         # 1-3. Retrieve Context
-        retrieval_data = await self.retrieve_context(query, context, history_context, tenant_id=tenant_id)
+        retrieval_history = self._build_retrieval_history_context(
+            session_summary_window=session_summary_window,
+            recent_turns=recent_turns,
+            history_context=history_context,
+        )
+        retrieval_data = await self.retrieve_context(query, context, retrieval_history, tenant_id=tenant_id)
         
         query_english = retrieval_data['query_english']
         original_language = retrieval_data['original_language']
@@ -1041,12 +1473,15 @@ class RAGEngine:
         agent_rules = retrieval_data.get('agent_rules', [])
         general_kb = retrieval_data.get('general_kb', [])
         case_memories = retrieval_data.get('case_memories', [])
+        case_memories, agent_skills, agent_rules, general_kb = self._apply_policy_retrieval_profile(
+            context, case_memories, agent_skills, agent_rules, general_kb
+        )
         timing = retrieval_data['timing']
         fast_path_type = retrieval_data['fast_path_type']
         
         # 3.5 Language Context Strategy
         # Detect explicit intent to switch response language
-        combined_context_text = (str(history_context) + " " + query).lower()
+        combined_context_text = (str(retrieval_history) + " " + query).lower()
         if any(x in combined_context_text for x in ["speak in telugu", "speak telugu", "తెలుగులో మాట్లాడు", "telugu"]):
             logger.info("🌐 User requested Telugu response (explicit intent detected)")
             original_language = "telugu"
@@ -1073,7 +1508,17 @@ class RAGEngine:
             )
         if web_results:
             hive_mind_state["insights"]["live_web_data"] = str(web_results)
-        
+        policy_snapshot = {
+            "policy_mode": (context.get("policy_mode") if isinstance(context, dict) else None) or self.config.policy_mode_default,
+            "conversation_stage": context.get("conversation_stage") if isinstance(context, dict) else None,
+            "response_act": context.get("response_act") if isinstance(context, dict) else None,
+            "retrieval_profile": context.get("retrieval_profile") if isinstance(context, dict) else None,
+            "hypotheses": (context.get("hypotheses") or []) if isinstance(context, dict) else [],
+            "missing_slots": (context.get("missing_slots") or []) if isinstance(context, dict) else [],
+            "policy_metadata": (context.get("policy_metadata") or {}) if isinstance(context, dict) else {},
+        }
+        hive_mind_state["variables"]["policy"] = policy_snapshot
+
         # User profile for personalization
         user_profile = {
             "language": original_language,
@@ -1089,21 +1534,22 @@ class RAGEngine:
                 user_profile["tenant_id"] = str(context.get("tenant_id"))
             if context.get("user_id"):
                 user_id = str(context.get("user_id"))
+            if context.get("policy_mode"):
+                user_profile["policy_mode"] = str(context.get("policy_mode"))
+            if context.get("conversation_stage"):
+                user_profile["conversation_stage"] = str(context.get("conversation_stage"))
+            if context.get("response_act"):
+                user_profile["response_act"] = str(context.get("response_act"))
 
         # Build history list
-        history_list = []
-        if history_context and isinstance(history_context, str) and history_context.strip():
-            # Naive parsing of history context string into list of turns if needed
-            # For now, we'll wrap the whole block as a single turn if it's unstructured
-            history_list.append({"role": "user", "content": history_context})
-        elif isinstance(history_context, list):
-            history_list = history_context
+        history_list = self._normalize_recent_turns(recent_turns or history_context)
 
         # 4. Context Architecture (Zoned XML Assembly)
         # Using the new ContextArchitect for <500ms TTFT and robust context boundaries
         # Zone D: Dynamic skills/rules retrieved from Qdrant HiveMind
         skill_texts = [s.get("text", "") for s in agent_skills if s.get("text")]
         rule_texts = [r.get("text", "") for r in agent_rules if r.get("text")]
+        rule_texts.extend(self._build_policy_rule_texts(context))
 
         if isinstance(context, dict) and context.get("surface") == "hivemind_dashboard":
             active_llm_model = (getattr(self.config, "hivemind_llm_model", None) or getattr(self.config, "llm_model", "")).strip()
@@ -1122,26 +1568,35 @@ class RAGEngine:
         else:
             active_llm_model = str(getattr(self.config, "llm_model", "")).strip()
             architect_cls = self._resolve_context_architect(tenant_id)
-            prompt = architect_cls.assemble_prompt(
-                query=query_english,
-                raw_query=query,
-                retrieved_docs=relevant_docs,
-                history=history_list,
-                hive_mind=hive_mind_state,
-                user_profile=user_profile,
-                agent_skills=skill_texts,
-                agent_rules=rule_texts,
-                interrupted_text=interrupted_text,
-                interruption_transcripts=interruption_transcripts,
-                interruption_type=interruption_type,
-                user_id=user_id,
-            )
+            architect_kwargs = {
+                "query": query_english,
+                "raw_query": query,
+                "retrieved_docs": relevant_docs,
+                "history": history_list,
+                "hive_mind": hive_mind_state,
+                "user_profile": user_profile,
+                "agent_skills": skill_texts,
+                "agent_rules": rule_texts,
+                "interrupted_text": interrupted_text,
+                "interruption_transcripts": interruption_transcripts,
+                "interruption_type": interruption_type,
+                "user_id": user_id,
+            }
+            try:
+                signature = inspect.signature(architect_cls.assemble_prompt)
+                if "session_summary_window" in signature.parameters:
+                    architect_kwargs["session_summary_window"] = session_summary_window
+            except Exception:
+                pass
+            prompt = architect_cls.assemble_prompt(**architect_kwargs)
         prompt = self._apply_prompt_budget(prompt, active_llm_model)
 
         # 4.5 Generation controls (endpoint-tunable)
         gen_cfg = generation_config or {}
         generation_temperature = float(gen_cfg.get("temperature", 0.65))
         generation_max_tokens = int(gen_cfg.get("max_tokens", 400))
+        if self._fast_local_mode_enabled():
+            generation_max_tokens = min(generation_max_tokens, 220)
         generation_stop = gen_cfg.get("stop")
         if isinstance(generation_stop, str):
             generation_stop = [generation_stop]
@@ -1183,8 +1638,9 @@ class RAGEngine:
                     if first_chunk_at is None: first_chunk_at = time.time()
                     text = chunk if isinstance(chunk, str) else getattr(chunk, 'text', str(chunk))
                     accumulated += text
-                    if streaming_callback: streaming_callback(text, False)
-            
+                    if streaming_callback and text:
+                        streaming_callback(text, False)
+
             # Handle Sync Generator (Gemini/OpenAI Streaming)
             elif hasattr(result, '__iter__'):
                 streamed_live = True
@@ -1195,7 +1651,8 @@ class RAGEngine:
                     if first_chunk_at is None: first_chunk_at = time.time()
                     text = chunk if isinstance(chunk, str) else getattr(chunk, 'text', str(chunk))
                     accumulated += text
-                    if streaming_callback: streaming_callback(text, False)
+                    if streaming_callback and text:
+                        streaming_callback(text, False)
             
             # Handle Coroutine (Non-streaming Async)
             elif asyncio.iscoroutine(result):
@@ -1268,6 +1725,7 @@ class RAGEngine:
         answer = re.sub(r'</turn>.*', '', answer, flags=re.DOTALL).strip()
         answer = re.sub(r'</ctxt>.*', '', answer, flags=re.DOTALL).strip()
         answer = await self._enforce_response_language(answer, original_language)
+        answer = self._compose_policy_answer(answer, context)
         answer = self._cap_answer_sentences(answer, max_sentences=3, max_chars=420)
 
         if streaming_callback and not streamed_live:
@@ -1310,6 +1768,7 @@ class RAGEngine:
                 'active_skills': len(skill_texts),
                 'active_rules': len(rule_texts),
                 'model': active_llm_model,
+                'session_summary_revision': session_summary_revision,
                 'llm_usage': llm_usage,
                 'raw_chunks': [
                    {"id": d.get("id", "unknown"), "text": d.get("text", ""), "score": d.get("score", 0), "doc_type": d.get("doc_type", "Skill/Rule")} 
