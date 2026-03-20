@@ -40,14 +40,17 @@ def assemble_tokens(tokens: list[str]) -> str:
     - If the previous token did NOT end with whitespace AND the next token
       does NOT start with whitespace, insert a single space.
     - Punctuation tokens (starting with .,;:!?) attach to the left — no space.
+    - Hyphen at end of previous token (compound) — next token attaches without space.
     """
     parts: list[str] = []
     for token in tokens:
         if parts:
             prev_ends_space = parts[-1][-1:].isspace()
+            prev_ends_hyphen = parts[-1][-1:] == "-"
             curr_starts_space = token[:1].isspace()
             curr_is_punct = token[:1] in ".,;:!?"
-            if not prev_ends_space and not curr_starts_space and not curr_is_punct:
+            # Don't add space if: prev ends with hyphen (compound), or space not needed per rules
+            if not prev_ends_space and not curr_starts_space and not curr_is_punct and not prev_ends_hyphen:
                 parts.append(" ")
         parts.append(token)
     return "".join(parts)
@@ -200,13 +203,14 @@ class TestPipelineTokenSpacing:
 
             complete_answer_parts: list[str] = []
             for t in full_answer:
-                if (
-                    complete_answer_parts
-                    and t
-                    and not complete_answer_parts[-1][-1:].isspace()
-                    and not t[:1].isspace()
-                ):
-                    complete_answer_parts.append(" ")
+                if complete_answer_parts and t:
+                    prev_ends_space = complete_answer_parts[-1][-1:].isspace()
+                    curr_starts_space = t[:1].isspace()
+                    curr_is_punct = t[:1] in ".,;:!?"
+                    prev_ends_hyphen = complete_answer_parts[-1][-1:] == "-"
+                    # Don't add space if: prev ends with hyphen (compound), or space not needed per rules
+                    if not prev_ends_space and not curr_starts_space and not curr_is_punct and not prev_ends_hyphen:
+                        complete_answer_parts.append(" ")
                 complete_answer_parts.append(t)
 
             return "".join(complete_answer_parts)

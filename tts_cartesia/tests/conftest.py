@@ -38,7 +38,10 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_pyfunc_call(pyfuncitem):  # type: ignore[override]
     test_fn = pyfuncitem.obj
     if inspect.iscoroutinefunction(test_fn):
-        asyncio.run(test_fn(**pyfuncitem.funcargs))
+        # Only pass fixtures that the test function actually accepts
+        sig = inspect.signature(test_fn)
+        accepted_args = {k: v for k, v in pyfuncitem.funcargs.items() if k in sig.parameters}
+        asyncio.run(test_fn(**accepted_args))
         return True
     return None
 

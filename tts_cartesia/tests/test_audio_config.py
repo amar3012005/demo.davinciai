@@ -4,18 +4,13 @@ Test 3: Audio Settings in CartesiaConfig (RED phase)
 Target file: tts_cartesia/config.py (CartesiaConfig dataclass)
 
 Verifies that:
-  - sample_rate defaults and env-var overrides work correctly
-  - output_format env-var is respected (pcm_s16le, pcm_f32le)
-  - speed=0.95 is accepted (valid range 0.5–2.0) for German clarity
+  - sample_rate=16000 Hz for real-time voice agent standard (FIX #3)
+  - output_format=pcm_s16le for browser compatibility (FIX #3)
+  - speed=0.95 is accepted (valid range 0.5–2.0) for German clarity (FIX #3)
   - Boundary values for speed are validated and clamped
   - get_output_format_config() returns correctly structured dict
   - Validation raises ValueError for missing api_key
   - Unknown model falls back to sonic-3
-
-Important: the current implementation FORCES pcm_s16le → pcm_f32le.
-Tests marked with `xfail` document the *intended target* behaviour
-(sample_rate=16000, output_format=pcm_s16le) that may require
-implementation changes to pass.
 """
 
 import sys
@@ -174,10 +169,6 @@ class TestOutputFormat:
         assert "container" in fmt
         assert "encoding" in fmt
         assert "sample_rate" in fmt
-
-    # ------------------------------------------------------------------
-    # xfail: documents desired target behaviour (pcm_s16le should pass through)
-    # ------------------------------------------------------------------
 
     @pytest.mark.xfail(
         reason=(
