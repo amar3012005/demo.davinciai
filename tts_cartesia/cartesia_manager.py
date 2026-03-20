@@ -299,10 +299,14 @@ class CartesiaManager:
         # Use provided context_id or generate new one
         ctx_id = context_id or str(uuid.uuid4())
         
-        # Register dispatcher queue
-        queue = asyncio.Queue()
+        # Register dispatcher queue. Reuse an existing queue if one was
+        # pre-registered for this context so external dispatchers/tests can
+        # attach before stream startup without being overwritten.
         async with conn._dispatch_lock:
-            conn._dispatch_queues[ctx_id] = queue
+            queue = conn._dispatch_queues.get(ctx_id)
+            if queue is None:
+                queue = asyncio.Queue()
+                conn._dispatch_queues[ctx_id] = queue
             
         try:
             # Stats tracking
@@ -424,27 +428,32 @@ class CartesiaManager:
 
                     # CRITICAL: Send final close signal with continue=False
                     # This tells Cartesia "no more input is coming"
+                    logger.info(f"[{ctx_id[:8]}] Sending close signal to Cartesia...")
                     close_message = {
                         "context_id": ctx_id,
                         "transcript": "",  # Empty transcript signals context close
                         "continue": False,  # CRITICAL: False tells Cartesia stream is ending
                     }
                     await conn.send(close_message)
-                    logger.info(f"[{ctx_id[:8]}] Stream closed with continue=False signal")
+                    logger.info(f"[{ctx_id[:8]}] ✅ Stream closed with continue=False signal, waiting for audio chunks...")
 
                 except Exception as e:
-                    logger.error(f"[{ctx_id[:8]}] Send error: {e}")
+                    logger.error(f"[{ctx_id[:8]}] Send error: {e}", exc_info=True)
                 finally:
+                    logger.info(f"[{ctx_id[:8]}] Send complete, setting send_complete event")
                     send_complete.set()
             
             async def receive_audio():
                 """Consume audio chunks from dispatcher queue"""
                 nonlocal first_chunk_time, receive_error
                 try:
+                    logger.info(f"[{ctx_id[:8]}] Starting audio receive loop (waiting for Cartesia chunks)...")
                     while True:
                         try:
                             # Wait for message from dispatcher
+                            logger.debug(f"[{ctx_id[:8]}] Waiting for message from queue...")
                             data = await asyncio.wait_for(queue.get(), timeout=10.0)
+                            logger.debug(f"[{ctx_id[:8]}] Received message type: {data.get('type')}")
                             
                             msg_type = data.get("type")
                             
@@ -486,8 +495,10 @@ class CartesiaManager:
                                 
                         except asyncio.TimeoutError:
                             if send_complete.is_set():
-                                logger.warning(f"[{ctx_id[:8]}] Receive timeout after send complete")
+                                logger.warning(f"[{ctx_id[:8]}] ⏱️ Receive timeout after send complete (chunks received: {stats['chunks_received']})")
                                 break
+                            else:
+                                logger.debug(f"[{ctx_id[:8]}] Timeout waiting for message, but send still in progress...")
                             continue
                             
                 except Exception as e:
