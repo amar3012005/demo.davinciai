@@ -94,14 +94,24 @@ class CartesiaConnection:
         """Background task to keep connection alive and dispatch messages"""
         backoff = self.config.reconnect_base_delay_ms / 1000.0
         max_backoff = 30.0
-        
+
         while True:
             try:
-                ws_url = self.config.get_websocket_url()
+                # Build WebSocket URL without API key in query string
+                ws_url = self.config.websocket_url + f"?cartesia_version={self.config.api_version}"
                 self.state = ConnectionState.CONNECTING
-                
+
+                # Add API key via Authorization header instead of URL parameter
+                extra_headers = {
+                    "Authorization": f"Bearer {self.config.api_key}",
+                    "User-Agent": "CartesiaPythonClient/1.0"
+                }
+
+                logger.debug(f"[{self.connection_id}] Connecting to {self.config.websocket_url}...")
+
                 async with websockets.connect(
                     ws_url,
+                    extra_headers=extra_headers,
                     ping_interval=self.config.ping_interval_seconds,
                     ping_timeout=self.config.ping_timeout_seconds,
                     max_size=10_000_000,
