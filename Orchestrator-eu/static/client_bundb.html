@@ -703,7 +703,7 @@
         // ═══════════════════════════════════════════════════════════════════════
 
         const MIC_SAMPLE_RATE = 16000;
-        const PLAYBACK_SAMPLE_RATE = 44100;
+        const PLAYBACK_SAMPLE_RATE = 16000;
         const URL_PARAMS = new URLSearchParams(window.location.search);
         const DEFAULT_POLICY_MODE = URL_PARAMS.get('mode') === 'clinical' ? 'clinical' : 'sales';
         const DEFAULT_TENANT_ID = URL_PARAMS.get('tenant')
@@ -1007,10 +1007,10 @@
                                 this.hasTtfcForTurn = true;
                                 this.addLog(`TTFC: ${ttfc}ms`, 'success');
                             }
-                            await this.processAudioChunk(chunk, data.sample_rate || 44100, data.format || 'pcm_f32le');
+                            await this.processAudioChunk(chunk, data.sample_rate || 16000, data.format || 'pcm_s16le');
                         } else if (data.data || data.audio) {
                             const audioB64 = data.data || data.audio;
-                            await this.processAudioChunk(audioB64, data.sample_rate || 44100, data.format || 'pcm_f32le');
+                            await this.processAudioChunk(audioB64, data.sample_rate || 16000, data.format || 'pcm_s16le');
                         }
                         break;
 

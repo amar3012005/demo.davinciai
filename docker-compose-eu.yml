@@ -47,6 +47,22 @@ services:
       REDIS_URL: redis://redis-eu:6379/0
       COOLIFY_CONTAINER_NAME: rag-eu
 
+      # LLM config (from Coolify env / .env.eu)
+      LLM_PROVIDER: "${LLM_PROVIDER}"
+      LLM_MODEL: "${LLM_MODEL}"
+      ANALYTICS_MODEL: "${ANALYTICS_MODEL}"
+
+      # Organization
+      ORGANIZATION_NAME: "${ORGANIZATION_NAME}"
+      ORGANIZATION_LOCATION: "${ORGANIZATION_LOCATION}"
+      TENANT_ID: "${TENANT_ID}"
+      LOG_LEVEL: "${LOG_LEVEL}"
+
+      # Qdrant
+      QDRANT_URL: "${QDRANT_URL}"
+      QDRANT_API_KEY: "${QDRANT_API_KEY}"
+      QDRANT_COLLECTION: "${QDRANT_COLLECTION}"
+
       # Feature flags (hardcoded for production stability)
       USE_NEW_DETECTIVE: "false"
       USE_MISSION_BRAIN: "false"
@@ -54,12 +70,22 @@ services:
       USE_HIVE_INTERFACE: "false"
       DAYTONA_RAG_ENABLE_CACHE: "false"
       DAYTONA_RAG_CACHE_TTL: "0"
+      ENABLE_HIVE_MIND: "${ENABLE_HIVE_MIND}"
+      ENABLE_LOCAL_RETRIEVAL: "${ENABLE_LOCAL_RETRIEVAL}"
+      ENABLE_INGESTION_SERVICE: "${ENABLE_INGESTION_SERVICE}"
+      USE_ULTIMATE_TARA: "${USE_ULTIMATE_TARA}"
+      HIVEMIND_IN_VISUAL_COPILOT: "${HIVEMIND_IN_VISUAL_COPILOT}"
       ENABLE_STAGE_AWARE_RETRIEVAL: "${ENABLE_STAGE_AWARE_RETRIEVAL}"
       ENABLE_MICRO_REASONING: "${ENABLE_MICRO_REASONING}"
       POLICY_MODE_DEFAULT: "${POLICY_MODE_DEFAULT}"
+      RAG_FAST_LOCAL_MODE: "${RAG_FAST_LOCAL_MODE}"
+      DAVINCIAI_BACKEND_URL: "${DAVINCIAI_BACKEND_URL}"
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    extra_hosts:
+      - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
+      - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"
     networks:
       eu-stack: null
     restart: unless-stopped
@@ -86,6 +112,31 @@ services:
       sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; uvicorn app:app --host 0.0.0.0 --port 4002'
     environment:
       PYTHONUNBUFFERED: 1
+      LOG_LEVEL: "${LOG_LEVEL}"
+
+      # STT model & language
+      GROQ_WHISPER_MODEL: "${GROQ_WHISPER_MODEL}"
+      GROQ_LANGUAGE: "${GROQ_LANGUAGE}"
+      ENABLE_MICRO_CHUNKING: "${ENABLE_MICRO_CHUNKING}"
+      CHUNK_DURATION_MS: "${CHUNK_DURATION_MS}"
+      OVERLAP_DURATION_MS: "${OVERLAP_DURATION_MS}"
+      CONTEXT_WINDOW_SEGMENTS: "${CONTEXT_WINDOW_SEGMENTS}"
+
+      # VAD tuning
+      VAD_ENERGY_THRESHOLD: "${VAD_ENERGY_THRESHOLD}"
+      SPEECH_START_TRIGGER_MS: "${SPEECH_START_TRIGGER_MS}"
+      MIN_SPEECH_DURATION_MS: "${MIN_SPEECH_DURATION_MS}"
+      MIN_SILENCE_DURATION_MS: "${MIN_SILENCE_DURATION_MS}"
+      PRE_SPEECH_PADDING_MS: "${PRE_SPEECH_PADDING_MS}"
+      FINAL_SILENCE_PADDING_MS: "${FINAL_SILENCE_PADDING_MS}"
+      FINALIZATION_WAIT_MS: "${FINALIZATION_WAIT_MS}"
+
+      # Adaptive endpointing
+      STT_ADAPTIVE_ENDPOINTING: "${STT_ADAPTIVE_ENDPOINTING}"
+      CONTINUATION_SILENCE_BONUS_MS: "${CONTINUATION_SILENCE_BONUS_MS}"
+      CONTINUATION_WORD_THRESHOLD: "${CONTINUATION_WORD_THRESHOLD}"
+      CONTINUATION_MIN_DURATION_MS: "${CONTINUATION_MIN_DURATION_MS}"
+      STT_CALLBACK_TIMEOUT_SECONDS: "${STT_CALLBACK_TIMEOUT_SECONDS}"
 
       # Internal service URLs (hardcoded)
       STT_GROQ_HOST: 0.0.0.0
@@ -130,6 +181,8 @@ services:
       TTS_CARTESIA_HOST: 0.0.0.0
       TTS_CARTESIA_PORT: 4003
       COOLIFY_CONTAINER_NAME: tts-eu
+      LOG_LEVEL: "${LOG_LEVEL}"
+      CONNECTION_POOL_SIZE: "${CONNECTION_POOL_SIZE}"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:4003/health" ]
       interval: 15s
@@ -162,10 +215,26 @@ services:
       REDIS_URL: redis://redis-eu:6379/0
       PORT: "4005"
       COOLIFY_CONTAINER_NAME: visual-copilot-eu
+
+      # LLM config
+      LLM_MODEL: "${LLM_MODEL}"
+      ANALYTICS_MODEL: "${ANALYTICS_MODEL}"
+      MIND_READER_MODEL: "${MIND_READER_MODEL}"
+
+      # Qdrant
+      QDRANT_URL: "${QDRANT_URL}"
+      QDRANT_API_KEY: "${QDRANT_API_KEY}"
+      QDRANT_COLLECTION: "${QDRANT_COLLECTION}"
+
+      LOG_LEVEL: "${LOG_LEVEL}"
+      TENANT_ID: "${TENANT_ID}"
     restart: unless-stopped
     depends_on:
       redis-eu:
         condition: service_healthy
+    extra_hosts:
+      - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
+      - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"
     networks:
       eu-stack: null
     labels:
@@ -203,6 +272,29 @@ services:
       ORCHESTRATOR_WS_URL: "wss://demo.davinciai.eu:8030/ws"
       WIDGET_WS_URL: "wss://demo.davinciai.eu:8030/ws"
 
+      # Organization
+      ORGANIZATION_NAME: "${ORGANIZATION_NAME}"
+      ORGANIZATION_FULL_NAME: "${ORGANIZATION_FULL_NAME}"
+      AGENT_NAME: "${AGENT_NAME}"
+      AGENT_ID: "${AGENT_ID}"
+      TENANT_ID: "${TENANT_ID}"
+
+      # Runtime config
+      STREAM_OUT: "${STREAM_OUT}"
+      SUPPORTED_LANGUAGES: "${SUPPORTED_LANGUAGES}"
+      ENABLE_FILLERS: "${ENABLE_FILLERS}"
+      BARGIN_FEATURE: "${BARGIN_FEATURE}"
+      DEFAULT_INTRO: "${DEFAULT_INTRO}"
+      DEFAULT_INTRO_DE: "${DEFAULT_INTRO_DE}"
+      BUNDB_CARTESIA_PRONUNCIATION_DICT_ID: "${BUNDB_CARTESIA_PRONUNCIATION_DICT_ID}"
+      LOG_LEVEL: "${LOG_LEVEL}"
+
+      # Backend & routing
+      DAVINCIAI_BACKEND_URL: "${DAVINCIAI_BACKEND_URL}"
+      AGENT_HOST_SUFFIX: "${AGENT_HOST_SUFFIX}"
+      GLOBAL_CLIENT_URL: "${GLOBAL_CLIENT_URL}"
+      FORCE_GLOBAL_DOMAIN: "${FORCE_GLOBAL_DOMAIN}"
+
       # Feature flags (hardcoded for production stability)
       USE_ULTIMATE_TARA: "false"
       ENABLE_STRATEGIC_POLICY: "${ENABLE_STRATEGIC_POLICY}"
@@ -210,6 +302,17 @@ services:
       ENABLE_STAGE_AWARE_RETRIEVAL: "${ENABLE_STAGE_AWARE_RETRIEVAL}"
       ENABLE_MICRO_REASONING: "${ENABLE_MICRO_REASONING}"
       POLICY_MODE_DEFAULT: "${POLICY_MODE_DEFAULT}"
+
+      # FSM Appointment Booking
+      FSM_APPOINTMENT_SCHEMA_JSON: "${FSM_APPOINTMENT_SCHEMA_JSON}"
+      FSM_ALLOW_RAG_DETOUR: "${FSM_ALLOW_RAG_DETOUR}"
+      FSM_MAX_DETOURS_PER_FIELD: "${FSM_MAX_DETOURS_PER_FIELD}"
+      FSM_MAX_RETRIES: "${FSM_MAX_RETRIES}"
+
+      # Orchestrator tuning
+      ORCHESTRATOR_TRANSCRIPT_TIMEOUT_S: "${ORCHESTRATOR_TRANSCRIPT_TIMEOUT_S}"
+      ORCHESTRATOR_BARGE_IN_VALIDATION_TIMEOUT_S: "${ORCHESTRATOR_BARGE_IN_VALIDATION_TIMEOUT_S}"
+      ORCHESTRATOR_BATCH_TTS: "${ORCHESTRATOR_BATCH_TTS}"
 
       COOLIFY_CONTAINER_NAME: orchestrator-eu
     networks:

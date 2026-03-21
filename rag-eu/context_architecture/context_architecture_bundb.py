@@ -37,7 +37,6 @@ PROTECTED_WORDS: List[str] = [
 TTS_EXPAND: Dict[str, str] = {
     # Brand names (protected)
     "BLAIQ": "Blaiq",
-    "B&B.": "B und B",
 
     # Abbreviations (doctor, professor, etc.)
     "Dr.": "Doktor",
@@ -79,7 +78,6 @@ TTS_EXPAND: Dict[str, str] = {
 # Use sparingly to avoid damaging meaning.
 TTS_PRONUNCIATION_OVERRIDES: Dict[str, str] = {
     "B&B": "B und B",
-    "B&B.": "B und B",
 }
 
 # Small set of English business words that are especially awkward in otherwise
@@ -136,8 +134,9 @@ def _protect_segments(text: str) -> Dict[str, str]:
         return token
 
     text = _URL_OR_CODE_RE.sub(repl, text)
+    text = _VERSIONISH_RE.sub(repl, text)
     for word in PROTECTED_WORDS:
-        text = re.sub(rf"\b{re.escape(word)}\b", repl, text)
+        text = re.sub(rf"(?<!\w){re.escape(word)}(?!\w)", repl, text)
     return {"text": text, "protected": protected}
 
 
@@ -197,7 +196,8 @@ def tts_safe(text: str) -> str:
 
     # TTS-friendly punctuation cleanup.
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-    text = re.sub(r"([,;:])(?=\S)", r"\1 ", text)
+    text = re.sub(r"([,;])(?=\S)", r"\1 ", text)
+    text = re.sub(r":(?=\S)", r": ", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
 
     # Add SSML breaks for natural pacing (German loves pauses)
@@ -205,7 +205,7 @@ def tts_safe(text: str) -> str:
     text = re.sub(r",(\s+)", r',<break time="400ms"/>\1', text)
     # Medium pause after semicolons and colons
     text = re.sub(r";(\s+)", r';<break time="600ms"/>\1', text)
-    text = re.sub(r":(\s+)", r':<break time="500ms"/>\1', text)
+    text = re.sub(r":\s*(\S+)", r': \1<break time="500ms"/>', text)
     # Longer pause after periods and question marks (sentence boundaries)
     text = re.sub(r"\.(\s+)(?=[A-ZÄÖÜ])", r'.<break time="800ms"/>\1', text)
     text = re.sub(r"\?(\s+)", r'?<break time="800ms"/>\1', text)

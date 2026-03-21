@@ -138,7 +138,7 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
     const lastPlaybackTimeRef = useRef(0);
     const playbackStartTimeRef = useRef(null);
     const audioStreamCompleteRef = useRef(false);
-    const audioConfigRef = useRef({ format: 'pcm_f32le', sampleRate: 44100 });
+    const audioConfigRef = useRef({ format: 'pcm_s16le', sampleRate: 16000 });
     const currentPlaybackTurnIdRef = useRef(null);
     const minAcceptedPlaybackTurnIdRef = useRef(0);
     const activeSourcesRef = useRef(new Set());
@@ -326,6 +326,7 @@ const BundBTaraVoiceWidget = ({ config: propConfig }) => {
                     currentPlaybackTurnIdRef.current = turnId;
                 }
                 if (d.sample_rate) audioConfigRef.current.sampleRate = d.sample_rate;
+                if (d.format) audioConfigRef.current.format = d.format;
                 setAgentIsSpeaking(true); audioStreamCompleteRef.current = false;
                 if (d.binary_sent && binaryQueueRef.current.length > 0) { const c = binaryQueueRef.current.shift(); if (c) playAudioChunk(c, audioConfigRef.current.format === 'pcm_s16le'); }
                 else { const a = d.data || d.audio; if (a) playAudioChunk(a); }

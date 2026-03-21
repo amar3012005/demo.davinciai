@@ -140,7 +140,7 @@ const TaraVoiceWidget = ({ config: propConfig }) => {
     const lastPlaybackTimeRef = useRef(0);
     const playbackStartTimeRef = useRef(null);
     const audioStreamCompleteRef = useRef(false);
-    const audioConfigRef = useRef({ format: 'pcm_f32le', sampleRate: 44100 });
+    const audioConfigRef = useRef({ format: 'pcm_s16le', sampleRate: 16000 });
     const currentPlaybackTurnIdRef = useRef(null);
     const minAcceptedPlaybackTurnIdRef = useRef(0);
     const activeSourcesRef = useRef(new Set());
@@ -319,13 +319,22 @@ const TaraVoiceWidget = ({ config: propConfig }) => {
             wsConnectedRef.current = true;
             sessionIdRef.current = 'session_' + Date.now();
             const sessionConfig = {
-                type: 'session_config', tenant_id: config.tenantId, agent_id: config.agentId, agent_name: config.agentName,
-                user_id: uid, session_type: 'webcall', language: config.language, interaction_mode: 'interactive',
-                stt_mode: 'streaming', tts_mode: 'streaming', metadata: { source: 'davinci_widget_blue', region: 'EU' }
+                type: 'session_config',
+                config: {
+                    mode: 'voice', tenant_id: config.tenantId, agent_id: config.agentId, agent_name: config.agentName,
+                    user_id: uid, stt_mode: 'audio', tts_mode: 'audio', language: config.language
+                }
             };
             ws.send(JSON.stringify(sessionConfig));
-            ws.send(JSON.stringify({ type: 'start_session', timestamp: Date.now() / 1000 }));
-            const ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            ws.send(JSON.stringify({
+                type: 'start_session',
+                flow_config: {
+                    policy_mode: 'sales', conversation_policy: 'sales',
+                    policy_flags: { enable_strategic_policy: true, enable_stage_aware_retrieval: true, enable_micro_reasoning: true }
+                },
+                timestamp: Date.now() / 1000
+            }));
+            const ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             audioCtxRef.current = ac; lastPlaybackTimeRef.current = ac.currentTime;
             const mic = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             const src = mic.createMediaStreamSource(stream);

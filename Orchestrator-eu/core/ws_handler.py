@@ -145,8 +145,8 @@ class OrchestratorSession:
     immediate_filler_played: bool = False  # Track if immediate filler was played to prevent double filling
 
     # TTS configuration (synced from TTS service)
-    tts_sample_rate: int = 44100
-    tts_format: str = "pcm_f32le"
+    tts_sample_rate: int = 16000
+    tts_format: str = "pcm_s16le"
 
     # Single active turn-processing task per session to avoid race conditions.
     task_semaphore: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -910,6 +910,8 @@ class OrchestratorWSHandler:
                 "type": "session_ready",
                 "session_id": session_id,
                 "timestamp": time.time(),
+                "sample_rate": session.tts_sample_rate,
+                "audio_format": session.tts_format,
                 "services": {
                     "stt_url": self.config.services.stt.url,
                     "tts_url": self.config.services.tts.url,
@@ -1403,6 +1405,64 @@ class OrchestratorWSHandler:
                 session.tts_connected_event.clear()
                 await asyncio.sleep(2.0)
 
+    def _should_reject_stt_transcript(self, session: OrchestratorSession, text: str, data: Dict[str, Any]) -> bool:
+        """Final safety-net for normal STT finals before they become turns."""
+        stripped = (text or "").strip()
+        if not stripped:
+            return True
+
+        lowered = stripped.lower().rstrip(".!?, ")
+        allow_single_word = {
+            "yes", "no", "ok", "okay", "stop", "wait", "go", "one", "two", "three",
+            "ja", "nein", "halt", "warte", "weiter", "stopp", "hallo", "bitte",
+        }
+        if lowered in allow_single_word:
+            return False
+
+        hallucination_phrases = {
+            "thank you", "thanks for watching", "please subscribe", "subscribe to my channel",
+            "bye bye bye", "goodbye goodbye", "thank you for watching",
+        }
+        if lowered in hallucination_phrases:
+            return True
+
+        no_speech_prob = data.get("no_speech_prob")
+        avg_logprob = data.get("avg_logprob")
+        compression_ratio = data.get("compression_ratio")
+        start_time = data.get("start_time")
+        end_time = data.get("end_time")
+
+        speech_ms = None
+        if start_time is not None and end_time is not None:
+            try:
+                speech_ms = max(0.0, (float(end_time) - float(start_time)) * 1000.0)
+            except (TypeError, ValueError):
+                speech_ms = None
+
+        if len(stripped) < 2:
+            return True
+
+        if speech_ms is not None and speech_ms < 450 and len(stripped) < 8:
+            return True
+
+        if no_speech_prob is not None and no_speech_prob >= 0.72:
+            return True
+
+        if avg_logprob is not None and avg_logprob <= -0.9:
+            if len(stripped) < 18 or (no_speech_prob is not None and no_speech_prob > 0.25):
+                return True
+
+        if compression_ratio is not None and compression_ratio >= 2.4 and len(stripped) < 40:
+            return True
+
+        if re.match(r"^[aeiouäöüAEIOUÄÖÜ]+$", stripped):
+            return True
+
+        if len(set(lowered.replace(" ", ""))) == 1 and len(lowered.replace(" ", "")) > 2:
+            return True
+
+        return False
+
     async def _handle_stt_result(self, session: OrchestratorSession, data: Dict[str, Any]):
         """Handle STT transcription result"""
         # Check if session is closed
@@ -1460,6 +1520,22 @@ class OrchestratorWSHandler:
             
         session.current_language = detected_lang
         session.state_manager.context.current_language = detected_lang
+
+        if is_final and self._should_reject_stt_transcript(session, text, data):
+            logger.info(
+                f"[{session.session_id}] 🚫 Rejected STT FINAL before turn creation: "
+                f"'{text[:80]}' "
+                f"(nsp={data.get('no_speech_prob')}, alp={data.get('avg_logprob')}, cr={data.get('compression_ratio')})"
+            )
+            await self._reset_stt_tracking(
+                session,
+                cancel_timeout=True,
+                cancel_accumulation=True,
+            )
+            if session.state_manager.state == State.THINKING:
+                await session.state_manager.transition(State.LISTENING, trigger="transcript_rejected")
+                await self._broadcast_state(session, State.LISTENING)
+            return
         
         if is_final:
             logger.info(f"[{session.session_id}] 📝 STT FINAL [{detected_lang}]: {text}")
@@ -1477,6 +1553,8 @@ class OrchestratorWSHandler:
         if session.barge_in_pending or (state_mgr.state == State.SPEAKING and self._is_bargin_enabled()):
             stripped = text.strip().rstrip(".!?,")
             no_speech_prob = data.get("no_speech_prob")
+            avg_logprob = data.get("avg_logprob")
+            compression_ratio = data.get("compression_ratio")
 
             # Quick pre-filter: Only reject obvious non-speech (high confidence noise)
             # Let LLM make the final verdict on everything else
@@ -1485,6 +1563,14 @@ class OrchestratorWSHandler:
                 not stripped  # Empty text
                 or len(stripped) < 2  # Too short to be meaningful
                 or (no_speech_prob is not None and no_speech_prob > 0.70)  # Lowered from 0.85 to 0.70
+                or (avg_logprob is not None and avg_logprob < -1.15 and len(stripped) < 16)
+                or (compression_ratio is not None and compression_ratio > 2.4 and len(stripped) < 24)
+                or (
+                    no_speech_prob is not None
+                    and avg_logprob is not None
+                    and no_speech_prob > 0.35
+                    and avg_logprob < -0.9
+                )
                 or re.match(r'^[aeiouAEIOU]+$', stripped)  # Vowel-only sounds (ah, oh, umm)
                 or len(set(stripped.lower())) == 1  # Repeated single character (aaa, hhh)
             )
@@ -1900,6 +1986,14 @@ class OrchestratorWSHandler:
                 listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="transcript_rejected")
                 await self._execute_side_effects(session, listening_side_effects, output_language)
                 await self._broadcast_state(session, State.LISTENING)
+            elif state_mgr.state == State.SPEAKING and session.barge_in_pending:
+                logger.info(f"[{session.session_id}] 🔄 Rejected interruption transcript during SPEAKING - clearing pending barge-in")
+                await self._reset_stt_tracking(
+                    session,
+                    clear_barge_in=True,
+                    clear_interruption=True,
+                    cancel_timeout=True,
+                )
     
     async def _execute_side_effects(self, session: OrchestratorSession, side_effects: list, language: str):
         """
@@ -5121,7 +5215,7 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
             "timestamp": time.time()
         }, session)
     
-    async def _enqueue_foreground_audio(self, session: OrchestratorSession, audio_bytes: bytes, flush: bool = False, sample_rate: int = 44100, encoding: str = "pcm_f32le"):
+    async def _enqueue_foreground_audio(self, session: OrchestratorSession, audio_bytes: bytes, flush: bool = False, sample_rate: int = 16000, encoding: str = "pcm_s16le"):
         """
         Buffer audio into aligned frames (100ms = 4410 samples @ 44.1kHz).
 
@@ -5514,6 +5608,22 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
             await session.stt_client.close()
         if session.tts_client:
             await session.tts_client.close()
+
+        # Clear live conversational memory for the finished session so it
+        # cannot leak into the next browser session.
+        try:
+            if self.summary_manager:
+                await self.summary_manager.clear_session(
+                    self._resolve_summary_tenant_id(session),
+                    session.session_id,
+                )
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] Failed to clear session summary: {e}")
+
+        try:
+            session.history_manager.clear()
+        except Exception:
+            pass
         
         # Remove from sessions
         self.sessions.pop(session.session_id, None)

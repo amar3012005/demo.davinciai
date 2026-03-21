@@ -19,6 +19,7 @@ class SessionSummaryManager:
         self.ttl_seconds = ttl_seconds
         self._tasks: Dict[str, asyncio.Task] = {}
         self._pending_updates: Dict[str, List[Dict[str, Any]]] = {}
+        self._closed_sessions: set[str] = set()
 
     @staticmethod
     def _summary_key(tenant_id: Optional[str], session_id: str) -> str:
@@ -97,6 +98,9 @@ class SessionSummaryManager:
             return
 
         worker_key = self._worker_key(tenant_id, session_id)
+        if worker_key in self._closed_sessions:
+            logger.info(f"[{session_id}] Skipping summary update for closed session")
+            return
         queue = self._pending_updates.setdefault(worker_key, [])
         queue.append({
             "tenant_id": tenant_id,
@@ -133,6 +137,9 @@ class SessionSummaryManager:
         user_text: str,
         assistant_text: str,
     ) -> None:
+        worker_key = self._worker_key(tenant_id, session_id)
+        if worker_key in self._closed_sessions:
+            return
         lock_key = self._lock_key(tenant_id, session_id)
         token = f"{time.time()}:{id(asyncio.current_task())}"
         try:
@@ -147,6 +154,8 @@ class SessionSummaryManager:
                 return
 
             previous_summary, previous_revision = await self.get_summary(tenant_id, session_id)
+            if worker_key in self._closed_sessions:
+                return
             summary_text = await self.rag_client.summarize_session_window(
                 session_id=session_id,
                 tenant_id=tenant_id or "tara",
@@ -186,3 +195,27 @@ class SessionSummaryManager:
                     await self.redis.delete(lock_key)
             except Exception:
                 pass
+
+    async def clear_session(self, tenant_id: Optional[str], session_id: str) -> None:
+        """Delete the live summary state for a finished session and block late writes."""
+        if not self.redis:
+            return
+
+        worker_key = self._worker_key(tenant_id, session_id)
+        self._closed_sessions.add(worker_key)
+
+        task = self._tasks.get(worker_key)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+        self._pending_updates.pop(worker_key, None)
+        try:
+            await self.redis.delete(self._summary_key(tenant_id, session_id))
+        except Exception as exc:
+            logger.warning(f"[{session_id}] Failed clearing session summary: {exc}")

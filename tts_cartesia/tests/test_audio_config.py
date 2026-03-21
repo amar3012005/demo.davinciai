@@ -170,14 +170,6 @@ class TestOutputFormat:
         assert "encoding" in fmt
         assert "sample_rate" in fmt
 
-    @pytest.mark.xfail(
-        reason=(
-            "Current implementation force-upgrades pcm_s16le → pcm_f32le. "
-            "This test documents the TARGET behaviour where pcm_s16le is "
-            "stored as-is when the orchestrator supports 16-bit PCM natively."
-        ),
-        strict=True,
-    )
     def test_pcm_s16le_stored_without_upgrade(self):
         """pcm_s16le SHOULD be stored as-is for 16-bit pipeline support."""
         config = make_config(CARTESIA_OUTPUT_FORMAT="pcm_s16le")

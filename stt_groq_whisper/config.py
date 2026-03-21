@@ -42,6 +42,10 @@ class GroqWhisperConfig:
     # VAD settings (local pre-filtering)
     # Higher energy threshold = less sensitive (reduces false positives from ambient noise/echo)
     vad_energy_threshold: int = int(os.getenv("VAD_ENERGY_THRESHOLD", "850"))  # RMS energy threshold (default: 850, range: 500-1000)
+    use_webrtcvad: bool = os.getenv("USE_WEBRTCVAD", "true").lower() == "true"
+    webrtcvad_aggressiveness: int = int(os.getenv("WEBRTCVAD_AGGRESSIVENESS", "2"))
+    webrtcvad_frame_ms: int = int(os.getenv("WEBRTCVAD_FRAME_MS", "20"))
+    min_voiced_ratio: float = float(os.getenv("MIN_VOICED_RATIO", "0.45"))
     min_speech_duration_ms: int = int(os.getenv("MIN_SPEECH_DURATION_MS", "500"))  # Minimum speech length in ms (default: 500ms)
     speech_start_trigger_ms: int = int(os.getenv("SPEECH_START_TRIGGER_MS", "160"))  # Debounce speech start to reduce false VAD triggers
     min_silence_duration_ms: int = int(os.getenv("MIN_SILENCE_DURATION_MS", "1050"))  # Baseline silence before speech_end in ms
@@ -58,6 +62,11 @@ class GroqWhisperConfig:
     response_format: str = os.getenv("GROQ_RESPONSE_FORMAT", "verbose_json")  # json, verbose_json, text
     temperature: float = float(os.getenv("GROQ_TEMPERATURE", "0.0"))
     include_word_timestamps: bool = os.getenv("GROQ_WORD_TIMESTAMPS", "true").lower() == "true"
+    reject_no_speech_prob: float = float(os.getenv("REJECT_NO_SPEECH_PROB", "0.72"))
+    reject_avg_logprob: float = float(os.getenv("REJECT_AVG_LOGPROB", "-0.90"))
+    reject_compression_ratio: float = float(os.getenv("REJECT_COMPRESSION_RATIO", "2.40"))
+    reject_short_utterance_ms: int = int(os.getenv("REJECT_SHORT_UTTERANCE_MS", "450"))
+    reject_short_text_chars: int = int(os.getenv("REJECT_SHORT_TEXT_CHARS", "6"))
     
     # Service settings
     host: str = os.getenv("STT_GROQ_HOST", "0.0.0.0")
@@ -136,7 +145,8 @@ class GroqWhisperConfig:
         if extra_prompt:
             parts.append(extra_prompt.strip())
         prompt = " ".join(part for part in parts if part)
-        return prompt[:1000] if prompt else None
+        # Groq rejects longer prompts; keep headroom below the platform limit.
+        return prompt[:850] if prompt else None
 
     @staticmethod
     def is_german_language(language: Optional[str]) -> bool:
@@ -196,6 +206,12 @@ class GroqWhisperConfig:
         self.continuation_silence_bonus_ms = max(0, self.continuation_silence_bonus_ms)
         self.continuation_word_threshold = max(1, self.continuation_word_threshold)
         self.continuation_min_duration_ms = max(self.min_speech_duration_ms, self.continuation_min_duration_ms)
+        self.webrtcvad_aggressiveness = max(0, min(3, self.webrtcvad_aggressiveness))
+        if self.webrtcvad_frame_ms not in {10, 20, 30}:
+            self.webrtcvad_frame_ms = 20
+        self.min_voiced_ratio = max(0.0, min(1.0, self.min_voiced_ratio))
+        self.reject_short_utterance_ms = max(0, self.reject_short_utterance_ms)
+        self.reject_short_text_chars = max(1, self.reject_short_text_chars)
     
     @staticmethod
     def from_env() -> "GroqWhisperConfig":

@@ -102,7 +102,7 @@ class OrchestratorWSClient:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
 
-    async def send_event(self, event_type: str, signal_type: str) -> bool:
+    async def send_event(self, event_type: str, signal_type: str, **extra: Any) -> bool:
         """Send VAD event directly to orchestrator"""
         message = {
             "type": "stt_event",
@@ -112,6 +112,8 @@ class OrchestratorWSClient:
             "session_id": self.session_id,
             "source": "groq_whisper"
         }
+        if extra:
+            message.update(extra)
         return await self._send(message)
 
     async def send_transcript(
@@ -121,7 +123,10 @@ class OrchestratorWSClient:
         language: str = "en",
         words: Optional[list] = None,
         language_code: Optional[str] = None,
-        latency_ms: Optional[float] = None
+        latency_ms: Optional[float] = None,
+        avg_logprob: Optional[float] = None,
+        no_speech_prob: Optional[float] = None,
+        compression_ratio: Optional[float] = None,
     ) -> bool:
         """Send transcript directly to orchestrator"""
         message = {
@@ -137,6 +142,9 @@ class OrchestratorWSClient:
         if words: message["words"] = words
         if language_code: message["language_code"] = language_code
         if latency_ms: message["latency_ms"] = latency_ms
+        if avg_logprob is not None: message["avg_logprob"] = avg_logprob
+        if no_speech_prob is not None: message["no_speech_prob"] = no_speech_prob
+        if compression_ratio is not None: message["compression_ratio"] = compression_ratio
         
         return await self._send(message)
 

@@ -270,9 +270,11 @@ class TestContinuationFlagsEndToEnd:
                     context_id=ctx_id,
                 )
 
-        assert len(sent) == 2, f"Expected 2 sent messages, got {len(sent)}: {sent}"
+        assert len(sent) == 3, f"Expected 3 sent messages, got {len(sent)}: {sent}"
         assert sent[0].get("continue") is False, "First chunk must have continue=False"
         assert sent[1].get("continue") is True, "Second chunk must have continue=True"
+        assert sent[2].get("transcript") == "", "Final flush message must close with empty transcript"
+        assert sent[2].get("continue") is False, "Final flush message must have continue=False"
 
     async def test_receive_error_propagated_in_stats(self, mock_manager):
         """If Cartesia returns an error message, stats must contain the error key."""

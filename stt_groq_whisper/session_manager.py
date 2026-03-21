@@ -13,6 +13,10 @@ import json
 import re
 from typing import Dict, Any, Optional, Callable, List
 from collections import deque
+try:
+    import webrtcvad
+except Exception:  # pragma: no cover - optional dependency fallback
+    webrtcvad = None
 
 from config import GroqWhisperConfig
 from groq_client import GroqWhisperClient, GroqTranscriptionResult
@@ -104,6 +108,15 @@ class GroqWhisperSession:
         
         # Silence detection
         self.consecutive_silent_chunks = 0
+        self.vad = None
+        if self.config.use_webrtcvad and webrtcvad is not None:
+            try:
+                self.vad = webrtcvad.Vad(self.config.webrtcvad_aggressiveness)
+            except Exception as exc:
+                logger.warning(f"⚠️ [{session_id}] Failed to initialize WebRTC VAD: {exc}")
+                self.vad = None
+        elif self.config.use_webrtcvad and webrtcvad is None:
+            logger.warning(f"⚠️ [{session_id}] WebRTC VAD requested but dependency is unavailable; falling back to energy-only gate")
 
     def _append_pre_speech_chunk(self, audio_chunk: bytes):
         """Keep a rolling pre-speech PCM buffer (for start padding)."""
@@ -134,6 +147,41 @@ class GroqWhisperSession:
     def _is_stale_utterance(self, utterance_id: int) -> bool:
         """Drop finals from interrupted or cleaned-up utterances."""
         return not self._running or utterance_id != self._active_utterance_id
+
+    def _pcm_frame_bytes(self) -> int:
+        return int(self.config.sample_rate * self.config.webrtcvad_frame_ms / 1000) * 2
+
+    def _voiced_ratio(self, audio_chunk: bytes) -> float:
+        if not self.vad:
+            return 1.0
+        frame_bytes = self._pcm_frame_bytes()
+        if frame_bytes <= 0 or len(audio_chunk) < frame_bytes:
+            return 0.0
+        total_frames = 0
+        voiced_frames = 0
+        for offset in range(0, len(audio_chunk) - frame_bytes + 1, frame_bytes):
+            frame = audio_chunk[offset:offset + frame_bytes]
+            total_frames += 1
+            try:
+                if self.vad.is_speech(frame, self.config.sample_rate):
+                    voiced_frames += 1
+            except Exception:
+                continue
+        if total_frames == 0:
+            return 0.0
+        return voiced_frames / total_frames
+
+    def _is_speech_chunk(self, audio_chunk: bytes, energy: int) -> bool:
+        energy_ok = energy > self.config.vad_energy_threshold
+        if not self.vad:
+            return energy_ok
+        voiced_ratio = self._voiced_ratio(audio_chunk)
+        return energy_ok and voiced_ratio >= self.config.min_voiced_ratio
+
+    def _audio_duration_ms(self, audio_bytes: bytes) -> float:
+        if not audio_bytes:
+            return 0.0
+        return len(audio_bytes) / (self.config.sample_rate * 2) * 1000.0
     
     async def start(self) -> bool:
         """Start session and initialize Groq client"""
@@ -183,7 +231,7 @@ class GroqWhisperSession:
         except Exception:
             energy = 0
         
-        is_speech = energy > self.config.vad_energy_threshold
+        is_speech = self._is_speech_chunk(audio_chunk, energy)
         
         if is_speech:
             self.consecutive_silent_chunks = 0
@@ -428,6 +476,7 @@ class GroqWhisperSession:
             return
         
         closing_utterance_id = self._active_utterance_id
+        segment_duration_ms = self._speech_duration_ms()
         self.speech_active = False
         self.speech_candidate_start_time = None
         self.speech_segment_start_time = None
@@ -435,7 +484,28 @@ class GroqWhisperSession:
         # FULL TRANSCRIPTION MODE: Transcribe entire buffer at once
         if not self.config.enable_micro_chunking and self.full_audio_buffer:
             audio_to_transcribe = bytes(self.full_audio_buffer)
-            audio_duration_ms = len(self.full_audio_buffer) / (self.config.sample_rate * 2) * 1000
+            audio_duration_ms = self._audio_duration_ms(self.full_audio_buffer)
+
+            if segment_duration_ms and segment_duration_ms < self.config.min_speech_duration_ms:
+                logger.info(
+                    f"🚫 [{self.session_id}] Rejecting pre-Groq short speech segment "
+                    f"({segment_duration_ms:.0f}ms < {self.config.min_speech_duration_ms}ms)"
+                )
+                await self._emit_transcript_rejected(
+                    reason="speech_too_short",
+                    rejected_text="",
+                    speech_duration_ms=segment_duration_ms,
+                )
+                self.full_audio_buffer.clear()
+                await self._emit_speech_event("SPEECH_END")
+                logger.info(f"🔇 [{self.session_id}] Speech ended")
+                self.current_utterance = ""
+                self.partial_text = ""
+                self.context_window.clear()
+                self.pre_speech_chunks.clear()
+                self.pre_speech_bytes = 0
+                self._just_seeded_from_preroll = False
+                return
             
             logger.info(f"📤 [{self.session_id}] Full transcription mode: sending {len(audio_to_transcribe)} bytes ({audio_duration_ms:.0f}ms)")
             
@@ -458,6 +528,14 @@ class GroqWhisperSession:
                 final_text = result.text.strip()
                 if self._should_filter_full_result(result, final_text):
                     logger.info(f"🚫 [{self.session_id}] Filtered full hallucination/noise: '{result.text}' (no_speech_prob={result.no_speech_prob or 0:.3f})")
+                    await self._emit_transcript_rejected(
+                        reason="full_result_rejected",
+                        rejected_text=final_text,
+                        speech_duration_ms=audio_duration_ms,
+                        avg_logprob=result.avg_logprob,
+                        no_speech_prob=result.no_speech_prob,
+                        compression_ratio=result.compression_ratio,
+                    )
                 else:
                     if final_text:
                         await self._emit_transcript(
@@ -582,6 +660,46 @@ class GroqWhisperSession:
                 logger.warning(f"🚫 [{self.session_id}] Filtering English result during German-forced session: '{final_text[:80]}...'")
                 return True
 
+        text_len = len(final_text.strip())
+        utterance_ms = 0.0
+        if result.duration:
+            utterance_ms = result.duration * 1000.0
+        elif self.full_audio_buffer:
+            utterance_ms = self._audio_duration_ms(self.full_audio_buffer)
+
+        nsp = result.no_speech_prob
+        avg_lp = result.avg_logprob
+        comp = result.compression_ratio
+        looks_short = text_len < self.config.reject_short_text_chars
+        looks_brief = utterance_ms and utterance_ms < self.config.reject_short_utterance_ms
+        low_nsp_confidence = nsp is not None and nsp >= self.config.reject_no_speech_prob
+        low_logprob_confidence = avg_lp is not None and avg_lp <= self.config.reject_avg_logprob
+        suspicious_compression = comp is not None and comp >= self.config.reject_compression_ratio
+
+        if looks_brief and looks_short:
+            logger.warning(
+                f"🚫 [{self.session_id}] Rejecting too-short utterance "
+                f"({utterance_ms:.0f}ms, text_len={text_len}): '{final_text[:80]}...'"
+            )
+            return True
+
+        if low_nsp_confidence and (looks_short or low_logprob_confidence or suspicious_compression):
+            logger.warning(
+                f"🚫 [{self.session_id}] Rejecting by metadata "
+                f"(no_speech_prob={nsp:.3f}, avg_logprob={avg_lp}, compression_ratio={comp}): '{final_text[:80]}...'"
+            )
+            return True
+
+        if low_logprob_confidence:
+            if text_len < 18 or (nsp is not None and nsp > 0.25) or suspicious_compression:
+                logger.warning(f"🚫 [{self.session_id}] Rejecting low avg_logprob={avg_lp:.3f}: '{final_text[:80]}...'")
+                return True
+
+        if suspicious_compression:
+            if text_len < 40 or result.is_hallucination or low_logprob_confidence:
+                logger.warning(f"🚫 [{self.session_id}] Rejecting high compression_ratio={comp:.3f}: '{final_text[:80]}...'")
+                return True
+
         return result.is_hallucination or result.is_low_quality
     
     async def _emit_transcript(
@@ -645,7 +763,10 @@ class GroqWhisperSession:
                     language=self._resolved_language(),
                     language_code=self._resolved_language(),
                     words=words,
-                    latency_ms=latency_ms
+                    latency_ms=latency_ms,
+                    avg_logprob=avg_logprob,
+                    no_speech_prob=no_speech_prob,
+                    compression_ratio=compression_ratio,
                 )
             
             # Send to client callback
@@ -688,6 +809,55 @@ class GroqWhisperSession:
                 
         except Exception as e:
             logger.error(f"❌ Error emitting speech event: {e}")
+
+    async def _emit_transcript_rejected(
+        self,
+        reason: str = "noise_or_hallucination",
+        rejected_text: str = "",
+        speech_duration_ms: Optional[float] = None,
+        avg_logprob: Optional[float] = None,
+        no_speech_prob: Optional[float] = None,
+        compression_ratio: Optional[float] = None,
+    ):
+        """Notify listeners that the latest potential transcript was rejected as noise/hallucination."""
+        try:
+            message = {
+                "type": "events",
+                "data": {
+                    "event_type": "transcript_rejected",
+                    "signal_type": "TRANSCRIPT_REJECTED",
+                    "timestamp": time.time(),
+                    "reason": reason,
+                    "rejected_text": rejected_text,
+                }
+            }
+            if speech_duration_ms is not None:
+                message["data"]["speech_duration_ms"] = speech_duration_ms
+            if avg_logprob is not None:
+                message["data"]["avg_logprob"] = avg_logprob
+            if no_speech_prob is not None:
+                message["data"]["no_speech_prob"] = no_speech_prob
+            if compression_ratio is not None:
+                message["data"]["compression_ratio"] = compression_ratio
+            if self.orchestrator_ws:
+                await self.orchestrator_ws.send_event(
+                    event_type="transcript_rejected",
+                    signal_type="TRANSCRIPT_REJECTED",
+                    reason=reason,
+                    rejected_text=rejected_text,
+                    speech_duration_ms=speech_duration_ms,
+                    avg_logprob=avg_logprob,
+                    no_speech_prob=no_speech_prob,
+                    compression_ratio=compression_ratio,
+                )
+            try:
+                await asyncio.wait_for(self.callback(message), timeout=self.config.callback_timeout_seconds)
+            except asyncio.TimeoutError:
+                logger.error(f"❌ [{self.session_id}] Timeout delivering transcript rejection event")
+            except Exception as e:
+                logger.error(f"❌ [{self.session_id}] Transcript rejection callback error: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error emitting transcript rejection event: {e}")
     
     async def stop(self, flush_pending_audio: bool = True):
         """Stop session and cleanup"""

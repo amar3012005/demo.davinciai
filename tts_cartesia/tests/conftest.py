@@ -6,6 +6,7 @@ so tests run without network access and without a real API key.
 """
 
 import asyncio
+import importlib.util
 import inspect
 import json
 import sys
@@ -22,6 +23,21 @@ import pytest
 TTS_ROOT = Path(__file__).resolve().parent.parent
 if str(TTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TTS_ROOT))
+
+
+def _load_local_config_module() -> None:
+    """Force `config` imports in this test suite to resolve to tts_cartesia/config.py."""
+    config_path = TTS_ROOT / "config.py"
+    spec = importlib.util.spec_from_file_location("config", config_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load TTS config module from {config_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["config"] = module
+    spec.loader.exec_module(module)
+
+
+_load_local_config_module()
 
 
 # ---------------------------------------------------------------------------
