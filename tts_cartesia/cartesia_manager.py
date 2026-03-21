@@ -130,17 +130,23 @@ class CartesiaConnection:
                     async for message in ws:
                         self.metrics.messages_received += 1
                         self.metrics.last_activity = time.time()
-                        
+
                         try:
                             data = json.loads(message)
                             ctx_id = data.get("context_id")
+                            msg_type = data.get("type", "unknown")
                             if ctx_id:
                                 async with self._dispatch_lock:
                                     queue = self._dispatch_queues.get(ctx_id)
-                                    if queue:
-                                        await queue.put(data)
+                                    registered_ids = list(self._dispatch_queues.keys())
+                                if queue:
+                                    await queue.put(data)
+                                else:
+                                    logger.warning(f"[{self.connection_id}] ⚠️ No queue for ctx={ctx_id[:8]} type={msg_type} (registered: {[k[:8] for k in registered_ids]})")
+                            else:
+                                logger.warning(f"[{self.connection_id}] ⚠️ Message without context_id: type={msg_type}")
                         except Exception as e:
-                            logger.error(f"[{self.connection_id}] Dispatch error: {e}")
+                            logger.error(f"[{self.connection_id}] Dispatch error: {e}", exc_info=True)
                 
                 # If we exit the loop normally, ws was closed
                 logger.warning(f"[{self.connection_id}] Connection closed by server")
@@ -436,16 +442,10 @@ class CartesiaManager:
                         
                         await conn.send(message)
 
-                    # CRITICAL: Send final close signal with continue=False
-                    # This tells Cartesia "no more input is coming"
-                    logger.info(f"[{ctx_id[:8]}] Sending close signal to Cartesia...")
-                    close_message = {
-                        "context_id": ctx_id,
-                        "transcript": "",  # Empty transcript signals context close
-                        "continue": False,  # CRITICAL: False tells Cartesia stream is ending
-                    }
-                    await conn.send(close_message)
-                    logger.info(f"[{ctx_id[:8]}] ✅ Stream closed with continue=False signal, waiting for audio chunks...")
+                    # Note: Do NOT send an empty close message — it causes Cartesia to
+                    # return an error (missing voice) that races ahead of audio chunks.
+                    # The last real chunk with continue=False already signals end of context.
+                    logger.info(f"[{ctx_id[:8]}] ✅ All text sent, waiting for audio chunks...")
 
                 except Exception as e:
                     logger.error(f"[{ctx_id[:8]}] Send error: {e}", exc_info=True)

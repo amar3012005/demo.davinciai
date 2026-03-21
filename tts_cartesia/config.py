@@ -30,13 +30,13 @@ class CartesiaConfig:
     api_version: str = "2024-06-10"  # Cartesia API version
 
     # Audio format settings
-    sample_rate: int = field(default_factory=lambda: int(os.getenv("CARTESIA_SAMPLE_RATE", "16000")))  # 16kHz for real-time voice (was 44100)
-    output_format: str = field(default_factory=lambda: os.getenv("CARTESIA_OUTPUT_FORMAT", "pcm_s16le").strip())  # 16-bit for browser compatibility (was pcm_f32le)
+    sample_rate: int = field(default_factory=lambda: int(os.getenv("CARTESIA_SAMPLE_RATE", "").strip() or "16000"))
+    output_format: str = field(default_factory=lambda: os.getenv("CARTESIA_OUTPUT_FORMAT", "").strip() or "pcm_s16le")
     container: str = "raw"  # raw or mp3
 
     # Voice settings
-    language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "de").strip())  # Default to German for EU deployment
-    speed: float = field(default_factory=lambda: float(os.getenv("CARTESIA_SPEED", "0.95")))  # Speed: 0.95 for German clarity (range: 0.5-2.0, was 0.9)
+    language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "").strip() or "de")
+    speed: float = field(default_factory=lambda: float(os.getenv("CARTESIA_SPEED", "").strip() or "0.95"))
 
     # Pronunciation dictionary for tenant-specific brand names
     pronunciation_dict_id: Optional[str] = field(default_factory=lambda: os.getenv("CARTESIA_PRONUNCIATION_DICT_ID", "").strip() or None)

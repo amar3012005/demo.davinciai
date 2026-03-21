@@ -258,15 +258,8 @@ services:
       # TTS Cartesia Configuration - Optimized for German pronunciation
       CARTESIA_API_KEY: ${CARTESIA_API_KEY}
       # German-native voice ID (improves pronunciation of German text, umlauts, compounds)
-      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID}
-      CARTESIA_LANGUAGE: ${CARTESIA_LANGUAGE}  # Default language for German TTS
-      CARTESIA_OUTPUT_FORMAT: ${CARTESIA_OUTPUT_FORMAT}  # FIX #3: 16-bit PCM for browser compatibility
-      CARTESIA_SAMPLE_RATE: ${CARTESIA_SAMPLE_RATE}  # FIX #3: 16kHz real-time voice agent standard
-      CARTESIA_MODEL: ${CARTESIA_MODEL}  # Multilingual model
-      # Speed: 0.95 optimized for German compound word clarity
-      CARTESIA_SPEED: ${CARTESIA_SPEED}  # FIX #3: Optimized for German clarity
-      # Tenant-specific pronunciation dictionary for brand names (e.g., BLAIQ, DaVinci)
-      CARTESIA_PRONUNCIATION_DICT_ID: ${CARTESIA_PRONUNCIATION_DICT_ID}
+      # Audio config loaded from env_file (.env.eu) — do NOT duplicate here
+      # or .env will override .env.eu values via ${VAR} substitution
 
       TTS_CARTESIA_HOST: 0.0.0.0
       TTS_CARTESIA_PORT: 4003
