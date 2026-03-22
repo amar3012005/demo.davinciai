@@ -95,6 +95,75 @@ class SessionAnalytics:
             
         return formatted_transcript
 
+    async def _run_summary_reasoning_engine(self, brief_context: str, session_id: str) -> Dict[str, Any]:
+        """
+        Summary-first analytics path used when the orchestrator already provides a
+        compact session summary window. This avoids reprocessing the full session
+        transcript at cleanup time.
+        """
+        system_prompt = """
+You analyze a compact session summary and return structured business analytics.
+
+Rules:
+- Use only the supplied summary text.
+- Do not invent turns, names, or details not present in the summary.
+- Keep the output conservative when evidence is limited.
+- Infer sentiment and lead/churn signals only when clearly supported.
+
+Return ONLY valid JSON with this schema:
+{
+  "turns": [],
+  "session_summary": {
+    "overall_sentiment": 0.0,
+    "resolution_status": "Resolved | Unresolved | Escalated | Unknown",
+    "customer_pain_points": ["point1", "point2"]
+  },
+  "distilled_knowledge": [
+    {
+      "issue": "string",
+      "solution": "string",
+      "category": "technical | branding | product_info | pricing | person_info | strategy",
+      "reliability_score": 0.0
+    }
+  ]
+}
+"""
+        user_prompt = f"Analyze the compact session summary for session {session_id}:\n\n{brief_context}"
+        try:
+            response = await self.llm_provider.generate_messages(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model=self.model_name,
+                response_format={"type": "json_object"},
+            )
+            raw = response if isinstance(response, str) else json.dumps(response)
+            raw = self._strip_reasoning_artifacts(raw)
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                raw = raw[start:end + 1]
+            parsed = json.loads(raw)
+            parsed.setdefault("turns", [])
+            parsed.setdefault(
+                "session_summary",
+                {"overall_sentiment": 0, "resolution_status": "Unknown", "customer_pain_points": []},
+            )
+            parsed.setdefault("distilled_knowledge", [])
+            return parsed
+        except Exception as exc:
+            logger.error(f"Summary reasoning engine failed: {exc}")
+            return {
+                "turns": [],
+                "session_summary": {
+                    "overall_sentiment": 0,
+                    "resolution_status": "Unknown",
+                    "customer_pain_points": [],
+                },
+                "distilled_knowledge": [],
+            }
+
     async def analyze_session(self, raw_logs: List[Dict[str, Any]], session_id: str, brief_context: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes the full analytics pipeline.
@@ -106,11 +175,18 @@ class SessionAnalytics:
         """
         start_time = time.time()
         
+        raw_logs = raw_logs or []
+
         # 1. Serialize
         transcript = self.format_transcript(raw_logs)
-        
+
         # 2. Reasoning (LLM)
-        reasoning_output = await self._run_reasoning_engine(transcript, session_id)
+        summary_only_mode = bool(brief_context and brief_context.strip())
+        if summary_only_mode:
+            logger.info(f"Using summary-first analytics path for {session_id}")
+            reasoning_output = await self._run_summary_reasoning_engine(brief_context, session_id)
+        else:
+            reasoning_output = await self._run_reasoning_engine(transcript, session_id)
         
         # 3. Calculate Deterministic Metrics
         davinci_metrics = self._calculate_davinci_metrics(reasoning_output.get('turns', []), raw_logs)
@@ -130,7 +206,7 @@ class SessionAnalytics:
         
         # 6. Fallback Knowledge Distillation (if primary reasoning found 0 units)
         distilled_knowledge = reasoning_output.get('distilled_knowledge', [])
-        if not distilled_knowledge and transcript:
+        if not distilled_knowledge and transcript and not summary_only_mode:
             try:
                 from distillprompt_hivemind_savecase import CaseDistiller
                 logger.info(f"🔄 Primary reasoning found 0 units. running fallback distillation for {session_id}...")
@@ -161,7 +237,8 @@ class SessionAnalytics:
             "analysis_quality": {
                 "deterministic_metrics": True,
                 "llm_heuristics_present": True,
-                "fallback_used": (not reasoning_output.get('distilled_knowledge'))
+                "fallback_used": (not reasoning_output.get('distilled_knowledge')),
+                "summary_first": summary_only_mode,
             },
             "processing_time": round(time.time() - start_time, 2)
         }

@@ -5476,16 +5476,35 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
         logger.info("============================================================")
         
         # 2. 🧠 DEVINCIAI SENTIMENT & REASONING PIPELINE
+        # Read the live session summary BEFORE clearing it — reuse mid-session work
+        session_summary_text = ""
+        if self.summary_manager:
+            try:
+                summary_tenant = self._resolve_summary_tenant_id(session)
+                session_summary_text, _ = await self.summary_manager.get_summary(
+                    summary_tenant, session.session_id
+                )
+                if session_summary_text:
+                    logger.info(
+                        f"[{session.session_id}] 📋 Retrieved session summary for report "
+                        f"({len(session_summary_text)} chars)"
+                    )
+            except Exception as e:
+                logger.warning(f"[{session.session_id}] Failed reading session summary for report: {e}")
+
         if session.history_manager:
             try:
-                # Construct history list (time-aware)
-                history_list = session.history_manager.to_dict()
-                
-                if history_list and len(history_list) > 0:
+                # Prefer the compact session summary for final analytics. Only
+                # fall back to raw turn history when no summary window exists.
+                history_list = []
+                if not session_summary_text:
+                    history_list = session.history_manager.to_dict()
+
+                if session_summary_text or history_list:
                     logger.info(f"[{session.session_id}] 🧠 Triggering DavinciAI Sentiment & Reasoning Pipeline...")
                     base_rag_url = (session.rag_url or self.config.services.rag.url).rstrip('/')
                     analysis_url = f"{base_rag_url}/api/v1/analyze_session"
-                    
+
                     try:
                         async with aiohttp.ClientSession() as http_session:
                             payload = {
@@ -5493,6 +5512,7 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
                                 "history_context": history_list,
                                 "user_id": session.user_id or "anonymous",
                                 "tenant_id": session.tenant_id or "tara",
+                                "brief_context": session_summary_text or None,
                                 "metadata": {
                                     "agent_name": session.agent_name,
                                     "agent_id": session.agent_id,
@@ -5560,6 +5580,11 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
             except Exception as e:
                 logger.error(f"[{session.session_id}] ❌ Sentiment Pipeline setup error: {e}")
 
+        # Ensure brief_context is always present — use session summary as fallback
+        if not report.get("brief_context") and session_summary_text:
+            report["brief_context"] = session_summary_text
+            logger.info(f"[{session.session_id}] 📋 Using session summary as brief_context fallback")
+
         # 3. 📡 EXTERNAL METRICS WEBHOOK (BACKEND)
         webhook_url = self.config.services.davinciai_backend_url
         if webhook_url:
@@ -5622,9 +5647,36 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
 
         try:
             session.history_manager.clear()
+            session.history_manager.form_data.clear()
         except Exception:
             pass
-        
+
+        # Scrub session-scoped conversational state so nothing survives long
+        # enough to leak into concurrent or subsequent users.
+        session.accumulated_final_text = ""
+        session.partial_transcript = ""
+        session.pending_transcript = False
+        session.expecting_final_transcript = False
+        session.user_speaking_active = False
+        session.last_query_text = ""
+        session.current_response_text = ""
+        session.interrupted_response_text = ""
+        session.interruption_transcripts.clear()
+        session.interruption_type = None
+        session.structured_observations.clear()
+        session.missing_slots.clear()
+        session.hypotheses.clear()
+        session.current_policy_context.clear()
+        session.policy_flags.clear()
+        session.stage_history.clear()
+        session.metadata.clear()
+        session.dom_context.clear()
+        session.last_dom_context.clear()
+        session.dom_history.clear()
+        session.action_history.clear()
+        session.map_hints = ""
+        session.current_goal = None
+
         # Remove from sessions
         self.sessions.pop(session.session_id, None)
         

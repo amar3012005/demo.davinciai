@@ -172,7 +172,7 @@ class CheckDomainRequest(BaseModel):
 
 class AnalyzeSessionRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
-    history_context: List[Dict[str, Any]] = Field(..., description="Raw conversation logs")
+    history_context: List[Dict[str, Any]] = Field(default_factory=list, description="Raw conversation logs")
     user_id: Optional[str] = Field(None, description="User identifier")
     tenant_id: str = Field("tara", description="Tenant identifier")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional context")
@@ -1858,7 +1858,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
         # 1. Run full analysis (Reasoning + Sentiment + Distillation)
         # Pass brief_context if provided, otherwise it will be auto-generated
         report = await analytics_engine.analyze_session(
-            raw_logs=request.history_context, 
+            raw_logs=request.history_context or [],
             session_id=request.session_id,
             brief_context=request.brief_context
         )
