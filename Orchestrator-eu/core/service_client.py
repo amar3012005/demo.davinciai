@@ -234,7 +234,7 @@ class TTSClient:
         "CRM": "Kundenmanagement-System",
         "B2B": "Business-to-Business",
         "B2C": "Business-to-Consumer",
-        "AI": "Davinci",  # Brand-specific for DaVinci AI
+        "AI": "äi",  # Phonetic hint for German TTS — pronounce as English "AI" not letter-by-letter
         "TARA": "Tara",  # Avoid spelling T-A-R-A
     }
 

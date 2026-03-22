@@ -624,12 +624,12 @@ class GroqWhisperSession:
         if not text:
             return False
 
+        text_normalized = text.strip().lower()
+
         # Build the full prompt that would be sent to Groq
         full_prompt = self.config.build_transcription_prompt(language=self._resolved_language())
         if not full_prompt:
             return False
-
-        text_normalized = text.strip().lower()
         prompt_normalized = full_prompt.strip().lower()
 
         # Check if transcription starts with or contains significant portions of the prompt
@@ -641,6 +641,25 @@ class GroqWhisperSession:
         # Check if prompt is contained in transcription (full prompt leak)
         if prompt_normalized in text_normalized:
             return True
+
+        # Check against known prompt fragments that Whisper hallucinates
+        # This catches cases where base_prompt is prepended but transcript starts mid-prompt
+        hallucination_markers = [
+            "transcribe the spoken audio",
+            "do not translate, summarize",
+            "preserve names, brands",
+            "business voice consultation",
+        ]
+        for marker in hallucination_markers:
+            if marker in text_normalized:
+                logger.warning(f"🚫 [{self.session_id}] Prompt fragment detected in transcript: '{marker}'")
+                return True
+
+        # Also check the base_prompt itself (often echoed verbatim)
+        if self.config.base_prompt:
+            base_normalized = self.config.base_prompt.strip().lower()
+            if len(base_normalized) > 20 and base_normalized[:40] in text_normalized:
+                return True
 
         return False
 

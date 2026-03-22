@@ -123,12 +123,13 @@ class GroqWhisperConfig:
             parts.append(self.base_prompt.strip())
         if self.is_german_language(lang):
             parts.append(
-                "Transcribe the spoken audio exactly in German using normal German orthography. "
-                "Do not translate, summarize, paraphrase, or normalize it into English. "
-                "Preserve names, brands, German compounds, umlauts (ae/oe/ue where spoken as ä/ö/ü only if clearly necessary), "
-                "and the Eszett (ß) when appropriate. Keep acronyms and product names as spoken. "
+                "Transcribe the spoken audio exactly as spoken. The primary language is German. "
+                "If the speaker switches to English, transcribe the English portions in English. "
+                "Do not translate between languages — preserve whatever language the speaker actually uses. "
+                "Preserve names, brands, German compounds, umlauts, and the Eszett (ß) when appropriate. "
+                "Keep acronyms and product names as spoken. "
                 "Do not spell words letter by letter unless the speaker explicitly spells them. "
-                "If audio is unclear, transcribe only the clearly spoken German words and omit uncertain fragments rather than guessing."
+                "If audio is unclear, omit uncertain fragments rather than guessing."
             )
         elif lang == "en":
             parts.append(

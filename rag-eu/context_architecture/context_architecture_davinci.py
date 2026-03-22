@@ -78,7 +78,7 @@ TTS_EXPAND: Dict[str, str] = {
 
     # Acronyms & tech terms
     "KI": "künstliche Intelligenz",
-    "AI": "künstliche Intelligenz",
+    "AI": "äi",  # Phonetic hint — pronounce as English "AI"
     "DSGVO": "Datenschutz-Grundverordnung",
     "UX": "User Experience",
     "UI": "User Interface",
@@ -105,7 +105,6 @@ TTS_PRONUNCIATION_OVERRIDES: Dict[str, str] = {}
 # Small set of English business words that are especially awkward in otherwise
 # German spoken responses. Intentionally conservative.
 LOANWORD_DE: Dict[str, str] = {
-    "AI": "KI",
 }
 
 NUMBERS_DE = {

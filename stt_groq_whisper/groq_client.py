@@ -293,20 +293,14 @@ class GroqWhisperClient:
                     self.successful_requests += 1
                     result = GroqTranscriptionResult(response.json())
 
+                    # Accept English transcriptions when Groq detects English speech.
+                    # The orchestrator handles multilingual sessions (SUPPORTED_LANGUAGES=en,de).
+                    # Forcing German re-transcription mangles legitimate English input.
                     expected_language = language or self.config.language
                     if self.config.is_german_language(expected_language):
                         result_language = (result.language or "").strip().lower()
                         if result_language.startswith("en"):
-                            logger.warning("⚠️ Groq reported English language during German session; retrying with stricter native-language prompt")
-                            retried = await self._retry_strict_native_transcription(
-                                client=client,
-                                headers=headers,
-                                files=files,
-                                base_data=data,
-                                language=expected_language,
-                            )
-                            if retried and retried.text:
-                                result = retried
+                            logger.info("ℹ️ Groq detected English speech during German-default session — accepting as-is")
                     
                     if result.text:
                         status = "🚫 HALLUCINATION" if result.is_hallucination else "✅"
