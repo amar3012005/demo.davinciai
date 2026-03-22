@@ -95,7 +95,9 @@ function OrbRenderer({ agentState, userVolume, agentIsSpeaking }) {
 // ═══════════════════════════════════════════════════════════
 
 const getWsBaseUrl = () => {
-    return 'wss://demo.davinciai.eu:8030/ws';
+    const loc = window.location;
+    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${loc.host}/ws`;
 };
 
 const CALL_LIMIT = 300;
@@ -123,12 +125,12 @@ const TaraVoiceWidget = ({ config: propConfig }) => {
     const [agentIsSpeaking, setAgentIsSpeaking] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState(null);
     const [micStream, setMicStream] = useState(null);
-    const [isMuted, setIsMuted] = useState(false);
-    const [showCallSetup, setShowCallSetup] = useState(false);
+    const [isMuted, _setIsMuted] = useState(false); // eslint-disable-line no-unused-vars
+    const [_showCallSetup, setShowCallSetup] = useState(false); // eslint-disable-line no-unused-vars
     const [accessKeyInput, setAccessKeyInput] = useState('');
     const [accessError, setAccessError] = useState('');
-    const [isAccessGranted, setIsAccessGranted] = useState(false);
-    const [selectedCallMode, setSelectedCallMode] = useState('speaker');
+    const [_isAccessGranted, setIsAccessGranted] = useState(false); // eslint-disable-line no-unused-vars
+    const [selectedCallMode, _setSelectedCallMode] = useState('speaker'); // eslint-disable-line no-unused-vars
     const [showEmailDialog, setShowEmailDialog] = useState(false);
     const [emailInput, setEmailInput] = useState('');
 
@@ -159,6 +161,7 @@ const TaraVoiceWidget = ({ config: propConfig }) => {
 
     useEffect(() => {
         if (isCallActive && callDuration >= CALL_LIMIT) endCall();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callDuration, isCallActive]);
 
     useEffect(() => {
@@ -284,7 +287,7 @@ const TaraVoiceWidget = ({ config: propConfig }) => {
         startCall();
     };
 
-    const submitAccessKey = () => {
+    const submitAccessKey = () => { // eslint-disable-line no-unused-vars
         if (accessKeyInput.trim() !== config.accessKey) { setAccessError('Invalid access key'); return; }
         setIsAccessGranted(true); setShowCallSetup(false); setAccessError(''); setAccessKeyInput(''); startCall();
     };
