@@ -125,12 +125,12 @@ def setup_tracing(
         if otlp_endpoint and OTLP_AVAILABLE:
             otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
             provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-            logger.info(f"✅ OTLP trace exporter enabled: {otlp_endpoint}")
+            logger.info(f"[OK] OTLP trace exporter enabled: {otlp_endpoint}")
         
         if enable_console_export:
             console_exporter = ConsoleSpanExporter()
             provider.add_span_processor(BatchSpanProcessor(console_exporter))
-            logger.info("✅ Console trace exporter enabled")
+            logger.info("[OK] Console trace exporter enabled")
         
         # Set global provider
         trace.set_tracer_provider(provider)
@@ -139,7 +139,7 @@ def setup_tracing(
         _tracer = trace.get_tracer(service_name)
         _propagator = TraceContextTextMapPropagator()
         
-        logger.info(f"✅ OpenTelemetry tracing initialized for {service_name}")
+        logger.info(f"[OK] OpenTelemetry tracing initialized for {service_name}")
         return _tracer
         
     except Exception as e:
@@ -401,7 +401,7 @@ def setup_metrics(service_name: str, service_version: str = "1.0.0"):
             'environment': os.getenv('DEPLOYMENT_ENV', 'development')
         })
         _metrics_initialized = True
-        logger.info(f"✅ Prometheus metrics initialized for {service_name}")
+        logger.info(f"[OK] Prometheus metrics initialized for {service_name}")
     except Exception as e:
         logger.error(f"Failed to setup metrics: {e}")
 

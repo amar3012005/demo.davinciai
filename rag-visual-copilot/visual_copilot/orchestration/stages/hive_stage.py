@@ -67,6 +67,6 @@ def compute_location_guard_candidate(*, effective_step: int, action_history: Opt
         if isinstance(last_entry, str) and last_entry.startswith("type:"):
             last_action_was_type = True
     if last_action_was_type:
-        logger.info("⏩ LOCATION GUARD Skipped: last action was a search (type). Waiting for results to render.")
+        logger.info("[SKIP] LOCATION GUARD Skipped: last action was a search (type). Waiting for results to render.")
         return False
     return True

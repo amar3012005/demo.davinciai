@@ -8,13 +8,19 @@ These schemas define the specific rigid capabilities the Groq LLM can invoke
 when attempting to autonomously resolve a goal in the `last_mile` phase.
 
 Tool Priority (enforced in system prompt):
-  1. complete_mission — when evidence exists
-  2. read_page_content — to re-examine visible content
-  3. type_text — to search/filter
-  4. click_element — only when evidence insufficient
-  5. scroll_page — to reveal hidden content
-  6. wait_for_ui — when page is loading
-  7. request_vision — system-triggered only
+  For ACTION goals (Create/Add/Click/Select/Open/Make):
+    1. click_element — MUST click the target button first
+    2. wait_for_ui — wait for UI to update after click
+    3. complete_mission — only AFTER the click succeeds and result is visible
+  For INFORMATION goals (What/How/Show/Find):
+    1. complete_mission — when evidence exists in readable content
+    2. read_page_content — to re-examine visible content
+    3. click_element — only when evidence insufficient
+  Common:
+    4. type_text — to search/filter
+    5. scroll_page — to reveal hidden content
+    6. wait_for_ui — when page is loading
+    7. request_vision — system-triggered only
 """
 
 LAST_MILE_TOOLS = [
@@ -23,12 +29,12 @@ LAST_MILE_TOOLS = [
         "function": {
             "name": "complete_mission",
             "description": (
-                "HIGHEST PRIORITY TOOL. Finalize the task with a grounded answer. "
-                "Call this FIRST whenever the readable page content contains evidence "
-                "that answers the user's goal. You MUST include the actual answer text "
-                "extracted from the page, not just a summary. Include evidence_refs "
-                "pointing to the specific content that supports your answer. "
-                "STRICT VERIFICATION: Before calling complete_mission, you MUST verify that the data matches the specific target entity requested. If the user asked for a specific model (e.g. 'Whisper') but the screen shows a different one (e.g. 'GPT-OSS-120B' or 'Playground'), you are NOT done. Use scroll_page or click tabs to find the correct entity entry."
+                "Finalize the task with a grounded answer extracted from visible page content. "
+                "CRITICAL CONSTRAINT: If the user's goal is action-oriented (Create, Add, Click, Select, Open, Make), "
+                "you are FORBIDDEN from calling complete_mission until you have physically CLICKED the relevant button "
+                "and verified the resulting UI change. Seeing a button is NOT completion — clicking it IS. "
+                "For information-seeking goals (What, How, Show usage), call this when readable content answers the goal. "
+                "You MUST include actual answer text and evidence_refs from the page."
             ),
             "parameters": {
                 "type": "object",

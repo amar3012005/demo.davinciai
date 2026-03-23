@@ -115,6 +115,12 @@
                   "Activity Tab",
                   "Cost Tab"
                 ],
+                "control_aliases": {
+                  "Date Picker": ["date", "march", "february", "january", "april", "may", "june", "july", "august", "september", "october", "november", "december", "2024", "2025", "2026", "calendar", "date range", "last 7 days", "last 30 days", "last 90 days", "this month", "custom range"],
+                  "Model Filter": ["models", "all models", "model", "select model", "filter model", "llama", "whisper", "mixtral", "gemma"],
+                  "Activity Tab": ["activity", "tokens", "requests", "token usage"],
+                  "Cost Tab": ["cost", "spend", "billing", "dollars", "usd"]
+                },
                 "required_controls": [
                   "Date Picker",
                   "Model Filter"

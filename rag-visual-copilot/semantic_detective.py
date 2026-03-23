@@ -120,12 +120,12 @@ class SemanticDetective:
         if embeddings is not None:
             self.model = embeddings
             self._model_available = True
-            logger.info("🔍 SemanticDetective using provided embeddings instance")
+            logger.info("[SEARCH] SemanticDetective using provided embeddings instance")
         elif SENTENCE_TRANSFORMERS_AVAILABLE:
             try:
                 self.model = SentenceTransformer(model_name)
                 self._model_available = True
-                logger.info(f"🔍 SemanticDetective loaded model: {model_name}")
+                logger.info(f"[SEARCH] SemanticDetective loaded model: {model_name}")
             except Exception as e:
                 logger.warning(f"Could not load sentence transformer: {e}")
         else:
@@ -134,7 +134,7 @@ class SemanticDetective:
                 from remote_embeddings import RemoteEmbeddings
                 self.model = RemoteEmbeddings()
                 self._model_available = True
-                logger.info("🔍 SemanticDetective using RemoteEmbeddings as fallback")
+                logger.info("[SEARCH] SemanticDetective using RemoteEmbeddings as fallback")
             except ImportError:
                 logger.warning("Neither sentence-transformers nor RemoteEmbeddings available, using keyword fallback")
 
@@ -185,7 +185,7 @@ class SemanticDetective:
         # Build set of already-tried element IDs for penalty
         _excluded = set(excluded_ids or [])
         if _excluded:
-            logger.info(f"🔍 Detective excluding {len(_excluded)} already-tried IDs: {list(_excluded)[:5]}")
+            logger.info(f"[SEARCH] Detective excluding {len(_excluded)} already-tried IDs: {list(_excluded)[:5]}")
 
         # ═══════════════════════════════════════════════════════════════
         # BATCH EMBEDDING: Pre-compute query + all node embeddings at once
@@ -219,7 +219,7 @@ class SemanticDetective:
                     for i, node in enumerate(interactive_nodes):
                         node_vectors[node.id] = all_embeddings[i]
                 
-                logger.debug(f"🔍 Batch embedded: 1 query + {len(all_texts)} nodes")
+                logger.debug(f"[SEARCH] Batch embedded: 1 query + {len(all_texts)} nodes")
             except Exception as e:
                 logger.warning(f"Batch embedding failed, falling back to keyword scoring: {e}")
                 query_vector = None

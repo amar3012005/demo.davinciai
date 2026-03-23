@@ -212,13 +212,13 @@ async def run_router_pre_detective_stage(
                 f"({current_idx + 1}/{total_subgoals}). Guard runs at terminal phase only."
             )
         else:
-            logger.info(f"🎯 LOCATION GUARD: Terminal-phase LLM check for '{schema.target_entity}'...")
+            logger.info(f"[TARGET] LOCATION GUARD: Terminal-phase LLM check for '{schema.target_entity}'...")
             nodes = await live_graph.get_visible_nodes(session_id)
             is_arrived, arrival_reason = await check_if_arrived_fn(
                 app, session_id, goal, current_url, nodes, schema
             )
             if is_arrived:
-                logger.info("🎯 LOCATION GUARD: LLM confirmed arrival at terminal phase. Generating final answer...")
+                logger.info("[TARGET] LOCATION GUARD: LLM confirmed arrival at terminal phase. Generating final answer...")
                 visible_text = " ".join([n.text for n in nodes if n.text])
                 try:
                     summary_prompt = f"The user asked '{goal}'. Summarize the answer briefly using this page content: {visible_text[:3000]}"
@@ -280,7 +280,7 @@ async def run_router_pre_detective_stage(
         )
 
     if subgoal_mode == "cognitive_read":
-        logger.info("🧠 READ MODE: terminal read-only path (no click/type fallback).")
+        logger.info("[BRAIN] READ MODE: terminal read-only path (no click/type fallback).")
         read_result = await run_read_only_terminal_fn(
             session_id=session_id,
             app=app,
@@ -560,7 +560,7 @@ async def run_router_pre_detective_stage(
                 None,
             )
             if _target_node:
-                logger.info(f"   ⚡ FAST PATH: ID '{_target_id}' not found, using search input '{_target_node.id}' instead")
+                logger.info(f"   [FAST] FAST PATH: ID '{_target_id}' not found, using search input '{_target_node.id}' instead")
                 _target_id = _target_node.id
 
         _already_typed = any(
@@ -569,7 +569,7 @@ async def run_router_pre_detective_stage(
         )
 
         if _target_node and not _already_typed:
-            logger.info(f"   ⚡ FAST PATH: TYPE '{_text_to_type}' into {_target_id} (tag={_target_node.tag}) + press_enter")
+            logger.info(f"   [FAST] FAST PATH: TYPE '{_text_to_type}' into {_target_id} (tag={_target_node.tag}) + press_enter")
             _next_idx = await record_and_maybe_advance_fn(
                 mission_brain=mission_brain,
                 mission=mission,
@@ -614,11 +614,11 @@ async def run_router_pre_detective_stage(
                 mission = await mission_brain._load_mission(mission.mission_id)
                 if mission and mission.current_subgoal_index < len(mission.subgoals):
                     query = mission.subgoals[mission.current_subgoal_index]
-                    logger.info(f"   ⏩ New query (subgoal {mission.current_subgoal_index}): '{query}'")
+                    logger.info(f"   [SKIP] New query (subgoal {mission.current_subgoal_index}): '{query}'")
                 else:
-                    logger.info("   🏁 All subgoals exhausted after auto-advance.")
+                    logger.info("   [DONE] All subgoals exhausted after auto-advance.")
         else:
-            logger.info(f"   ⚡ FAST PATH: ID '{_target_id}' not found as interactive in DOM, falling through")
+            logger.info(f"   [FAST] FAST PATH: ID '{_target_id}' not found as interactive in DOM, falling through")
 
     elif _click_shortcut:
         _target_id = _click_shortcut.group(1).rstrip("]")
@@ -630,7 +630,7 @@ async def run_router_pre_detective_stage(
             None,
         )
         if _generic_click_shortcut and _target_node:
-            logger.info("   ⚡ FAST PATH: generic 'Click element [ID: ...]' resolved via grounded ID.")
+            logger.info("   [FAST] FAST PATH: generic 'Click element [ID: ...]' resolved via grounded ID.")
         if _target_node and f"click:{_target_id}" not in mission.action_history:
             _retargeted_node, _retarget_reason = retarget_click_to_nav_duplicate_if_needed_fn(
                 target_node=_target_node,
@@ -646,7 +646,7 @@ async def run_router_pre_detective_stage(
                 _target_node = _retargeted_node
                 _target_id = _retargeted_node.id
             _btn_label = (_target_node.text[:40].strip() if _target_node.text else "the element")
-            logger.info(f"   ⚡ FAST PATH: CLICK '{_target_node.text[:30] if _target_node.text else ''}' [ID: {_target_id}]")
+            logger.info(f"   [FAST] FAST PATH: CLICK '{_target_node.text[:30] if _target_node.text else ''}' [ID: {_target_id}]")
             _next_idx = await record_and_maybe_advance_fn(
                 mission_brain=mission_brain,
                 mission=mission,
@@ -678,7 +678,7 @@ async def run_router_pre_detective_stage(
             }
 
     if query.lower().startswith("ask user:"):
-        logger.info(f"   💬 ReAct wants to clarify: '{query}' — skipping Semantic Detective.")
+        logger.info(f"   [CLARIFY] ReAct wants to clarify: '{query}' -- skipping Semantic Detective.")
         speech = query[9:].strip()
         mission.status = "paused"
         await mission_brain._save_mission(mission)
@@ -699,7 +699,7 @@ async def run_router_pre_detective_stage(
         }
 
     if "extract and present" in query.lower():
-        logger.info("   🏁 ReAct signaled completion: validating and ending mission.")
+        logger.info("   [DONE] ReAct signaled completion: validating and ending mission.")
         end_result = await validate_and_end_mission_fn(
             schema, nodes, mission, mission_brain, app, start_time
         )

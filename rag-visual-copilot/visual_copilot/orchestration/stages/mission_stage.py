@@ -153,24 +153,23 @@ async def prepare_mission_and_query(
             }
 
         if len(new_subgoals) == 1 and "extract and present" in new_subgoals[0].lower():
-            logger.info("🏁 ReAct signals DONE. Validating mission completion...")
+            logger.info("REACT_SIGNALS_DONE validating mission completion")
             end_result = await validate_and_end_mission_fn(
                 schema, nodes, mission, mission_brain, app, start_time
             )
             if end_result:
                 return mission, None, None, excluded_ids, False, "", end_result
-            logger.info("🔄 Validator says NOT done yet. Continuing mission.")
+            logger.debug("VALIDATOR_NOT_DONE continuing mission")
             new_subgoals = [f"Navigate to {schema.target_entity}"]
 
         mission.subgoals = new_subgoals
         mission.current_subgoal_index = 0
         mission.status = "in_progress"
         await mission_brain._save_mission(mission)
-        logger.info(f"🧭 Zero-Shot re-plan: new subgoal = '{new_subgoals[0]}'")
+        logger.info(f"ZERO_SHOT_REPLAN new_subgoal='{new_subgoals[0]}'")
 
-    logger.info(
-        f"   ✅ Mission: {mission.mission_id}, Subgoal(indexed): "
-        f"{mission_progress_label_fn(mission)}"
+    logger.debug(
+        f"MISSION_STATE mission={mission.mission_id} subgoal={mission_progress_label_fn(mission)}"
     )
 
     if is_zero_shot and not mission.subgoals:
@@ -248,10 +247,6 @@ async def prepare_mission_and_query(
                     f"target={pending_target or 'none'}"
                 )
                 await mission_brain._save_mission(mission)
-                logger.info(
-                    f"   ✅ Mission(after-verify): {mission.mission_id}, Subgoal(indexed): "
-                    f"{mission_progress_label_fn(mission)}"
-                )
             else:
                 mission.pending_verify_attempts = int(getattr(mission, "pending_verify_attempts", 0) or 0) + 1
                 if mission.pending_verify_attempts >= 2:
@@ -315,9 +310,8 @@ async def prepare_mission_and_query(
 
 
 
-        logger.info(
-            f"   ✅ Mission(after-verify): {mission.mission_id}, Subgoal(indexed): "
-            f"{mission_progress_label_fn(mission)}"
+        logger.debug(
+            f"MISSION_AFTER_VERIFY mission={mission.mission_id} subgoal={mission_progress_label_fn(mission)}"
         )
 
     if mission and mission.status in ("completed", "paused"):
@@ -350,16 +344,15 @@ async def prepare_mission_and_query(
 
         if is_valid:
             if expected_node:
-                logger.info(
-                    f"SITE_MAP_CLICK_VALID: '{click_target}' is valid on current page. "
-                    f"Expected outcome: '{expected_node.get('title', '?')}' "
-                    f"({expected_node.get('node_id', '?')})"
+                logger.debug(
+                    f"SITE_MAP_CLICK_VALID target='{click_target}' "
+                    f"expected_node='{expected_node.get('node_id', '?')}'"
                 )
                 # Store expected node for post-navigation validation
                 mission.expected_navigation_target = expected_node.get("node_id", "")
                 await mission_brain._save_mission(mission)
             else:
-                logger.info(f"SITE_MAP_CLICK_VALID: '{click_target}' - {validation_msg}")
+                logger.debug(f"SITE_MAP_CLICK_VALID target='{click_target}' msg={validation_msg}")
         else:
             # Click target not recognized as expected control
             logger.warning(f"SITE_MAP_CLICK_WARNING: {validation_msg}")
@@ -372,9 +365,8 @@ async def prepare_mission_and_query(
                     # Suggest backtracking if we have a parent
                     parent = validator.get_parent_node(current_node.get("node_id", ""))
                     if parent:
-                        logger.info(
-                            f"SITE_MAP_RECOVERY_SUGGESTION: Backtrack to parent "
-                            f"'{parent.get('title', '?')}' ({parent.get('node_id', '?')})"
+                        logger.debug(
+                            f"SITE_MAP_RECOVERY_SUGGESTION parent='{parent.get('node_id', '?')}'"
                         )
 
     query = current_subgoal
@@ -384,7 +376,7 @@ async def prepare_mission_and_query(
         if _subgoal_total > 0
         else mission.current_subgoal_index
     )
-    logger.info(f"   🎯 Query (subgoal {_subgoal_display_idx}): '{query}'")
+    logger.info(f"QUERY subgoal={_subgoal_display_idx} query='{query}'")
     domain_name = getattr(schema, "domain", "unknown")
     pre_subgoal_mode = classify_subgoal_mode_fn(query)
     total_subgoals_pre = len(mission.subgoals or [])

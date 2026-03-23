@@ -177,15 +177,15 @@ INSTRUCTIONS:
             action_name = tool_call["function"]["name"]
             args = json.loads(tool_call["function"]["arguments"])
 
-            logger.info(f"   🧠 Tier 3 Chain of Draft: {args.get('draft_thought')}")
-            logger.info(f"   🚀 Tier 3 Tool Call: {action_name}")
+            logger.info(f"   [BRAIN] Tier 3 Chain of Draft: {args.get('draft_thought')}")
+            logger.info(f"   [STARTUP] Tier 3 Tool Call: {action_name}")
 
             if action_name == "click_element":
                 resolved_id, resolve_reason = _resolve_clickable_target_id(
                     args.get("target_id", ""), nodes, excluded_ids=excluded_ids
                 )
                 if resolved_id and resolved_id != args.get("target_id", ""):
-                    logger.info(f"   🧭 Tier 3 click target remap: {args.get('target_id')} -> {resolved_id}")
+                    logger.info(f"   [ZERO-SHOT] Tier 3 click target remap: {args.get('target_id')} -> {resolved_id}")
                     args["target_id"] = resolved_id
                 
                 # RELAX: For strategy subgoals, allow re-clicking if it's the explicit target
@@ -205,7 +205,7 @@ INSTRUCTIONS:
                 
                 ok, reason = _validate_action_target("click", args.get("target_id", ""), nodes, excluded_ids=validation_excluded_ids)
                 if not ok:
-                    logger.warning(f"   🚫 Tier 3 rejected ungrounded click target: {reason} (resolve={resolve_reason})")
+                    logger.warning(f"   [BLOCKED] Tier 3 rejected ungrounded click target: {reason} (resolve={resolve_reason})")
                     return None
                 if expected_labels:
                     _candidate = next((n for n in nodes if getattr(n, "id", "") == args.get("target_id", "")), None)
@@ -243,10 +243,10 @@ INSTRUCTIONS:
                 _t3_text = args.get("text_to_type", "")
                 ok, reason = _validate_action_target("type_text", args.get("target_id", ""), nodes, excluded_ids=excluded_ids)
                 if not ok:
-                    logger.warning(f"   🚫 Tier 3 rejected ungrounded type target: {reason}")
+                    logger.warning(f"   [BLOCKED] Tier 3 rejected ungrounded type target: {reason}")
                     fallback_type_node = _find_best_type_target(nodes, query, excluded_ids or set())
                     if fallback_type_node:
-                        logger.info(f"   🧭 Tier 3 type fallback: using grounded input {fallback_type_node.id} after rejection={reason}")
+                        logger.info(f"   [ZERO-SHOT] Tier 3 type fallback: using grounded input {fallback_type_node.id} after rejection={reason}")
                         _next_idx = await record_and_maybe_advance(
                             mission_brain=mission_brain,
                             mission=mission,
@@ -282,7 +282,7 @@ INSTRUCTIONS:
                     if not _node_matches_expected_labels(_candidate, expected_labels, expected_domain):
                         logger.warning("TIER3_REJECT reason=tier3_label_mismatch action=type_text")
                         return None
-                logger.info(f"   🚀 V1 Fallback Success: TYPE '{_t3_text}' into {args['target_id']}")
+                logger.info(f"   [STARTUP] V1 Fallback Success: TYPE '{_t3_text}' into {args['target_id']}")
                 _next_idx = await record_and_maybe_advance(
                     mission_brain=mission_brain,
                     mission=mission,
@@ -314,7 +314,7 @@ INSTRUCTIONS:
                 }
 
             if action_name == "answer_user":
-                logger.info("   🧠 Tier 3: LLM says goal is already visible — no click needed.")
+                logger.info("   [BRAIN] Tier 3: LLM says goal is already visible -- no click needed.")
                 await mission_brain.advance_subgoal(mission.mission_id, is_zero_shot=getattr(schema, "zero_shot_mode", False) or is_zero_shot)
                 return {
                     "success": True,
@@ -326,6 +326,6 @@ INSTRUCTIONS:
                 }
 
     except Exception as e:
-        logger.error(f"   ❌ Tier 3 V1 Fallback failed: {e}")
+        logger.error(f"   [ERROR] Tier 3 V1 Fallback failed: {e}")
 
     return None

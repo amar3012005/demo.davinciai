@@ -165,12 +165,12 @@ async def ultimate_plan_next_step_impl(
     live_graph = app.state.live_graph
     
     if not all([mind_reader, hive_interface, mission_brain, semantic_detective, live_graph]):
-        logger.warning("⚠️ Ultimate TARA modules not fully initialized, falling back to legacy")
+        logger.warning("[WARN] Ultimate TARA modules not fully initialized, falling back to legacy")
         return None
     
     try:
         excluded_ids = build_excluded_ids(action_history)
-        logger.info(f"📋 action_history: {len(action_history or [])} entries, {len(excluded_ids)} excluded click IDs")
+        logger.info(f"[PLAN] action_history: {len(action_history or [])} entries, {len(excluded_ids)} excluded click IDs")
 
         existing_mission, effective_step, early_response = await apply_frontend_amnesia_guard(
             mission_brain=mission_brain,
@@ -202,7 +202,7 @@ async def ultimate_plan_next_step_impl(
             )
             action_history = backend_history
             excluded_ids = build_excluded_ids(action_history)
-            logger.info(f"📋 action_history (restored): {len(action_history)} entries, {len(excluded_ids)} excluded click IDs")
+            logger.info(f"[PLAN] action_history (restored): {len(action_history)} entries, {len(excluded_ids)} excluded click IDs")
 
         set_pre_mission_context(
             app_state=app.state,
@@ -221,7 +221,7 @@ async def ultimate_plan_next_step_impl(
 
         # Prefetch LiveGraph + optional quick Hive probe in parallel
         nodes_task = asyncio.create_task(live_graph.get_visible_nodes(session_id))
-        logger.info("👁️ Step 0: Live Graph prefetch started...")
+        logger.debug("LiveGraph prefetch started")
 
         quick_hive_probe = None
         pre_decision_livegraph_ms = 0
@@ -412,28 +412,28 @@ async def ultimate_plan_next_step_impl(
                 pre_decision_last_mile_goal = last_mile_entries[-1].split(":", 1)[-1].strip()
             nav_subgoals = [s for s in pre_decision_strategy_sequence if not s.strip().upper().startswith("LAST_MILE:")]
             logger.info(
-                f"⚡ PRE-DECISION STRATEGY: {len(nav_subgoals)} nav subgoals, "
+                f"PRE-DECISION STRATEGY: {len(nav_subgoals)} nav subgoals, "
                 f"last_mile={'yes' if pre_decision_last_mile_goal else 'no'}"
             )
             if isinstance(pre_decision, dict):
                 reasoning_log = pre_decision.get("reasoning") or pre_decision.get("reason")
                 if reasoning_log:
-                    logger.info(f"🧠 PRE-DECISION REASONING: {reasoning_log}")
+                    logger.info(f"[BRAIN] PRE-DECISION REASONING: {reasoning_log}")
 
         if pre_decision_strategy_sequence or pre_decision_last_mile_goal:
-            logger.info("⚡ FAST-TRACK: Bypassing Mind Reader with Pre-Decision optimized strategy.")
+            logger.info("[FAST] FAST-TRACK: Bypassing Mind Reader with Pre-Decision optimized strategy.")
             
             # Log the full PageIndex strategy sequence for visibility
             if pre_decision_strategy_sequence:
-                logger.info(f"📋 PAGEINDEX STRATEGY SEQUENCE ({len(pre_decision_strategy_sequence)} steps):")
+                logger.info(f"[PLAN] PAGEINDEX STRATEGY SEQUENCE ({len(pre_decision_strategy_sequence)} steps):")
                 for idx, step in enumerate(pre_decision_strategy_sequence, 1):
                     # Clean up double "LAST_MILE:" prefix if present
                     clean_step = step
                     if clean_step.upper().startswith("LAST_MILE: LAST_MILE:"):
                         clean_step = "LAST_MILE: " + clean_step.split("LAST_MILE:", 2)[-1].strip()
                         pre_decision_strategy_sequence[idx-1] = clean_step  # Fix in-place
-                    step_type = "🎯 LAST_MILE" if clean_step.upper().startswith("LAST_MILE:") else "🔀 NAV"
-                    logger.info(f"   {idx}. {step_type}: {clean_step}")
+                    step_type = "LAST_MILE" if clean_step.upper().startswith("LAST_MILE:") else "NAV"
+                    logger.debug(f"   {idx}. {step_type}: {clean_step}")
             
             domain_val = _domain_for_probe if '_domain_for_probe' in locals() else ""
             # If only LAST_MILE (no nav subgoals), use EXTRACTION action; otherwise NAVIGATION
@@ -457,8 +457,12 @@ async def ultimate_plan_next_step_impl(
             #    This avoids round-trips between each click.
             #    CONSTRAINT: Only works if ALL targets are visible in current DOM.
             # ═══════════════════════════════════════════════════════════
+            # DISABLED: Bundled nav causes subgoal index/verification issues.
+            # Each nav step is now executed and verified individually through
+            # the mission stage, which is more reliable even if slightly slower.
             if (
-                nav_subgoals
+                False  # bundled nav disabled
+                and nav_subgoals
                 and len(nav_subgoals) >= 1
                 and effective_step == 0
                 and isinstance(pre_decision, dict)
@@ -522,9 +526,9 @@ async def ultimate_plan_next_step_impl(
                             "speech": f"Clicking {label}...",
                         })
                         excluded_ids.add(best_id)
-                        logger.info(f"  ✓ Mapped '{nav_step}' -> {best_id} (score={best_score})")
+                        logger.debug(f"Mapped '{nav_step}' -> {best_id} (score={best_score})")
                     else:
-                        logger.warning(f"  ✗ Could not resolve '{nav_step}' in current DOM")
+                        logger.warning(f"Could not resolve '{nav_step}' in current DOM")
                         all_resolved = False
 
                 # Only use bundled navigation if ALL targets are visible
@@ -579,7 +583,7 @@ async def ultimate_plan_next_step_impl(
 
                         # 2. Stage final click for verification logic in next turn
                         if verified_advance_active:
-                            logger.info(f"🎯 PAGEINDEX_BUNDLED_NAV: Staging final click {final_click['target_id']} (subgoal {mission.current_subgoal_index}) for verification")
+                            logger.info(f"[TARGET] PAGEINDEX_BUNDLED_NAV: Staging final click {final_click['target_id']} (subgoal {mission.current_subgoal_index}) for verification")
                             await _record_and_maybe_advance(
                                 mission_brain=mission_brain,
                                 mission=mission,
@@ -605,18 +609,18 @@ async def ultimate_plan_next_step_impl(
                             await mission_brain._save_mission(mission)
 
                     logger.info(
-                        f"🎯 PAGEINDEX_BUNDLED_NAV: Returning {len(bundled_actions)}-step pipeline"
+                        f"PAGEINDEX_BUNDLED_NAV: Returning {len(bundled_actions)}-step pipeline"
                     )
                     # Log the full bundled pipeline for debugging
-                    logger.info(f"   📦 BUNDLED PIPELINE ({len(bundled_actions)} actions):")
+                    logger.info(f"   [BUNDLE] BUNDLED PIPELINE ({len(bundled_actions)} actions):")
                     for idx, action in enumerate(bundled_actions, 1):
                         action_type = action.get("type", "unknown")
                         target = action.get("target_id", "N/A")
                         text = action.get("text", "")
                         if action_type == "click":
-                            logger.info(f"      {idx}. 🔘 CLICK {text} (id={target})")
+                            logger.info(f"      {idx}. [CLICK] CLICK {text} (id={target})")
                         elif action_type == "wait":
-                            logger.info(f"      {idx}. ⏳ WAIT {action.get('seconds', 2)}s")
+                            logger.info(f"      {idx}. [WAIT] WAIT {action.get('seconds', 2)}s")
                         else:
                             logger.info(f"      {idx}. {action_type.upper()} (id={target})")
                     
@@ -637,7 +641,7 @@ async def ultimate_plan_next_step_impl(
             #    trigger compound last_mile IMMEDIATELY. Skip everything.
             # ═══════════════════════════════════════════════════════════
             if not nav_subgoals and pre_decision_last_mile_goal and effective_step == 0:
-                logger.info(f"⚡ INSTANT LAST_MILE: No nav subgoals — triggering compound last_mile directly for '{pre_decision_last_mile_goal}'")
+                logger.info(f"[FAST] INSTANT LAST_MILE: No nav subgoals -- triggering compound last_mile directly for '{pre_decision_last_mile_goal}'")
                 # Get nodes
                 if 'nodes' not in locals() or not nodes:
                     try:
@@ -883,13 +887,13 @@ async def ultimate_plan_next_step_impl(
                 effective_step=effective_step,
             )
             if schema_cached:
-                logger.info(f"🧠 Step 1: CACHED → {schema.action.value} on '{schema.target_entity}' (0 LLM calls)")
+                logger.info(f"[BRAIN] Step 1: CACHED -> {schema.action.value} on '{schema.target_entity}' (0 LLM calls)")
             else:
                 prefetched_nodes = None
                 try:
                     prefetched_nodes = await nodes_task
                     nodes = prefetched_nodes
-                    logger.info(f"   ✅ DOM nodes (prefetch): {len(nodes)}")
+                    logger.debug(f"DOM nodes_prefetch={len(nodes)}")
                 except Exception as prefetch_err:
                     logger.warning(f"DOM prefetch failed before intent parse, falling back: {prefetch_err}")
 
@@ -940,10 +944,10 @@ async def ultimate_plan_next_step_impl(
         )
 
         hints = ""
-        logger.debug("⏩ Step 2: GPS hints disabled (Hive visual_hints used instead)")
+        logger.debug("[SKIP] Step 2: GPS hints disabled (Hive visual_hints used instead)")
 
         if pre_decision_strategy_sequence or pre_decision_last_mile_goal:
-            logger.info("⚡ FAST-TRACK: Bypassing Hive Interface with Pre-Decision optimized strategy.")
+            logger.debug("FAST_TRACK bypassing Hive Interface")
             
             visual_hints = []
             if quick_hive_probe and "top_hints" in quick_hive_probe:
@@ -971,10 +975,10 @@ async def ultimate_plan_next_step_impl(
             )
             hive_response.strategy_accepted = True  # CRITICAL: Ensures the mission stage locks the strategy
             domain_known_for_hive = quick_hive_probe.get("domain_indexed", True) if quick_hive_probe else True
-            logger.info(f"   ✅ Fast-Tracked Strategy: True, Hints: {len(hive_response.visual_hints)}")
+            logger.debug(f"fast_tracked=True hints={len(hive_response.visual_hints)}")
         else:
             if effective_step == 0:
-                logger.info("🧠 Step 3: Hive Interface retrieving strategy...")
+                logger.info("[BRAIN] Step 3: Hive Interface retrieving strategy...")
             hive_response, domain_known_for_hive = await resolve_hive_response(
                 app_state=app.state,
                 hive_interface=hive_interface,
@@ -984,14 +988,14 @@ async def ultimate_plan_next_step_impl(
                 skip_hive_prefetch=skip_hive_prefetch,
             )
             if effective_step == 0:
-                logger.info(f"   ✅ Strategy: {bool(hive_response.strategy)}, Hints: {len(hive_response.visual_hints)}")
+                logger.info(f"   [OK] Strategy: {bool(hive_response.strategy)}, Hints: {len(hive_response.visual_hints)}")
                 if not domain_known_for_hive:
                     logger.info(
                         f"HIVE_BYPASS_UNKNOWN_DOMAIN domain={getattr(schema, 'domain', 'unknown')} "
                         "reason=domain_not_indexed -> zero_shot_local"
                     )
             else:
-                logger.debug("⏩ Step 3: Using cached Hive response")
+                logger.debug("[SKIP] Step 3: Using cached Hive response")
 
         location_guard_candidate = compute_location_guard_candidate(
             effective_step=effective_step,
@@ -1024,11 +1028,11 @@ async def ultimate_plan_next_step_impl(
             except Exception as prefetch_err:
                 logger.warning(f"DOM prefetch failed, refetching live graph: {prefetch_err}")
                 nodes = await live_graph.get_visible_nodes(session_id)
-            logger.info(f"   ✅ DOM nodes: {len(nodes)}")
+            logger.debug(f"DOM nodes={len(nodes)}")
 
         # 🛡️ THE PHANTOM FIRE FIX: Prevent acting on an empty page transition
         if len(nodes) == 0:
-            logger.warning("   🚫 DOM is empty! Frontend fired prematurely during navigation. Forcing a wait.")
+            logger.warning("   [BLOCKED] DOM is empty! Frontend fired prematurely during navigation. Forcing a wait.")
             return {
                 "success": True,
                 "action": {"type": "wait", "speech": "Waiting for the page to finish loading..."},
@@ -1070,11 +1074,11 @@ async def ultimate_plan_next_step_impl(
             ]
             elem_count = len(matching_elements)
 
-            logger.info(f"🎯 DOM CHECK: '{schema.target_entity}' found in {elem_count} content elements (need 5+)")
+            logger.info(f"[TARGET] DOM CHECK: '{schema.target_entity}' found in {elem_count} content elements (need 5+)")
 
             if elem_count >= 5:
                 logger.info(
-                    f"🎯 FAST DOM CHECK: Goal '{schema.target_entity}' confirmed in {elem_count} elements. "
+                    f"FAST DOM CHECK: Goal '{schema.target_entity}' confirmed in {elem_count} elements. "
                     f"Completing immediately."
                 )
                 mission_for_fast_check = existing_mission
@@ -1087,7 +1091,7 @@ async def ultimate_plan_next_step_impl(
                 )
                 if end_result:
                     return end_result
-                logger.info("🎯 Fast DOM Check: validator said not done, continuing...")
+                logger.info("[TARGET] Fast DOM Check: validator said not done, continuing...")
 
         mission, query, domain_name, excluded_ids, enter_last_mile, last_mile_reason, mission_stage_response = await prepare_mission_and_query(
             session_id=session_id,
@@ -1130,17 +1134,17 @@ async def ultimate_plan_next_step_impl(
             # Check 1: LAST_MILE: prefix — always force (domain-independent)
             if query and str(query).strip().upper().startswith("LAST_MILE:"):
                 should_force_last_mile = True
-                logger.info(f"⚡ LAST_MILE PREFIX DETECTED in query — forcing last_mile regardless of domain canary")
+                logger.info(f"[FAST] LAST_MILE PREFIX DETECTED in query -- forcing last_mile regardless of domain canary")
             # Check 2: Pre-decision execution_mode — requires last_mile_enabled
             elif last_mile_enabled and isinstance(pre_decision, dict) and pre_decision.get("execution_mode") == "last_mile" and not nav_subgoals:
                 should_force_last_mile = True
             # Check 3: Waterfall Fallacy fix — once in last_mile, NEVER leave!
             elif mission and getattr(mission, "phase", "") == "last_mile":
                 should_force_last_mile = True
-                logger.info(f"⚡ WATERFALL FALLACY GUARD: Mission already in last_mile phase. Forcing continuation.")
+                logger.info(f"[FAST] WATERFALL FALLACY GUARD: Mission already in last_mile phase. Forcing continuation.")
 
         if should_force_last_mile:
-            logger.info(f"⚡ PRE-DECISION LAST_MILE OVERRIDE: Forcing direct last_mile entry. Goal: '{pre_decision_last_mile_goal or goal}'")
+            logger.info(f"[FAST] PRE-DECISION LAST_MILE OVERRIDE: Forcing direct last_mile entry. Goal: '{pre_decision_last_mile_goal or goal}'")
             enter_last_mile = True
             last_mile_enabled = True  # Force-enable last_mile for this request
             last_mile_reason = "pre_decision_last_mile_override"
@@ -1198,6 +1202,164 @@ async def ultimate_plan_next_step_impl(
                 "confidence": "medium",
                 "no_legacy_fallback": True,
             }
+
+        # ═══════════════════════════════════════════════════════════════
+        # ⚡ [CTRL] SUBGOAL HANDLER: Graph-walker-injected control subgoals
+        # Use site_map fuzzy grounding (0.70 threshold) instead of keyword
+        # router's strict threshold (0.75). Same validation, just looser matching.
+        # ═══════════════════════════════════════════════════════════════
+        if query and str(query).startswith("[CTRL] "):
+            ctrl_label = str(query).replace("[CTRL] ", "", 1)
+            # Strip "Click " or "Select " prefix to get the control/value name
+            ctrl_name = ctrl_label
+            for prefix in ("Click ", "Select "):
+                if ctrl_name.startswith(prefix):
+                    ctrl_name = ctrl_name[len(prefix):]
+                    break
+
+            try:
+                from visual_copilot.navigation.site_map_validator import SiteMapValidator
+                from visual_copilot.routing.action_guard import _is_clickable_node
+                import re as _re
+
+                _ctrl_validator = getattr(app.state, "_site_map_validator", None) if hasattr(app, "state") else None
+                if _ctrl_validator is None:
+                    _ctrl_validator = SiteMapValidator()
+                    if hasattr(app, "state"):
+                        app.state._site_map_validator = _ctrl_validator
+
+                # Debug: log what interactive elements are available
+                _interactive = [n for n in nodes if getattr(n, "interactive", False)]
+                _labels = [f"{getattr(n, 'id', '')}:{(getattr(n, 'text', '') or '')[:25]}" for n in _interactive if (getattr(n, 'text', '') or '').strip()][:20]
+                logger.warning(f"🔍 [CTRL] scanning for '{ctrl_name}' in {len(_interactive)} interactive ({len(_labels)} with text): {_labels}")
+
+                # Strategy 1: SiteMapValidator with aliases (primary name → then control_aliases from site_map)
+                ctrl_target_id = _ctrl_validator.find_control_with_aliases(
+                    ctrl_name, nodes, current_url, excluded_ids
+                )
+
+                # Strategy 2: Broad token scan — any interactive element where
+                # ANY significant token from the control name appears in node text
+                if not ctrl_target_id:
+                    ctrl_tokens = set(_re.findall(r"[a-z0-9]+", ctrl_name.lower()))
+                    # Remove generic tokens that match too broadly
+                    ctrl_tokens -= {"click", "select", "the", "a", "tab", "button", "picker", "filter"}
+                    if ctrl_tokens:
+                        best_id = None
+                        best_score = 0.0
+                        for n in nodes:
+                            if not getattr(n, "interactive", False):
+                                continue
+                            nid = str(getattr(n, "id", "") or "")
+                            if not nid or nid in excluded_ids:
+                                continue
+                            node_text = (getattr(n, "text", "") or "").lower().strip()
+                            if not node_text:
+                                continue
+                            node_tokens = set(_re.findall(r"[a-z0-9]+", node_text))
+                            overlap = len(ctrl_tokens & node_tokens)
+                            if overlap > 0:
+                                score = overlap / max(len(ctrl_tokens), 1)
+                                # Boost clickable elements
+                                if _is_clickable_node(n):
+                                    score += 0.1
+                                if score > best_score:
+                                    best_score = score
+                                    best_id = nid
+                        if best_id and best_score >= 0.3:
+                            ctrl_target_id = best_id
+                            logger.info(f"🔍 [CTRL] broad_scan grounded '{ctrl_name}' → {ctrl_target_id} (score={best_score:.2f})")
+
+                if ctrl_target_id:
+                    logger.warning(f"🎯 [CTRL] grounded '{ctrl_name}' → {ctrl_target_id}")
+                    if mission:
+                        # CTRL subgoals: advance immediately (no verified_advance).
+                        # In-page controls (dropdowns, filters, tabs) produce UI state
+                        # changes that verified_advance can't detect (no URL change).
+                        await _record_and_maybe_advance(
+                            mission_brain=mission_brain,
+                            mission=mission,
+                            action_type="click",
+                            target_id=ctrl_target_id,
+                            nodes=nodes,
+                            current_url=current_url,
+                            dom_signature=_build_dom_signature(nodes),
+                            verified_advance_active=False,  # Skip verification for CTRL subgoals
+                            is_zero_shot=False,
+                        )
+                        mission = await mission_brain._load_mission(mission.mission_id) or mission
+                    return {
+                        "success": True,
+                        "blocked": False,
+                        "action": {
+                            "type": "click",
+                            "target_id": ctrl_target_id,
+                            "speech": f"Clicking {ctrl_name}.",
+                            "force_click": True,  # In-page controls (Radix dropdowns, date pickers, filters) need forced clicks
+                        },
+                        "speech": f"Clicking {ctrl_name}.",
+                        "mission_id": mission.mission_id if mission else "",
+                        "pipeline": "graph_walker_ctrl",
+                        "confidence": "high",
+                    }
+                # Strategy 3: LLM fallback — ask 8b to pick from interactive elements
+                if not ctrl_target_id and app and hasattr(app, "state") and hasattr(getattr(app.state, "mind_reader", None), "llm"):
+                    try:
+                        _llm = app.state.mind_reader.llm
+                        _elements = "\n".join([
+                            f"  [{getattr(n, 'id', '')}] {getattr(n, 'tag', '')}: \"{(getattr(n, 'text', '') or '')[:50]}\""
+                            for n in nodes
+                            if getattr(n, "interactive", False) and (getattr(n, "text", "") or "").strip()
+                        ][:30])
+                        _llm_prompt = (
+                            f"Which interactive element matches the control '{ctrl_name}'?\n\n"
+                            f"INTERACTIVE ELEMENTS:\n{_elements}\n\n"
+                            f"Reply with ONLY the element ID (e.g., t-abc123) or 'none' if no match."
+                        )
+                        _llm_resp = await _llm.generate(_llm_prompt, model="llama-3.1-8b-instant", temperature=0.0)
+                        _llm_resp = (_llm_resp or "").strip()
+                        # Extract ID from response
+                        _id_match = _re.search(r"(t-[a-z0-9]+|date|radix-[a-zA-Z0-9_-]+)", _llm_resp)
+                        if _id_match:
+                            _llm_target = _id_match.group(1)
+                            # Verify it exists in DOM
+                            if any(str(getattr(n, "id", "")) == _llm_target for n in nodes):
+                                ctrl_target_id = _llm_target
+                                logger.warning(f"🧠 [CTRL] 8b_fallback grounded '{ctrl_name}' → {ctrl_target_id}")
+                                if mission:
+                                    await _record_and_maybe_advance(
+                                        mission_brain=mission_brain,
+                                        mission=mission,
+                                        action_type="click",
+                                        target_id=ctrl_target_id,
+                                        nodes=nodes,
+                                        current_url=current_url,
+                                        dom_signature=_build_dom_signature(nodes),
+                                        verified_advance_active=False,  # Skip verification for CTRL subgoals
+                                        is_zero_shot=False,
+                                    )
+                                    mission = await mission_brain._load_mission(mission.mission_id) or mission
+                                return {
+                                    "success": True,
+                                    "blocked": False,
+                                    "action": {
+                                        "type": "click",
+                                        "target_id": ctrl_target_id,
+                                        "speech": f"Clicking {ctrl_name}.",
+                                        "force_click": True,
+                                    },
+                                    "speech": f"Clicking {ctrl_name}.",
+                                    "mission_id": mission.mission_id if mission else "",
+                                    "pipeline": "graph_walker_ctrl_llm",
+                                    "confidence": "high",
+                                }
+                    except Exception as llm_err:
+                        logger.warning(f"⚠️ [CTRL] 8b_fallback error: {llm_err}")
+
+                if not ctrl_target_id:
+                    logger.warning(f"⚠️ [CTRL] all strategies failed for '{ctrl_name}' — falling through to keyword router")
+            except Exception as ctrl_err:
+                logger.warning(f"⚠️ [CTRL] handler error: {ctrl_err}")
 
         pre_router = await run_router_pre_detective_stage(
             app=app,
@@ -1333,10 +1495,36 @@ async def ultimate_plan_next_step_impl(
             record_and_maybe_advance_fn=_record_and_maybe_advance,
             extract_type_text_fn=_extract_type_text,
         )
+        # ═══════════════════════════════════════════════════════════════
+        # VALIDATION GATE: Block "success" with empty target_id
+        # If all routers failed to find a target, don't return a phantom click.
+        # ═══════════════════════════════════════════════════════════════
+        if detective_response and isinstance(detective_response, dict):
+            action = detective_response.get("action", {})
+            action_type = action.get("type", "") if isinstance(action, dict) else ""
+            target_id = action.get("target_id", "") if isinstance(action, dict) else ""
+            if action_type in ("click", "select") and not target_id:
+                logger.warning(
+                    f"🛡️ [VALIDATION_GATE] blocked click-on-none: "
+                    f"query='{query}' all routers returned empty target"
+                )
+                detective_response = {
+                    "success": True,
+                    "blocked": False,
+                    "action": {
+                        "type": "scroll",
+                        "speech": f"I couldn't find the control for '{query}'. Let me look further on this page.",
+                    },
+                    "speech": f"Looking for the right control...",
+                    "pipeline": "validation_gate_blocked",
+                    "confidence": "low",
+                    "mission_id": mission.mission_id if mission else "",
+                }
+
         return detective_response
-        
+
     except Exception as e:
-        logger.error(f"❌ Ultimate TARA pipeline failed: {e}")
+        logger.error(f"[ERROR] Ultimate TARA pipeline failed: {e}")
         import traceback
         traceback.print_exc()
         return None

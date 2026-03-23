@@ -190,7 +190,7 @@ class EventConsumer(ABC):
             name=f"claimer_{self.config.consumer_name}"
         )
         
-        logger.info(f"✅ {self.config.consumer_name} started")
+        logger.info(f"[OK] {self.config.consumer_name} started")
     
     async def stop(self):
         """Stop the consumer gracefully."""
@@ -214,12 +214,12 @@ class EventConsumer(ABC):
             except asyncio.CancelledError:
                 pass
         
-        logger.info(f"🛑 {self.config.consumer_name} stopped")
+        logger.info(f"[STOP] {self.config.consumer_name} stopped")
         logger.info(f"   Final metrics: {self.metrics.to_dict()}")
     
     async def _consume_loop(self):
         """Main consumer loop."""
-        logger.info(f"🎧 {self.config.consumer_name} consuming from {self.config.stream_key}")
+        logger.info(f"[CONSUMER] {self.config.consumer_name} consuming from {self.config.stream_key}")
         
         while self._running:
             try:
@@ -267,7 +267,7 @@ class EventConsumer(ABC):
                 
                 if claimed:
                     self.metrics.events_claimed += len(claimed)
-                    logger.info(f"📥 {self.config.consumer_name} claimed {len(claimed)} stuck messages")
+                    logger.info(f"[RECV] {self.config.consumer_name} claimed {len(claimed)} stuck messages")
                     
                     # Process claimed messages
                     for message_id, message_data in claimed:
@@ -470,7 +470,7 @@ class MultiStreamConsumer(EventConsumer):
         for stream in self.additional_streams:
             streams[stream] = ">"
         
-        logger.info(f"🎧 {self.config.consumer_name} consuming from {list(streams.keys())}")
+        logger.info(f"[CONSUMER] {self.config.consumer_name} consuming from {list(streams.keys())}")
         
         while self._running:
             try:

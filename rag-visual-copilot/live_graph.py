@@ -94,7 +94,7 @@ class LiveGraph:
         self.TTL = ttl
         # Tracking for session-based log rewriting
         self._last_logged_session = None
-        logger.info(f"📊 LiveGraph initialized with TTL={ttl}s")
+        logger.info(f"[GRAPH] LiveGraph initialized with TTL={ttl}s")
 
     def _graph_key(self, session_id: str) -> str:
         """
@@ -211,8 +211,8 @@ class LiveGraph:
             await pipe.execute()
             
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logger.info(
-                f"📸 Full scan: {len(nodes)} nodes stored for session {session_id} "
+            logger.debug(
+                f"Full scan: {len(nodes)} nodes stored for session {session_id} "
                 f"({elapsed_ms}ms)"
             )
 
@@ -297,11 +297,11 @@ class LiveGraph:
             with open(_SCAN_LOG_PATH, mode, encoding='utf-8') as f:
                 f.writelines(lines)
 
-            logger.debug(f"📝 Scan appended to {_SCAN_LOG_PATH}")
+            logger.debug(f"[NOTE] Scan appended to {_SCAN_LOG_PATH}")
 
         except Exception as e:
             # Never let file I/O crash the core pipeline
-            logger.warning(f"⚠️ Could not write scan to markdown: {e}")
+            logger.warning(f"[WARN] Could not write scan to markdown: {e}")
 
     async def _handle_incremental_update(self, session_id: str, delta: Dict[str, Any]) -> None:
         """
@@ -360,7 +360,7 @@ class LiveGraph:
             
             elapsed_ms = int((time.time() - start_time) * 1000)
             logger.debug(
-                f"📝 Delta update: +{added_count} ~{updated_count} -{removed_count} "
+                f"Delta update: +{added_count} ~{updated_count} -{removed_count} "
                 f"for session {session_id} ({elapsed_ms}ms)"
             )
             
@@ -428,7 +428,7 @@ class LiveGraph:
             all_nodes = await self.get_all_nodes(session_id)
             visible = [n for n in all_nodes if n.visible]
             interactive = [n for n in visible if n.interactive]
-            logger.info(f"👁️ get_visible_nodes: {len(visible)} visible, {len(interactive)} interactive (of {len(all_nodes)} total)")
+            logger.debug(f"get_visible_nodes: {len(visible)} visible, {len(interactive)} interactive (of {len(all_nodes)} total)")
             return visible
         except Exception as e:
             logger.error(f"get_visible_nodes failed: {e}")
@@ -655,7 +655,7 @@ class LiveGraph:
             keys = await self.redis.keys(f"graph:{session_id}*")
             if keys:
                 await self.redis.delete(*keys)
-                logger.info(f"🧹 Cleared graph for session {session_id}")
+                logger.info(f"[CLEANUP] Cleared graph for session {session_id}")
         except Exception as e:
             logger.error(f"clear_graph failed: {e}")
 
@@ -707,20 +707,20 @@ class LiveGraph:
 
             if node is None:
                 logger.warning(
-                    f"⚠️ PreFlight FAILED – node '{node_id}' no longer in Redis "
+                    f"PreFlight FAILED - node '{node_id}' no longer in Redis "
                     f"(likely removed by a concurrent DOM delta)"
                 )
                 return {"valid": False, "reason": "node_gone", "node": None}
 
             if not node.visible:
-                logger.warning(f"⚠️ PreFlight FAILED – node '{node_id}' is hidden")
+                logger.warning(f"[WARN] PreFlight FAILED - node '{node_id}' is hidden")
                 return {"valid": False, "reason": "not_visible", "node": node}
 
             if not node.interactive:
-                logger.warning(f"⚠️ PreFlight FAILED – node '{node_id}' not interactive")
+                logger.warning(f"[WARN] PreFlight FAILED - node '{node_id}' not interactive")
                 return {"valid": False, "reason": "not_interactive", "node": node}
 
-            logger.debug(f"✅ PreFlight PASSED – node '{node_id}' is live and clickable")
+            logger.debug(f"[OK] PreFlight PASSED - node '{node_id}' is live and clickable")
             return {"valid": True, "reason": "ok", "node": node}
 
         except Exception as e:

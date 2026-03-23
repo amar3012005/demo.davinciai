@@ -295,6 +295,135 @@ class SiteMapValidator:
 
         return False
 
+    def find_control_node_in_dom(
+        self,
+        control_name: str,
+        nodes: List[Any],
+        excluded_ids: Optional[Set[str]] = None,
+        fuzzy: bool = True,
+    ) -> Optional[str]:
+        """Find a control in the DOM and return its node ID (for deterministic grounding).
+
+        Same matching logic as _find_control_in_dom() but returns the actual
+        DOM node ID instead of a boolean. If the matched node is not interactive,
+        walks up the parent chain to find the nearest clickable ancestor.
+
+        Args:
+            control_name: Name of the control to find (e.g., "Create API Key Button")
+            nodes: List of DOM nodes to search
+            excluded_ids: IDs to skip (already clicked)
+            fuzzy: Whether to use fuzzy token matching
+
+        Returns:
+            DOM node ID string, or None if not found
+        """
+        from visual_copilot.routing.action_guard import _is_clickable_node, _resolve_clickable_target_id
+
+        control_lower = control_name.lower().strip()
+        control_tokens = set(re.findall(r"[a-z0-9]+", control_lower))
+        excl = excluded_ids or set()
+
+        for dom_node in nodes:
+            nid = str(getattr(dom_node, "id", "") or "")
+            if not nid or nid in excl:
+                continue
+
+            node_text = self._extract_control_text(dom_node)
+
+            matched = False
+            # Exact substring match
+            if control_lower in node_text:
+                matched = True
+            # Token-based fuzzy match
+            elif fuzzy and control_tokens:
+                node_tokens = set(re.findall(r"[a-z0-9]+", node_text))
+                if len(control_tokens & node_tokens) >= max(1, len(control_tokens) * 0.7):
+                    matched = True
+
+            if matched:
+                # Prefer interactive + clickable nodes
+                is_interactive = bool(getattr(dom_node, "interactive", False))
+                is_clickable = _is_clickable_node(dom_node)
+                if is_interactive and is_clickable:
+                    return nid
+                # Walk parent chain to find clickable ancestor
+                resolved, _ = _resolve_clickable_target_id(nid, nodes, excl)
+                if resolved:
+                    return resolved
+                # Still return the match even if not clickable — caller decides
+                if is_interactive:
+                    return nid
+
+        return None
+
+    def find_control_with_aliases(
+        self,
+        control_name: str,
+        nodes: List[Any],
+        current_url: str,
+        excluded_ids: Optional[Set[str]] = None,
+    ) -> Optional[str]:
+        """Find a control using primary name first, then site_map control_aliases.
+
+        This bridges the gap between abstract control names in site_map
+        (e.g., "Date Picker") and actual dynamic DOM text (e.g., "March 2026").
+
+        Args:
+            control_name: Abstract control name from site_map expected_controls
+            nodes: Live DOM nodes
+            current_url: Current page URL (to find the right site_map node)
+            excluded_ids: IDs to skip
+
+        Returns:
+            DOM node ID, or None
+        """
+        # First try primary name
+        result = self.find_control_node_in_dom(control_name, nodes, excluded_ids, fuzzy=True)
+        if result:
+            return result
+
+        # Look up aliases from site_map
+        current_node = self.get_node_for_url(current_url)
+        if not current_node:
+            return None
+
+        aliases_map = current_node.get("control_aliases", {})
+        aliases = aliases_map.get(control_name, [])
+        if not aliases:
+            return None
+
+        # Try each alias — prefer shortest matching text (trigger buttons, not list items)
+        from visual_copilot.routing.action_guard import _is_clickable_node, _resolve_clickable_target_id
+        excl = excluded_ids or set()
+
+        best_match_id = None
+        best_match_len = 999
+
+        for alias in aliases:
+            alias_lower = alias.lower().strip()
+            for dom_node in nodes:
+                if not getattr(dom_node, "interactive", False):
+                    continue
+                nid = str(getattr(dom_node, "id", "") or "")
+                if not nid or nid in excl:
+                    continue
+                node_text = self._extract_control_text(dom_node)
+                if alias_lower in node_text:
+                    # Prefer shorter text (trigger buttons like "March 2026" over
+                    # calendar cells like "Friday, March 13th, 2026, selected")
+                    text_len = len(node_text)
+                    if text_len < best_match_len:
+                        if _is_clickable_node(dom_node):
+                            best_match_id = nid
+                            best_match_len = text_len
+                        else:
+                            resolved, _ = _resolve_clickable_target_id(nid, nodes, excl)
+                            if resolved:
+                                best_match_id = resolved
+                                best_match_len = text_len
+
+        return best_match_id
+
     def validate_page_state(
         self,
         url: str,

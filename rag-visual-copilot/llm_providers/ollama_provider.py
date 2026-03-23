@@ -27,11 +27,11 @@ class OllamaProvider(LLMProvider):
             # Test connection by listing models
             models = ollama.list()
             self._client = True  # Flag that we're initialized
-            logger.info(f"✅ Ollama initialized: {self.model_name} (host: {self.host})")
+            logger.info(f"[OK] Ollama initialized: {self.model_name} (host: {self.host})")
             logger.info(f"   Available models: {len(models.get('models', []))}")
             return True
         except Exception as e:
-            logger.error(f"❌ Ollama initialization failed: {e}")
+            logger.error(f"[ERROR] Ollama initialization failed: {e}")
             logger.error("   Make sure Ollama is running: ollama serve")
             return False
     

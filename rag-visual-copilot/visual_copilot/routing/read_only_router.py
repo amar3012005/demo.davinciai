@@ -104,9 +104,9 @@ async def run_read_only_terminal(
             if data.get("found"):
                 speech = data.get("answer", "").strip()
                 if not speech:
-                    logger.info("🧠 READ MODE: model returned found=true but empty answer, treating as not-found.")
+                    logger.info("[BRAIN] READ MODE: model returned found=true but empty answer, treating as not-found.")
             else:
-                logger.info("🧠 READ MODE: no clear stats yet, attempting constrained semantic assist.")
+                logger.info("[BRAIN] READ MODE: no clear stats yet, attempting constrained semantic assist.")
     except Exception as e:
         logger.warning(f"Read-only extraction failed, using safe fallback: {e}")
 
@@ -143,7 +143,7 @@ async def run_read_only_terminal(
                 tag_ok = tag in {"a", "button", "summary"}
                 strong_match = ("focus_exact_match" in (cand.reasons or [])) or lexical >= 0.55
                 if tag_ok and zone_ok and overlap and strong_match and score >= 0.62 and cand.node_id not in excluded_ids:
-                    logger.info(f"🧠 READ MODE semantic assist: click '{cand.text[:40]}' (zone={cand.zone}, score={score:.2f}, lex={lexical:.2f})")
+                    logger.info(f"[BRAIN] READ MODE semantic assist: click '{cand.text[:40]}' (zone={cand.zone}, score={score:.2f}, lex={lexical:.2f})")
                     _next_idx = await record_and_maybe_advance(
                         mission_brain=mission_brain,
                         mission=mission,
@@ -167,7 +167,7 @@ async def run_read_only_terminal(
                         "pending_verification": verified_advance_active,
                         "timing_ms": int((time.time() - start_time) * 1000),
                     }
-                logger.info(f"🧠 READ MODE semantic assist rejected: text='{cand.text[:40] if cand and cand.text else ''}' zone={zone} score={score:.2f}")
+                logger.info(f"[BRAIN] READ MODE semantic assist rejected: text='{cand.text[:40] if cand and cand.text else ''}' zone={zone} score={score:.2f}")
         except Exception as e:
             logger.warning(f"READ MODE semantic assist failed: {e}")
 

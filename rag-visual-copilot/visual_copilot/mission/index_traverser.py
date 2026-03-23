@@ -163,7 +163,7 @@ def get_path_to_goal(current_url: str, goal: str, site_map: Dict[str, Any]) -> D
     if not current_node:
         current_node = root
         
-    logger.info(f"IndexTraverser | START | URL: {current_url} | Node: {current_node.get('node_id')}")
+    logger.debug(f"IndexTraverser START url={current_url} node={current_node.get('node_id')}")
 
     # Reasoning-Based Search (Global Top-Down)
     # Start from root to ensure we can reach any node in the tree, 
@@ -183,7 +183,7 @@ def get_path_to_goal(current_url: str, goal: str, site_map: Dict[str, Any]) -> D
         active_node = next_node
         reasoning_path.append(active_node.get("node_id", "unknown"))
 
-    logger.info(f"IndexTraverser | GOAL | Node: {active_node.get('node_id')} | Reasoning Path: {' -> '.join(reasoning_path)}")
+    logger.info(f"IndexTraverser GOAL node={active_node.get('node_id')} path={' -> '.join(reasoning_path)}")
 
     # Generate path
     path_nodes = _get_path_from_node_to_root(active_node, root)

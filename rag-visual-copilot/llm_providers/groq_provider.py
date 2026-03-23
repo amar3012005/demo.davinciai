@@ -32,10 +32,10 @@ class GroqProvider(LLMProvider):
                 )
             self._client = GroqProvider._client_instance
             self._last_usage: Dict[str, Any] = {}
-            logger.info(f"✅ Groq initialized (AsyncGroq): {self.model_name}")
+            logger.info(f"[OK] Groq initialized (AsyncGroq): {self.model_name}")
             return True
         except Exception as e:
-            logger.error(f"❌ Groq initialization failed: {e}")
+            logger.error(f"[ERROR] Groq initialization failed: {e}")
             return False
     
     def generate(
@@ -182,7 +182,7 @@ class GroqProvider(LLMProvider):
                     "model": model,
                 }
                 cache_suffix = f" | cached={cached_tokens}" if cached_tokens else ""
-                logger.info(f"🧬 Groq Usage: {u.prompt_tokens} prompt / {u.completion_tokens} completion. Total: {u.total_tokens}{cache_suffix}")
+                logger.info(f"[USAGE] Groq Usage: {u.prompt_tokens} prompt / {u.completion_tokens} completion. Total: {u.total_tokens}{cache_suffix}")
             else:
                 self._last_usage = {}
 
@@ -270,7 +270,7 @@ class GroqProvider(LLMProvider):
             # Log Usage
             if hasattr(chat_completion, 'usage'):
                 u = chat_completion.usage
-                logger.info(f"🧠 Reasoning [{model}] {reasoning_effort}: {u.prompt_tokens}→{u.completion_tokens} tokens (total: {u.total_tokens})")
+                logger.info(f"[BRAIN] Reasoning [{model}] {reasoning_effort}: {u.prompt_tokens}->{u.completion_tokens} tokens (total: {u.total_tokens})")
 
             message = chat_completion.choices[0].message
             reasoning = getattr(message, 'reasoning', None) or ""
@@ -293,7 +293,7 @@ class GroqProvider(LLMProvider):
                     content = fenced.group(1).strip()
             
             if reasoning:
-                logger.info(f"💭 CoT ({len(reasoning)} chars): {reasoning[:300]}...")
+                logger.info(f"[COT] CoT ({len(reasoning)} chars): {reasoning[:300]}...")
             
             return {"content": content, "reasoning": reasoning}
         except Exception as e:
@@ -535,7 +535,7 @@ class GroqProvider(LLMProvider):
                     }
                     self._last_usage = usage_info
                     cache_suffix = f" | cached={cached_tokens}" if cached_tokens else ""
-                    logger.info(f"🧬 Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.{cache_suffix}")
+                    logger.info(f"[USAGE] Groq Stream Usage: {chunk.usage.prompt_tokens} prompt / {chunk.usage.completion_tokens} completion.{cache_suffix}")
 
                 content = chunk.choices[0].delta.content
                 if content:

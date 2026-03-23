@@ -115,9 +115,9 @@ def create_fallback_provider(
             **kwargs
         )
         providers_list.append(primary)
-        logger.info(f"✅ Primary provider: {primary_provider} ({primary_model})")
+        logger.info(f"[OK] Primary provider: {primary_provider} ({primary_model})")
     except Exception as e:
-        logger.error(f"❌ Failed to create primary provider: {e}")
+        logger.error(f"[ERROR] Failed to create primary provider: {e}")
     
     # Create fallback
     try:
@@ -127,9 +127,9 @@ def create_fallback_provider(
             model_name=fallback_model
         )
         providers_list.append(fallback)
-        logger.info(f"✅ Fallback provider: {fallback_provider} ({fallback_model})")
+        logger.info(f"[OK] Fallback provider: {fallback_provider} ({fallback_model})")
     except Exception as e:
-        logger.error(f"❌ Failed to create fallback provider: {e}")
+        logger.error(f"[ERROR] Failed to create fallback provider: {e}")
     
     if not providers_list:
         raise RuntimeError("Failed to create any providers for fallback chain")

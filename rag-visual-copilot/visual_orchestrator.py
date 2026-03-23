@@ -1083,7 +1083,7 @@ class VisualOrchestrator:
         # GUARD: If filter is too aggressive, return original (minus SVG noise)
         if len(filtered) < 5 and len(dom_context) >= 5:
             fallback = [el for el in dom_context if el.get("type", "div").lower() not in _SVG_NOISE]
-            logger.warning(f"Smart DOM filter too aggressive: {len(dom_context)} → {len(filtered)}. Using fallback ({len(fallback)}).")
+            logger.warning(f"Smart DOM filter too aggressive: {len(dom_context)} -> {len(filtered)}. Using fallback ({len(fallback)}).")
             return fallback[:300]
         
         return filtered
@@ -1243,7 +1243,7 @@ class VisualOrchestrator:
 
     async def _explorer_first_contact(self, session, dom_context: list, url: str):
         """(C2) Protocol for first time visiting a domain in explorer mode."""
-        logger.info(f"🌍 Explorer Mode: First contact with {url}")
+        logger.info(f"[EXPLORER] Explorer Mode: First contact with {url}")
         
         # 1. Extract Skeleton
         skeleton = self._extract_site_skeleton(dom_context, url)
@@ -1570,7 +1570,7 @@ class VisualOrchestrator:
                 max_completion_tokens=1024,
                 response_format={"type": "json_object"},
             )
-            logger.info(f"💭 NAV-120B CoT: {result['reasoning'][:300]}..." if result.get('reasoning') else "NAV-120B: no CoT")
+            logger.info(f"[COT] NAV-120B CoT: {result['reasoning'][:300]}..." if result.get('reasoning') else "NAV-120B: no CoT")
             content = result['content'].strip()
             cot = result.get('reasoning', '')
 
@@ -1674,7 +1674,7 @@ class VisualOrchestrator:
                 max_completion_tokens=4096,
                 response_format={"type": "json_object"}
             )
-            logger.info(f"💭 REASON CoT: {result['reasoning'][:300]}..." if result.get('reasoning') else "REASON: no CoT")
+            logger.info(f"[COT] REASON CoT: {result['reasoning'][:300]}..." if result.get('reasoning') else "REASON: no CoT")
             content = result['content'].strip()
             cot = result.get('reasoning', '')
 
@@ -1731,7 +1731,7 @@ class VisualOrchestrator:
             cleaned = re.sub(r"(?<=[{,])\s*'([^']+)'\s*:", r' "\1":', cleaned)
             try:
                 data = json.loads(cleaned)
-                logger.info(f"🔧 JSON recovered via cleanup from {source_name}")
+                logger.info(f"[FIX] JSON recovered via cleanup from {source_name}")
                 return data
             except json.JSONDecodeError:
                 pass
@@ -1744,12 +1744,12 @@ class VisualOrchestrator:
                 extracted = re.sub(r',\s*([}\]])', r'\1', extracted)
                 try:
                     data = json.loads(extracted)
-                    logger.info(f"🔧 JSON recovered via regex extraction from {source_name}")
+                    logger.info(f"[FIX] JSON recovered via regex extraction from {source_name}")
                     return data
                 except json.JSONDecodeError:
                     pass
 
-        logger.error(f"🛑 JSON recovery failed across all stages. Content: {content[:200]}")
+        logger.error(f"[STOP] JSON recovery failed across all stages. Content: {content[:200]}")
         return fallback
 
     def _compress_history(self, action_ledger: list) -> str:
@@ -1948,7 +1948,7 @@ class VisualOrchestrator:
                 max_completion_tokens=4096
             )
             # result has 'content' (JSON) and 'reasoning' (CoT)
-            logger.info(f"💭 ORIENT CoT: {result['reasoning'][:300]}..." if result['reasoning'] else "ORIENT: no CoT")
+            logger.info(f"[COT] ORIENT CoT: {result['reasoning'][:300]}..." if result['reasoning'] else "ORIENT: no CoT")
             content = result['content'].strip()
             if not content:
                 import re
@@ -1994,7 +1994,7 @@ class VisualOrchestrator:
                 or el.get("type", "").lower() in _INTERACTIVE_TYPES
             ]
             dom_str = self._get_compact_dom(priority_dom, limit=80)
-            logger.info(f"DECIDE DOM pre-filter: {len(filtered_dom)} → {len(priority_dom)} elements")
+            logger.info(f"DECIDE DOM pre-filter: {len(filtered_dom)} -> {len(priority_dom)} elements")
         else:
             dom_str = self._get_compact_dom(filtered_dom, limit=100)
 
@@ -2045,7 +2045,7 @@ class VisualOrchestrator:
                 max_completion_tokens=1024
             )
             # result has 'content' (JSON) and 'reasoning' (CoT)
-            logger.info(f"💭 DECIDE CoT [{effort}]: {result['reasoning'][:300]}..." if result['reasoning'] else "DECIDE: no CoT")
+            logger.info(f"[COT] DECIDE CoT [{effort}]: {result['reasoning'][:300]}..." if result['reasoning'] else "DECIDE: no CoT")
             content = result['content'].strip()
             if not content:
                 import re
@@ -2258,7 +2258,7 @@ class VisualOrchestrator:
 
         if is_new_mission:
             if session.goal_raw and goal != session.goal_raw:
-                logger.info(f"🔄 New mission detected! Old: '{session.goal_raw[:40]}' → New: '{goal[:40]}'. Resetting session.")
+                logger.info(f"[RESET] New mission detected! Old: '{session.goal_raw[:40]}' -> New: '{goal[:40]}'. Resetting session.")
                 from session_manager import GoalPlan, ReflexionMemory
                 session.goal_plan = GoalPlan()
                 session.current_subgoal_index = 0
@@ -2281,7 +2281,7 @@ class VisualOrchestrator:
             # v5: Stale Context Warning (Turn 0)
             # If we start a new mission on a deep page, warn the planner.
             if current_url and current_url.count('/') > 3:  # Heuristic for deep URL
-                 logger.info(f"⚠️ New mission starting on deep URL: {current_url}. Adding context warning.")
+                 logger.info(f"[WARN] New mission starting on deep URL: {current_url}. Adding context warning.")
                  session.map_hints = (session.map_hints or "") + "\nWARNING: User started on a deep page. If it looks irrelevant to '" + goal + "', navigate Home or to Dashboard first."
 
             # Explorer Mode: First Contact
@@ -2289,12 +2289,12 @@ class VisualOrchestrator:
                 await self._explorer_first_contact(session, dom_context, current_url)
 
             # Goal Decomposition
-            logger.info("🧩 Decomposing Goal into Sub-Goals...")
+            logger.info("[DECOMPOSE] Decomposing Goal into Sub-Goals...")
             decomposed_plan = await self._decompose_goal(goal, dom_context, map_hints=session.map_hints or "")
             session.goal_plan = decomposed_plan
             session.current_subgoal_index = 0
             plan_desc = " -> ".join([sg.description for sg in session.goal_plan.subgoals])
-            logger.info(f"📋 Goal Plan: {plan_desc}")
+            logger.info(f"[PLAN] Goal Plan: {plan_desc}")
 
         # 2. Build or Update PageGraph (v5)
         page_state = classify_page_state(dom_context, current_url)
@@ -2365,7 +2365,7 @@ class VisualOrchestrator:
                     action=action_desc,
                     outcome=validation_res.reason,
                 )
-                logger.info(f"📝 Reflexion: recorded failure at step {session.step_number}")
+                logger.info(f"[NOTE] Reflexion: recorded failure at step {session.step_number}")
 
             # Stagnation check
             stagnation_action = self.handle_stagnation(session, validation_res)
@@ -2405,7 +2405,7 @@ class VisualOrchestrator:
                     session.consecutive_failures = 0
                     session.stagnation_count = 0
                     plan_desc = " -> ".join([sg.description for sg in new_plan.subgoals])
-                    logger.info(f"📋 New Goal Plan: {plan_desc}")
+                    logger.info(f"[PLAN] New Goal Plan: {plan_desc}")
                     # Update current_subgoal for the REASON call
                     if new_plan.subgoals:
                         current_subgoal = new_plan.subgoals[0]
@@ -2495,11 +2495,11 @@ class VisualOrchestrator:
                     )
                     action_data["target_id"] = substitute_id
                 else:
-                    logger.warning(f"👻 GHOST TARGET: '{target_id}' not in DOM and no substitute found. Action will likely fail.")
+                    logger.warning(f"[GHOST] GHOST TARGET: '{target_id}' not in DOM and no substitute found. Action will likely fail.")
 
         # FAST SENSE SYNC: If fast sense already spoke, don't double-speak
         if fast_sense_speech and action_type not in ("answer", "clarify"):
-            logger.info(f"⏭️ Skipping REASON speech (Fast Sense already spoke)")
+            logger.info(f"[SKIP] Skipping REASON speech (Fast Sense already spoke)")
             speech = ""
 
         # Handle answer action — speech IS the answer
@@ -2618,7 +2618,7 @@ class VisualOrchestrator:
 
         # Guard: Skip sub-goals already marked done (prevents double-advancement)
         if sg.status == "done":
-            logger.info(f"⏭️ Sub-goal {idx} already done, skipping advancement check.")
+            logger.info(f"[SKIP] Sub-goal {idx} already done, skipping advancement check.")
             return
 
         advanced = False
@@ -2651,7 +2651,7 @@ class VisualOrchestrator:
                             matches_expected = any(frag in current_url.lower() for frag in url_fragments)
                             if matches_expected:
                                 advanced = True
-                                logger.info(f"✅ Sub-goal {idx}: URL changed to expected destination ({current_url})")
+                                logger.info(f"[OK] Sub-goal {idx}: URL changed to expected destination ({current_url})")
                             else:
                                 logger.warning(
                                     f"⚠️ Sub-goal {idx}: URL changed ({session.last_url} → {current_url}) "
@@ -2666,24 +2666,24 @@ class VisualOrchestrator:
                                 matching = [w for w in signal_words if w in current_url.lower()]
                                 if matching:
                                     advanced = True
-                                    logger.info(f"✅ Sub-goal {idx}: URL matches verification keywords {matching}")
+                                    logger.info(f"[OK] Sub-goal {idx}: URL matches verification keywords {matching}")
                                 else:
-                                    logger.warning(f"⚠️ Sub-goal {idx}: URL changed to {current_url} but missing keywords {signal_words}")
+                                    logger.warning(f"[WARN] Sub-goal {idx}: URL changed to {current_url} but missing keywords {signal_words}")
                                     if getattr(page_state, 'page_type', 'unknown') not in ('unknown', 'error', 'auth'):
                                         advanced = True 
-                                        logger.info(f"✅ Sub-goal {idx}: Keyword mismatch overridden because page_type ({page_state.page_type}) is valid.")
+                                        logger.info(f"[OK] Sub-goal {idx}: Keyword mismatch overridden because page_type ({page_state.page_type}) is valid.")
                                     # Fallback: If URL changed significantly, accept it.
                                     elif session.last_url and current_url != session.last_url:
                                         advanced = True
-                                        logger.info(f"✅ Sub-goal {idx}: URL changed ({session.last_url} -> {current_url}) - accepting as generic success.")
+                                        logger.info(f"[OK] Sub-goal {idx}: URL changed ({session.last_url} -> {current_url}) - accepting as generic success.")
                             else:
                                 # Truly generic signal
                                 advanced = True
-                                logger.info(f"✅ Sub-goal {idx}: URL changed ({session.last_url} -> {current_url})")
+                                logger.info(f"[OK] Sub-goal {idx}: URL changed ({session.last_url} -> {current_url})")
                     else:
                         # No signal or signal doesn't have URL check — accept URL change
                         advanced = True
-                        logger.info(f"✅ Sub-goal {idx}: URL changed ({session.last_url} -> {current_url})")
+                        logger.info(f"[OK] Sub-goal {idx}: URL changed ({session.last_url} -> {current_url})")
                 elif "modal" in signal or "popup" in signal:
                     # Special case: modals don't change URL but are valid
                     if page_state.has_modal:
@@ -2695,18 +2695,18 @@ class VisualOrchestrator:
                         new_count = int(validation.reason.split()[0])
                         if new_count > 15: # Lowered from 30 for smaller DOM updates (breadcrumbs, lists)
                             advanced = True
-                            logger.info(f"✅ Sub-goal {idx}: {new_count} new elements — treating as page load.")
+                            logger.info(f"[OK] Sub-goal {idx}: {new_count} new elements -- treating as page load.")
                         else:
-                            logger.info(f"🔍 Sub-goal {idx}: Only {new_count} new elements — likely dropdown/menu, not page transition")
+                            logger.info(f"[SEARCH] Sub-goal {idx}: Only {new_count} new elements -- likely dropdown/menu, not page transition")
                             # If URL changed, force advance regardless of element count
                             if url_changed:
                                 advanced = True
-                                logger.info(f"✅ Sub-goal {idx}: URL changed override enabled.")
+                                logger.info(f"[OK] Sub-goal {idx}: URL changed override enabled.")
                     except (ValueError, IndexError):
                         if url_changed: advanced = True
 
                 if not advanced:
-                    logger.info(f"🛑 Sub-goal {idx}: Navigation required but URL unchanged. Holding. (attempt {sg.attempts})")
+                    logger.info(f"[STOP] Sub-goal {idx}: Navigation required but URL unchanged. Holding. (attempt {sg.attempts})")
                     return
 
             # ── NON-NAVIGATION SUB-GOALS ──
@@ -2725,7 +2725,7 @@ class VisualOrchestrator:
             # AND we have retried this > 2 times, force advance to let the Planner re-orient on the new page.
             if not advanced and url_changed and sg.attempts >= 2:
                 advanced = True
-                logger.warning(f"⚠️ Sub-goal {idx}: Forced advancement to prevent navigation loop (URL changed, but validation failed 2x).")
+                logger.warning(f"[WARN] Sub-goal {idx}: Forced advancement to prevent navigation loop (URL changed, but validation failed 2x).")
 
             elif "filter" in signal or "applied" in signal:
                 if validation.success and "DOM" in validation.reason:
@@ -2738,7 +2738,7 @@ class VisualOrchestrator:
 
         if advanced:
             sg.status = "done"
-            logger.info(f"✅ Sub-goal {idx} DONE: '{sg.description}' (after {sg.attempts} attempts)")
+            logger.info(f"[OK] Sub-goal {idx} DONE: '{sg.description}' (after {sg.attempts} attempts)")
 
             # Move to next pending sub-goal
             next_idx = idx + 1
@@ -2747,13 +2747,13 @@ class VisualOrchestrator:
                 if next_sg.status == "pending":
                     next_sg.status = "active"
                     session.current_subgoal_index = next_idx
-                    logger.info(f"🎯 Advanced to sub-goal {next_idx}: '{next_sg.description}'")
+                    logger.info(f"[TARGET] Advanced to sub-goal {next_idx}: '{next_sg.description}'")
                     return
                 next_idx += 1
 
             # All sub-goals done
             session.mission_status = "completed"
-            logger.info(f"🏁 All sub-goals completed for mission: '{session.goal_raw}'")
+            logger.info(f"[DONE] All sub-goals completed for mission: '{session.goal_raw}'")
 
     def _record_page_visit(self, session, url: str, page_state, dom_context: list):
         """(C3) Progressive site model: record a new page visit in explorer mode."""
@@ -2778,7 +2778,7 @@ class VisualOrchestrator:
             )
             session.site_skeleton.page_count += 1
             session.site_skeleton.discovered_urls.append(url)
-            logger.debug(f"🗺️ Explorer: Recorded page visit #{session.site_skeleton.page_count}: {url} ({page_state.page_type})")
+            logger.debug(f"[MAP] Explorer: Recorded page visit #{session.site_skeleton.page_count}: {url} ({page_state.page_type})")
 
     async def persist_explorer_knowledge(self, session):
         """
@@ -2866,7 +2866,7 @@ class VisualOrchestrator:
             )
 
             if hits_response.points:
-                logger.info(f"🧠 HiveMind MAPPED: Domain '{domain}' has Website_Map (score: {hits_response.points[0].score:.3f})")
+                logger.info(f"[BRAIN] HiveMind MAPPED: Domain '{domain}' has Website_Map (score: {hits_response.points[0].score:.3f})")
                 return {"mode": "mapped", "reason": f"Website_Map found for {domain}"}
 
             # Fallback: Check by URL text match
@@ -2886,10 +2886,10 @@ class VisualOrchestrator:
             )
 
             if fallback_response.points:
-                logger.info(f"🧠 HiveMind Match (legacy): Domain '{domain}' is KNOWN.")
+                logger.info(f"[BRAIN] HiveMind Match (legacy): Domain '{domain}' is KNOWN.")
                 return {"mode": "mapped", "reason": f"Indexed domain (legacy): {domain}"}
 
-            logger.info(f"🌑 HiveMind: Domain '{domain}' is UNKNOWN (Explorer Mode).")
+            logger.info(f"[UNKNOWN] HiveMind: Domain '{domain}' is UNKNOWN (Explorer Mode).")
             return {"mode": "explorer", "reason": "New territory"}
 
         except Exception as e:
@@ -2941,7 +2941,7 @@ class VisualOrchestrator:
                         if hint_domain != "unknown" and current_domain != "unknown":
                             # Check if domains share a root (e.g. console.groq.com vs groq.com)
                             if not (current_domain.endswith(hint_domain) or hint_domain.endswith(current_domain)):
-                                logger.info(f"🗺️ Map hint skipped (domain mismatch): {hint_domain} ≠ {current_domain}")
+                                logger.info(f"[MAP] Map hint skipped (domain mismatch): {hint_domain} != {current_domain}")
                                 continue
                     
                     selectors = payload.get("key_selectors", [])

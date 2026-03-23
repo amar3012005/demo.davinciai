@@ -431,7 +431,7 @@ class SessionManager:
             keys = await self.redis.keys(pattern)
             if keys:
                 await self.redis.delete(*keys)
-            logger.info(f"🧹 Redis Cleanup: Deleted {len(keys)} session keys.")
+            logger.info(f"[CLEANUP] Redis Cleanup: Deleted {len(keys)} session keys.")
             return True
         except Exception as e:
             logger.error(f"Failed to cleanup Redis sessions: {e}")

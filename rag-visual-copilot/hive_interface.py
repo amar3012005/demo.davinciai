@@ -415,7 +415,7 @@ class HiveInterface:
                     seen.add(hint_key)
                     unique_hints.append(hint)
             
-            logger.info(f"🧠 Hive Visual Hints: Found {len(unique_hints)} hints from {len(search_queries)} queries")
+            logger.info(f"[BRAIN] Hive Visual Hints: Found {len(unique_hints)} hints from {len(search_queries)} queries")
             return unique_hints[:10]  # Limit to top 10
             
         except Exception as e:
@@ -528,7 +528,7 @@ class HiveInterface:
             )
 
             if not results:
-                logger.info("🌐 Cross-Domain Search: no results globally")
+                logger.info("[CROSS-DOMAIN] Cross-Domain Search: no results globally")
                 return None
 
             # Group results by domain to find the best alternative domain
@@ -572,7 +572,7 @@ class HiveInterface:
                     ))
 
             if not domain_scores:
-                logger.info("🌐 Cross-Domain Search: no alternative domains found")
+                logger.info("[CROSS-DOMAIN] Cross-Domain Search: no alternative domains found")
                 return None
 
             # Pick domain with highest cumulative score
@@ -833,7 +833,7 @@ class HiveInterface:
                 logger.debug("Qdrant query skipped: empty vector")
                 return []
 
-            logger.info(f"🧠 Qdrant query: collection={self.collection}, limit={limit}, threshold={score_threshold}, filter={query_filter}")
+            logger.info(f"[BRAIN] Qdrant query: collection={self.collection}, limit={limit}, threshold={score_threshold}, filter={query_filter}")
 
             # query_points() is the standard API for qdrant-client >= 1.7
             # It uses 'query=' not 'vector=' (which is the PointStruct field)
@@ -859,7 +859,7 @@ class HiveInterface:
                 return []
 
             points = results.points if hasattr(results, 'points') else results
-            logger.info(f"🧠 Qdrant results: {len(points)} points returned")
+            logger.info(f"[BRAIN] Qdrant results: {len(points)} points returned")
             return points
 
         except Exception as e:
@@ -1035,7 +1035,7 @@ class HiveInterface:
                     points=[point]
                 )
             
-            logger.info(f"💾 Stored visual hint: {entity} → {selector}")
+            logger.info(f"[STORE] Stored visual hint: {entity} -> {selector}")
             return True
             
         except Exception as e:
@@ -1097,7 +1097,7 @@ class HiveInterface:
                     points=[point]
                 )
             
-            logger.info(f"💾 Stored website map: {url}")
+            logger.info(f"[STORE] Stored website map: {url}")
             return True
             
         except Exception as e:

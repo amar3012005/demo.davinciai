@@ -109,7 +109,7 @@ async def handle_last_mile_stage(
         wait_until_ms = int(runtime.get("wait_until_ms", 0) or 0)
         if wait_until_ms > now_ms:
             remaining_ms = max(200, min(wait_until_ms - now_ms, 2000))
-            logger.info(
+            logger.debug(
                 f"LAST_MILE_RUNTIME_WAIT_GATE mission={mission.mission_id} "
                 f"remaining_ms={remaining_ms}"
             )
@@ -147,7 +147,7 @@ async def handle_last_mile_stage(
             runtime["subgoal_index"] = int(getattr(mission, "current_subgoal_index", 0) or 0)
             mission.last_mile_runtime = runtime
             await mission_brain._save_mission(mission)
-            logger.info(
+            logger.debug(
                 f"LAST_MILE_RUNTIME_DEDUP_GATE mission={mission.mission_id} "
                 f"action_type={last_action_type} dedupe_hits={dedupe_hits}"
             )
@@ -169,13 +169,71 @@ async def handle_last_mile_stage(
         visible_goal_evidence = extract_visible_goal_evidence_fn(main_goal, nodes)
         location_guard_ok = bool(goal_completion_guard_fn(main_goal, nodes))
         location_ack = bool(location_guard_ok or model_usage_evidence or visible_goal_evidence)
-        logger.info(
+        logger.debug(
             f"LAST_MILE_LOCATION_ACK mission={mission.mission_id} ack={location_ack} "
             f"guard={location_guard_ok} model_evidence={bool(model_usage_evidence)} "
             f"visible_evidence={bool(visible_goal_evidence)} attempts={attempts} "
             f"dom_stagnant={dom_stagnant} loading={loading_signals}"
         )
         mission.last_dom_signature = current_dom_sig
+
+        # ═══════════════════════════════════════════════════════════════
+        # ⚡ GRAPH WALKER: Inject control subgoals into mission
+        # Uses site_map tree reasoning → produces subgoals like
+        # "Click Model Filter", "Select Whisper" → executed by the
+        # existing keyword router through the proven path.
+        # ═══════════════════════════════════════════════════════════════
+        try:
+            from visual_copilot.mission.deterministic_engine import try_inject_control_subgoals
+            from visual_copilot.navigation.site_map_validator import SiteMapValidator
+
+            _det_validator = None
+            if hasattr(app, "state"):
+                _det_validator = getattr(app.state, "_site_map_validator", None)
+            if _det_validator is None:
+                try:
+                    _det_validator = SiteMapValidator()
+                    if hasattr(app, "state"):
+                        app.state._site_map_validator = _det_validator
+                except Exception:
+                    _det_validator = None
+
+            first_subgoal = None
+            if _det_validator:
+                first_subgoal = await try_inject_control_subgoals(
+                    goal=main_goal,
+                    current_url=current_url,
+                    mission=mission,
+                    mission_brain=mission_brain,
+                    site_map_validator=_det_validator,
+                    app=app,
+                )
+        except Exception as det_err:
+            logger.warning(f"⚠️ GRAPH_WALKER_ERROR: {det_err}")
+            first_subgoal = None
+
+        if first_subgoal:
+            # Subgoals injected — return a short wait so the next request cycle
+            # picks up the new subgoals through the normal mission stage + keyword router.
+            logger.info(
+                f"⚡ GRAPH_WALKER_INJECTED first='{first_subgoal}' "
+                f"subgoals={mission.subgoals[mission.current_subgoal_index:mission.current_subgoal_index+4]}"
+            )
+            # Reset phase so mission_stage treats the new subgoals as navigation, not last_mile
+            mission.phase = "strategy"
+            await mission_brain._save_mission(mission)
+            return mission, {
+                "success": True,
+                "blocked": False,
+                "action": {"type": "wait", "wait_ms": 200},
+                "speech": "Planning control interactions...",
+                "mission_id": mission.mission_id,
+                "subgoal_index": mission.current_subgoal_index,
+                "pipeline": "graph_walker_inject",
+                "confidence": "high",
+            }
+
+        # ── Graph walker miss — fall through to queue + compound last-mile (last hope) ──
 
         queue = list(getattr(mission, "last_mile_queue", []) or [])
         while queue:
@@ -188,14 +246,14 @@ async def handle_last_mile_stage(
             await mission_brain._save_mission(mission)
             action_type = step.get("action")
             target_id = step.get("target_id", "")
-            logger.info(f"LAST_MILE_STEP_EXEC action={action_type} id={target_id}")
+            logger.debug(f"LAST_MILE_STEP_EXEC action={action_type} id={target_id}")
 
             if action_type == "answer":
                 speech = step.get("text") or step.get("why") or f"I've completed {schema.target_entity}."
                 mission.phase = "done"
                 mission.status = "completed"
                 await mission_brain._save_mission(mission)
-                logger.info("LAST_MILE_EXIT done=True reason=queue_answer")
+                logger.info("LAST_MILE_EXIT done=true reason=queue_answer")
                 return mission, {
                     "success": True,
                     "blocked": False,
@@ -304,7 +362,7 @@ async def handle_last_mile_stage(
         if loading_signals and not location_ack:
             mission.last_mile_attempts = attempts + 1
             await mission_brain._save_mission(mission)
-            logger.info("LAST_MILE_WAIT reason=loading_signals_detected")
+            logger.debug("LAST_MILE_WAIT reason=loading_signals_detected")
             return mission, {
                 "success": True,
                 "blocked": False,
@@ -330,14 +388,12 @@ async def handle_last_mile_stage(
             runtime["subgoal_index"] = int(getattr(mission, "current_subgoal_index", 0) or 0)
             mission.last_mile_runtime = runtime
             await mission_brain._save_mission(mission)
-            logger.info(
-                f"LAST_MILE_VISION_BOOTSTRAP_POLICY mission={mission.mission_id} "
-                "mode=one_time_on_last_mile_entry force=True"
+            logger.debug(
+                f"LAST_MILE_VISION_BOOTSTRAP mission={mission.mission_id} force=True"
             )
         else:
-            logger.info(
-                f"LAST_MILE_VISION_BOOTSTRAP_POLICY mission={mission.mission_id} "
-                "mode=one_time_on_last_mile_entry force=False"
+            logger.debug(
+                f"LAST_MILE_VISION_BOOTSTRAP mission={mission.mission_id} force=False"
             )
 
         try:
@@ -384,7 +440,7 @@ async def handle_last_mile_stage(
                 if not action_type or action_type == "action":
                     # All steps are waits — treat as a wait pipeline
                     action_type = "wait"
-                logger.info(
+                logger.debug(
                     f"COMPOUND_LAST_MILE_BUNDLED_PIPELINE steps={len(raw_action)} "
                     f"routing_type={action_type}"
                 )
@@ -427,7 +483,7 @@ async def handle_last_mile_stage(
             if compound_diagnostics:
                 lm_state = compound_diagnostics.get("last_mile_state", {})
                 if lm_state:
-                    logger.info(
+                    logger.debug(
                         f"LAST_MILE_PHASE phase={lm_state.get('phase')} "
                         f"evidence_hits={lm_state.get('evidence_hits')} "
                         f"miss_streak={lm_state.get('evidence_miss_streak')} "
@@ -601,7 +657,7 @@ async def handle_last_mile_stage(
                     }
                     await mission_brain._save_mission(mission)
 
-                    logger.info(
+                    logger.debug(
                         f"COMPOUND_LAST_MILE_PIPELINE_PASSTHROUGH steps={len(compound_action)} "
                         f"rep_type={rep_type} rep_target={rep_target}"
                     )
@@ -766,7 +822,7 @@ async def handle_last_mile_stage(
                     }
 
         # ── Compound result was None or unhandled — fall through to legacy ──
-        logger.warning("COMPOUND_LAST_MILE_FALLTHROUGH → legacy plan_last_mile")
+        logger.warning("COMPOUND_LAST_MILE_FALLTHROUGH falling back to legacy plan_last_mile")
 
         plan = await modular_plan_last_mile(schema=schema, mission=mission, nodes=nodes, app=app)
         mission.last_mile_attempts = attempts + 1
@@ -916,7 +972,7 @@ async def handle_last_mile_stage(
         }
 
     if last_mile_enabled:
-        logger.info(
+        logger.debug(
             f"LAST_MILE_DEFER mission={mission.mission_id} "
             f"phase={getattr(mission, 'phase', 'strategy')} reason={last_mile_reason}"
         )

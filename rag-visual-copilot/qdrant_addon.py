@@ -50,11 +50,11 @@ class QdrantAddon:
         self.client = None
         
         if not QDRANT_AVAILABLE:
-            logger.warning("⚠️ qdrant-client not installed. Memory features disabled.")
+            logger.warning("[WARN] qdrant-client not installed. Memory features disabled.")
             return
 
         if not self.url:
-            logger.warning("⚠️ QDRANT_URL not set. Memory features disabled.")
+            logger.warning("[WARN] QDRANT_URL not set. Memory features disabled.")
             return
             
         try:
@@ -96,9 +96,9 @@ class QdrantAddon:
                 self.enabled = True
             
             if self.enabled:
-                logger.info(f"✅ Qdrant Memory initialized (URL: {self.url})")
+                logger.info(f"[OK] Qdrant Memory initialized (URL: {self.url})")
         except Exception as e:
-            logger.error(f"❌ Qdrant connection failed: {e}")
+            logger.error(f"[ERROR] Qdrant connection failed: {e}")
             self.enabled = False
 
     def _create_payload_indexes(self, client):
@@ -111,7 +111,7 @@ class QdrantAddon:
                     field_name=field,
                     field_schema=models.PayloadSchemaType.KEYWORD
                 )
-                logger.info(f"✅ Created payload index for: {field}")
+                logger.info(f"[OK] Created payload index for: {field}")
             except Exception as e:
                 # Likely already exists
                 pass
@@ -192,7 +192,7 @@ class QdrantAddon:
                     )
                 ]
             )
-            logger.info(f"🧠 Learned new case from User {user_id}: {issue[:30]}...")
+            logger.info(f"[BRAIN] Learned new case from User {user_id}: {issue[:30]}...")
         except Exception as e:
             logger.error(f"Failed to upsert case: {e}")
 
@@ -227,9 +227,9 @@ class QdrantAddon:
                         match=models.MatchValue(value=domain)
                     )
                 )
-                logger.debug(f"🗺️ MAPPED MODE: Filtering HiveMind by domain={domain}")
+                logger.debug(f"[MAP] MAPPED MODE: Filtering HiveMind by domain={domain}")
             else:
-                logger.debug("🧭 EXPLORER MODE: No domain filter (searching all domains)")
+                logger.debug("[ZERO-SHOT] EXPLORER MODE: No domain filter (searching all domains)")
             
             query_filter = models.Filter(must=filter_conditions)
 
@@ -244,10 +244,10 @@ class QdrantAddon:
             
             if hits:
                 domain_info = f" [domain={domain}]" if domain else " [all domains]"
-                logger.info(f"🧠 Hive Mind{domain_info}: {len(hits)} matches (top score: {hits[0].score:.3f})")
+                logger.info(f"[BRAIN] Hive Mind{domain_info}: {len(hits)} matches (top score: {hits[0].score:.3f})")
             else:
                 domain_info = f" for domain={domain}" if domain else ""
-                logger.info(f"🧠 Hive Mind: No matches{domain_info} above threshold {score_threshold}")
+                logger.info(f"[BRAIN] Hive Mind: No matches{domain_info} above threshold {score_threshold}")
             
             results = []
             for hit in hits:
@@ -301,7 +301,7 @@ class QdrantAddon:
             
             has_knowledge = result.count > 0
             mode = "MAPPED" if has_knowledge else "EXPLORER"
-            logger.info(f"🗺️ Domain '{domain}': {result.count} HiveMind entries → {mode} MODE")
+            logger.info(f"[MAP] Domain '{domain}': {result.count} HiveMind entries -> {mode} MODE")
             return has_knowledge
             
         except Exception as e:
@@ -393,9 +393,9 @@ class QdrantAddon:
                     rules.append(entry)
 
             if skills or rules:
-                logger.info(f"🎯 Skills/Rules retrieved: {len(skills)} skills, {len(rules)} rules (top score: {hits[0].score:.3f})")
+                logger.info(f"[TARGET] Skills/Rules retrieved: {len(skills)} skills, {len(rules)} rules (top score: {hits[0].score:.3f})")
             else:
-                logger.debug("🎯 No matching skills/rules found above threshold")
+                logger.debug("[TARGET] No matching skills/rules found above threshold")
 
             return {"skills": skills, "rules": rules}
         except Exception as e:
@@ -487,7 +487,7 @@ class QdrantAddon:
                     )
                 )
             )
-            logger.info(f"🗑️ Deleted memory for User {user_id} (GDPR)")
+            logger.info(f"[DELETE] Deleted memory for User {user_id} (GDPR)")
         except Exception as e:
             logger.error(f"Failed to delete user memory: {e}")
 
@@ -573,7 +573,7 @@ class QdrantAddon:
                 results.append(entry)
                 
             if results:
-                logger.info(f"🧠 Unified Search: {len(results)} matches for types {doc_types}")
+                logger.info(f"[BRAIN] Unified Search: {len(results)} matches for types {doc_types}")
                 
             return results
         except Exception as e:

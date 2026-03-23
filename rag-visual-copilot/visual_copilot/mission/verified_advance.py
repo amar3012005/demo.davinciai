@@ -134,10 +134,9 @@ def verify_pending_action_effect(
                 )
 
                 if is_valid:
-                    logger.info(
-                        f"PENDING_VERIFY_SITE_MAP_SUCCESS: Navigation to '{expected_target_name}' "
-                        f"validated via site map. Reached '{expected_node_id}'. "
-                        f"Reason: {validation_msg}"
+                    logger.debug(
+                        f"PENDING_VERIFY_SITE_MAP_SUCCESS target='{expected_target_name}' "
+                        f"node='{expected_node_id}' reason={validation_msg}"
                     )
                     return True, f"site_map_validated_{validation_msg}"
                 else:
@@ -152,7 +151,7 @@ def verify_pending_action_effect(
                     recovery = outcome.alternative_targets
                     if recovery:
                         alt_ids = [n.get('node_id', '?') for n in recovery[:2]]
-                        logger.info(f"PENDING_VERIFY_RECOVERY_SUGGESTION: Try alternatives {alt_ids}")
+                        logger.debug(f"PENDING_VERIFY_RECOVERY_SUGGESTION alternatives={alt_ids}")
 
                     return False, f"site_map_validation_failed_{validation_msg}"
 

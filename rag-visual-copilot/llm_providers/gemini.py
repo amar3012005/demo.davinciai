@@ -34,10 +34,10 @@ class GeminiProvider(LLMProvider):
             
             # For back-compat with the original structure
             self._client = GeminiProvider._client_instance
-            logger.info(f"✅ Gemini initialized (google-genai): {self.model_name}")
+            logger.info(f"[OK] Gemini initialized (google-genai): {self.model_name}")
             return True
         except Exception as e:
-            logger.error(f"❌ Gemini initialization failed: {e}")
+            logger.error(f"[ERROR] Gemini initialization failed: {e}")
             return False
     
     def generate(

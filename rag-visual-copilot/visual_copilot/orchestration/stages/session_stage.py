@@ -36,7 +36,7 @@ async def apply_frontend_amnesia_guard(
                 old_session_id = by_id.session_id
                 by_id.session_id = session_id
                 await mission_brain._save_mission(by_id)
-                logger.info(f"🧷 Mission rebind: {by_id.mission_id} moved from session {old_session_id} → {session_id}")
+                logger.info(f"[REBIND] Mission rebind: {by_id.mission_id} moved from session {old_session_id} -> {session_id}")
 
     backend_step = 0
     early_response = None
@@ -100,7 +100,7 @@ async def apply_frontend_amnesia_guard(
                 f"phase={existing_phase} source=dedup_guard"
             )
         else:
-            logger.info(f"🏁 Mission {existing_mission.mission_id} already complete. Halting.")
+            logger.info(f"[DONE] Mission {existing_mission.mission_id} already complete. Halting.")
             early_response = {
                 "success": True,
                 "blocked": False,

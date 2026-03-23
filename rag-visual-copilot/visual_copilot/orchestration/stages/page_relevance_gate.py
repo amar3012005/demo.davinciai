@@ -100,11 +100,11 @@ def run_page_relevance_gate(
         inferred_target = _infer_target_domain_from_goal(goal)
         if inferred_target:
             target_domain = inferred_target
-            logger.info(
+            logger.debug(
                 f"PAGE_RELEVANCE_GATE: target_domain missing; inferred from goal='{inferred_target}'."
             )
         else:
-            logger.info("PAGE_RELEVANCE_GATE: No target_domain — continuing on current page.")
+            logger.debug("PAGE_RELEVANCE_GATE: No target_domain -- continuing on current page.")
             return None, None
 
     # Normalize: ensure TLD
@@ -122,7 +122,7 @@ def run_page_relevance_gate(
             current_host = ""
 
     if not current_host:
-        logger.info("PAGE_RELEVANCE_GATE: No current host, can't compare. Continuing.")
+        logger.debug("PAGE_RELEVANCE_GATE: No current host, can't compare. Continuing.")
         return None, target_domain
 
     current_root = _extract_root_domain(current_host)
@@ -130,16 +130,16 @@ def run_page_relevance_gate(
 
     # ── CASE 1: Already on target domain → continue to DOM interaction ──
     if current_root == target_root:
-        logger.info(
+        logger.debug(
             f"PAGE_RELEVANCE_GATE: Already on target domain "
             f"(current={current_root}, target={target_root}). Continuing."
         )
         return None, target_domain
 
     # ── CASE 2: Different domain → short-circuit navigate ──
-    logger.info(
+    logger.debug(
         f"PAGE_RELEVANCE_GATE: SHORTCUT! "
-        f"current={current_root} ≠ target={target_root}. "
+        f"current={current_root} != target={target_root}. "
         f"Short-circuiting to cross_domain_navigate."
     )
 

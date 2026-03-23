@@ -168,7 +168,7 @@ Output: {{"action": "search", "target_entity": "shoes", "domain": "current", "ta
             logger.warning("MindReader initialized without LLM provider - will use fallback only")
         
         self.llm = llm_provider
-        logger.info("🧠 MindReader initialized")
+        logger.info("[BRAIN] MindReader initialized")
 
     async def translate(
         self,
@@ -220,7 +220,7 @@ Output: {{"action": "search", "target_entity": "shoes", "domain": "current", "ta
                     previous_goal_section=previous_goal_section,
                     nodes=nodes,
                 )
-                logger.info(f"🧠 Using domain-specific prompt for {domain}")
+                logger.info(f"[BRAIN] Using domain-specific prompt for {domain}")
             except Exception as e:
                 logger.warning(f"Domain prompt for {domain} failed: {e}, falling back to generic")
                 prompt = None
@@ -283,7 +283,7 @@ Output: {{"action": "search", "target_entity": "shoes", "domain": "current", "ta
             )
             first_sg = getattr(schema, "first_subgoal", None)
             if first_sg:
-                logger.info(f"🧠 Mind Reader first_subgoal: {first_sg}")
+                logger.info(f"[BRAIN] Mind Reader first_subgoal: {first_sg}")
 
             return schema
             

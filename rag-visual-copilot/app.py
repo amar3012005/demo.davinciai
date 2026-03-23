@@ -35,6 +35,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Suppress noisy loggers ──
+# Third-party libraries
+for _lib in ("httpx", "httpcore", "qdrant_client", "uvicorn.access", "urllib3"):
+    logging.getLogger(_lib).setLevel(logging.WARNING)
+# Internal modules that flood with per-request diagnostics
+for _mod in (
+    "live_graph", "visual_copilot.orchestration.state_helpers",
+    "vc.orchestration.plan_next_step", "vc.stage.router_pre",
+    "vc.stage.page_relevance", "visual_copilot.mission.page_state",
+):
+    logging.getLogger(_mod).setLevel(logging.WARNING)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Pydantic Request/Response Models
@@ -139,7 +151,7 @@ async def lifespan(app: FastAPI):
     """Lifespan event handler for startup/shutdown."""
     global redis_client, app_start_time
 
-    logger.info("🚀 Starting Visual Copilot Microservice...")
+    logger.info("[STARTUP] Starting Visual Copilot Microservice...")
     app_start_time = time.time()
 
     try:
@@ -147,12 +159,12 @@ async def lifespan(app: FastAPI):
         try:
             redis_client = await asyncio.wait_for(get_redis_client(), timeout=15.0)
             await asyncio.wait_for(ping_redis(redis_client), timeout=5.0)
-            logger.info("✅ Redis connected successfully")
+            logger.info("[OK] Redis connected successfully")
         except asyncio.TimeoutError:
-            logger.warning("⚠️ Redis connection timeout — service will run in degraded mode")
+            logger.warning("[WARN] Redis connection timeout -- service will run in degraded mode")
             redis_client = None
         except Exception as redis_error:
-            logger.warning(f"⚠️ Redis connection failed: {redis_error} — caching disabled")
+            logger.warning(f"[WARN] Redis connection failed: {redis_error} -- caching disabled")
             redis_client = None
 
         app.state.redis = redis_client
@@ -166,14 +178,14 @@ async def lifespan(app: FastAPI):
             if groq_api_key:
                 llm_provider = GroqProvider(api_key=groq_api_key, model_name=llm_model)
                 if llm_provider.initialize():
-                    logger.info("✅ GroqProvider initialized and connected")
+                    logger.info("[OK] GroqProvider initialized and connected")
                 else:
-                    logger.warning("⚠️ GroqProvider created but failed to initialize")
+                    logger.warning("[WARN] GroqProvider created but failed to initialize")
                     llm_provider = None
             else:
-                logger.warning("⚠️ GROQ_API_KEY not set — Mind Reader will use fallback")
+                logger.warning("[WARN] GROQ_API_KEY not set -- Mind Reader will use fallback")
         except Exception as e:
-            logger.warning(f"⚠️ GroqProvider init failed: {e}")
+            logger.warning(f"[WARN] GroqProvider init failed: {e}")
         app.state.llm_provider = llm_provider
 
         # ── Embeddings (for Semantic Detective hybrid scoring) ───────────────
@@ -181,9 +193,9 @@ async def lifespan(app: FastAPI):
         try:
             from remote_embeddings import RemoteEmbeddings
             embeddings = RemoteEmbeddings()
-            logger.info("✅ RemoteEmbeddings loaded (all-MiniLM-L6-v2 via microservice)")
+            logger.info("[OK] RemoteEmbeddings loaded (all-MiniLM-L6-v2 via microservice)")
         except Exception as e:
-            logger.warning(f"⚠️ RemoteEmbeddings not available, keyword fallback: {e}")
+            logger.warning(f"[WARN] RemoteEmbeddings not available, keyword fallback: {e}")
         app.state.embeddings = embeddings
 
         # ── Qdrant (Hive Mind) ──────────────────────────────────────────────
@@ -197,12 +209,12 @@ async def lifespan(app: FastAPI):
                 collection_name=os.getenv("QDRANT_COLLECTION", "tara_hive"),
             )
             if qdrant.enabled:
-                logger.info(f"✅ Qdrant Hive Mind connected: {qdrant.url}")
+                logger.info(f"[OK] Qdrant Hive Mind connected: {qdrant.url}")
             else:
-                logger.warning("⚠️ Qdrant Hive Mind NOT AVAILABLE")
+                logger.warning("[WARN] Qdrant Hive Mind NOT AVAILABLE")
                 qdrant = None
         except Exception as e:
-            logger.warning(f"⚠️ Qdrant init failed: {e}")
+            logger.warning(f"[WARN] Qdrant init failed: {e}")
         app.state.qdrant = qdrant
 
         # ── Session Analytics ────────────────────────────────────────────────
@@ -213,9 +225,9 @@ async def lifespan(app: FastAPI):
                 llm_provider=llm_provider,
                 model_name=analytics_model,
             )
-            logger.info(f"✅ Session Analytics initialized (model: {analytics_model})")
+            logger.info(f"[OK] Session Analytics initialized (model: {analytics_model})")
         except Exception as e:
-            logger.warning(f"⚠️ Session Analytics init failed: {e}")
+            logger.warning(f"[WARN] Session Analytics init failed: {e}")
             app.state.session_analytics = None
 
         # ── Visual Orchestrator (legacy fallback) ────────────────────────────
@@ -227,17 +239,15 @@ async def lifespan(app: FastAPI):
                 embeddings=embeddings,
                 redis_client=redis_client,
             )
-            logger.info("✅ Visual Orchestrator initialized (legacy fallback)")
+            logger.info("[OK] Visual Orchestrator initialized (legacy fallback)")
         except Exception as e:
-            logger.warning(f"⚠️ Visual Orchestrator init failed: {e}")
+            logger.warning(f"[WARN] Visual Orchestrator init failed: {e}")
             app.state.visual_orchestrator = None
 
         # ═════════════════════════════════════════════════════════════════════
         # ULTIMATE TARA MODULES INITIALIZATION
         # ═════════════════════════════════════════════════════════════════════
-        logger.info("=" * 70)
-        logger.info("🚀 Initializing ULTIMATE TARA Architecture")
-        logger.info("=" * 70)
+        logger.info("[STARTUP] Initializing ULTIMATE TARA Architecture")
 
         from tara_models import TacticalSchema, ActionIntent
         from mind_reader import MindReader
@@ -249,9 +259,9 @@ async def lifespan(app: FastAPI):
         # Mind Reader
         try:
             app.state.mind_reader = MindReader(llm_provider)
-            logger.info("✅ Mind Reader initialized")
+            logger.info("[OK] Mind Reader initialized")
         except Exception as e:
-            logger.warning(f"⚠️ Mind Reader init failed: {e}")
+            logger.warning(f"[WARN] Mind Reader init failed: {e}")
             app.state.mind_reader = None
 
         # Hive Interface
@@ -262,17 +272,17 @@ async def lifespan(app: FastAPI):
                 redis_client=redis_client,
                 collection_name=os.getenv("QDRANT_COLLECTION", "tara_hive"),
             )
-            logger.info("✅ Hive Interface initialized")
+            logger.info("[OK] Hive Interface initialized")
         except Exception as e:
-            logger.warning(f"⚠️ Hive Interface init failed: {e}")
+            logger.warning(f"[WARN] Hive Interface init failed: {e}")
             app.state.hive_interface = None
 
         # Live Graph
         try:
             app.state.live_graph = LiveGraph(redis_client)
-            logger.info("✅ Live Graph initialized (Redis DOM mirror)")
+            logger.info("[OK] Live Graph initialized (Redis DOM mirror)")
         except Exception as e:
-            logger.warning(f"⚠️ Live Graph init failed: {e}")
+            logger.warning(f"[WARN] Live Graph init failed: {e}")
             app.state.live_graph = None
 
         # Semantic Detective
@@ -281,9 +291,9 @@ async def lifespan(app: FastAPI):
                 live_graph=app.state.live_graph,
                 embeddings=embeddings,
             )
-            logger.info("✅ Semantic Detective initialized (hybrid scoring)")
+            logger.info("[OK] Semantic Detective initialized (hybrid scoring)")
         except Exception as e:
-            logger.warning(f"⚠️ Semantic Detective init failed: {e}")
+            logger.warning(f"[WARN] Semantic Detective init failed: {e}")
             app.state.semantic_detective = None
 
         # Mission Brain
@@ -292,20 +302,17 @@ async def lifespan(app: FastAPI):
                 redis_client=redis_client,
                 hive_interface=app.state.hive_interface,
             )
-            logger.info("✅ Mission Brain initialized (constraint enforcement)")
+            logger.info("[OK] Mission Brain initialized (constraint enforcement)")
         except Exception as e:
-            logger.warning(f"⚠️ Mission Brain init failed: {e}")
+            logger.warning(f"[WARN] Mission Brain init failed: {e}")
             app.state.mission_brain = None
 
-        logger.info("=" * 70)
-        logger.info("✅ ULTIMATE TARA Architecture Ready")
-        logger.info("=" * 70)
-        logger.info("🟢 Visual Copilot Microservice ready")
+        logger.info("[READY] Visual Copilot Microservice ready -- all modules initialized")
 
         yield
 
         # Shutdown
-        logger.info("🔴 Shutting down Visual Copilot Microservice...")
+        logger.info("[SHUTDOWN] Shutting down Visual Copilot Microservice...")
         if redis_client:
             await close_redis_client()
             logger.info("Redis connection closed")
@@ -343,7 +350,7 @@ app.add_middleware(
 @app.middleware("http")
 async def strip_path_prefix(request: Request, call_next):
     path = request.url.path
-    logger.info(f"🔍 Incoming request path: {path}")
+    logger.debug(f"Incoming request path: {path}")
     prefix = None
     if path.startswith("/rag"):
         prefix = "/rag"
@@ -351,12 +358,12 @@ async def strip_path_prefix(request: Request, call_next):
         prefix = "/cartesia"
     if prefix:
         new_path = path[len(prefix):] or "/"
-        logger.info(f"✂️ Stripping prefix '{prefix}': {path} -> {new_path}")
+        logger.debug(f"Stripping prefix '{prefix}': {path} -> {new_path}")
         request.scope["path"] = new_path
         if "raw_path" in request.scope:
             request.scope["raw_path"] = new_path.encode()
     else:
-        logger.info(f"➡️ No prefix matched (checked /rag, /cartesia)")
+        logger.debug(f"No prefix matched (checked /rag, /cartesia)")
     response = await call_next(request)
     return response
 
@@ -393,8 +400,8 @@ async def analyse_page_endpoint(request: AnalysePageRequest):
     """
     🔍 Analyse Page — one-shot page narration via Visual Co-pilot.
     """
-    logger.info(
-        f"🔍 Analyse Page | Session: {request.session_id} | "
+    logger.debug(
+        f"Analyse Page | Session: {request.session_id} | "
         f"mode={request.analysis_mode} | url={request.current_url[:60]}"
     )
     try:
@@ -415,7 +422,7 @@ async def analyse_page_endpoint(request: AnalysePageRequest):
             "session_id": request.session_id,
         }
     except Exception as e:
-        logger.error(f"❌ Analyse Page failed: {e}", exc_info=True)
+        logger.error(f"[ERROR] Analyse Page failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -426,7 +433,7 @@ async def plan_next_step(request: PlanStepRequest):
     """
     ULTIMATE TARA PIPELINE — Primary planning endpoint.
     """
-    logger.info(f"🚀 Ultimate TARA Plan | Session: {request.session_id} | Goal: '{request.goal}' | Step: {request.step_number}")
+    logger.info(f"[PLAN] session={request.session_id} goal='{request.goal}' step={request.step_number}")
 
     # Cache screenshot if provided
     if request.screenshot_b64:
@@ -444,7 +451,7 @@ async def plan_next_step(request: PlanStepRequest):
         app.state.semantic_detective,
         app.state.live_graph,
     ]):
-        logger.warning("⚠️ Ultimate TARA not fully available, falling back to legacy")
+        logger.warning("[WARN] Ultimate TARA not fully available, falling back to legacy")
         return await _legacy_plan_next_step(request)
 
     try:
@@ -499,15 +506,14 @@ async def plan_next_step(request: PlanStepRequest):
                             action_target = step.get("target_id", "none") or "none"
                             break
             logger.info(
-                f"✅ Ultimate TARA {'success' if result.get('success') else 'failure'}: "
-                f"{action_type} on {action_target}"
+                f"[PLAN] success target={action_type} on {action_target}"
             )
             return result
 
         # Fallback to legacy with hive context
         if isinstance(result, dict) and result.get("no_legacy_fallback"):
             return result
-        logger.warning("⚠️ Ultimate TARA returned no result, falling back to legacy")
+        logger.warning("[WARN] Ultimate TARA returned no result, falling back to legacy")
         return await _legacy_plan_next_step(request)
 
     except Exception as e:
@@ -521,7 +527,7 @@ async def _legacy_plan_next_step(request: PlanStepRequest):
     if vo is None:
         raise HTTPException(status_code=501, detail="Visual Orchestrator not initialized")
 
-    logger.info(f"🎯 [LEGACY] Planner Request | Session: {request.session_id} | Goal: '{request.goal}'")
+    logger.info(f"[TARGET] [LEGACY] Planner Request | Session: {request.session_id} | Goal: '{request.goal}'")
     try:
         result = await vo.plan_next_step(
             goal=request.goal,
@@ -554,7 +560,7 @@ async def _legacy_plan_next_step(request: PlanStepRequest):
 @app.post("/api/v1/fast_sense")
 async def fast_sense(request: FastSenseRequest):
     """Fast Sense: Quick DOM scan for immediate TTS response."""
-    logger.info(f"⚡ Fast Sense | Session: {request.session_id} | Goal: '{request.goal}'")
+    logger.info(f"[FAST] Fast Sense | Session: {request.session_id} | Goal: '{request.goal}'")
 
     if app.state.mind_reader:
         try:
@@ -575,7 +581,7 @@ async def fast_sense(request: FastSenseRequest):
                 "pipeline": "ultimate_fast",
             }
         except Exception as e:
-            logger.warning(f"⚠️ Fast sense failed: {e}")
+            logger.warning(f"[WARN] Fast sense failed: {e}")
 
     vo = getattr(app.state, "visual_orchestrator", None)
     if vo is None:
@@ -612,7 +618,7 @@ async def get_map_hints(request: MapHintsRequest):
                 "timestamp": time.time(),
             }
             await app.state.live_graph.ingest_delta(request.session_id, seed_delta)
-            logger.info(f"🗺️ Map Hints pre-seed | Session: {request.session_id} | nodes={len(seed_nodes)}")
+            logger.debug(f"Map Hints pre-seed | Session: {request.session_id} | nodes={len(seed_nodes)}")
         except Exception as seed_err:
             logger.warning(f"Map Hints pre-seed skipped: {seed_err}")
 
@@ -645,8 +651,8 @@ async def push_screenshot(request: PushScreenshotRequest):
     prev_len = len(cache.get(request.session_id, "") or "")
     cache[request.session_id] = request.screenshot_b64
     new_len = len(request.screenshot_b64)
-    logger.info(
-        f"📸 PUSH_SCREENSHOT | session={request.session_id} "
+    logger.debug(
+        f"PUSH_SCREENSHOT | session={request.session_id} "
         f"source={request.source} size={new_len // 1024}KB (prev={prev_len // 1024}KB)"
     )
     return {"success": True, "size_kb": new_len // 1024}
@@ -709,16 +715,16 @@ async def livegraph_seed(request: LiveGraphSeedRequest):
         }
 
         if age < hard_min_interval_s:
-            logger.info(f"🌱 LiveGraph Seed SKIP(hard-throttle) | Session: {sess} | nodes={node_count}")
+            logger.debug(f"LiveGraph Seed SKIP(hard-throttle) | Session: {sess} | nodes={node_count}")
             return skip_response("hard_throttle")
 
         if prev_ts and age < min_interval_s:
             if prev_sig == dom_signature or delta_ratio <= max_small_delta_ratio:
-                logger.info(f"🌱 LiveGraph Seed SKIP(soft-dedupe) | Session: {sess} | nodes={node_count}")
+                logger.debug(f"LiveGraph Seed SKIP(soft-dedupe) | Session: {sess} | nodes={node_count}")
                 return skip_response("soft_dedupe")
 
         if prev_ts and prev_sig == dom_signature and age < dedupe_ttl_s:
-            logger.info(f"🌱 LiveGraph Seed SKIP(signature-ttl) | Session: {sess} | nodes={node_count}")
+            logger.debug(f"LiveGraph Seed SKIP(signature-ttl) | Session: {sess} | nodes={node_count}")
             return skip_response("signature_ttl")
 
         nodes = [GraphNode.from_dict(el) for el in dom_context if isinstance(el, dict)]
@@ -732,7 +738,7 @@ async def livegraph_seed(request: LiveGraphSeedRequest):
         visible_nodes = await app.state.live_graph.get_visible_nodes(request.session_id)
         duration_ms = int((time.time() - start) * 1000)
 
-        logger.info(f"🌱 LiveGraph Seed | Session: {request.session_id} | seeded={len(nodes)} visible={len(visible_nodes)} ({duration_ms}ms)")
+        logger.debug(f"LiveGraph Seed | Session: {request.session_id} | seeded={len(nodes)} visible={len(visible_nodes)} ({duration_ms}ms)")
 
         throttle[sess] = {"ts": now, "count": len(nodes), "sig": dom_signature}
         if len(throttle) > 512:
@@ -747,7 +753,7 @@ async def livegraph_seed(request: LiveGraphSeedRequest):
             "duration_ms": duration_ms, "skipped": False,
         }
     except Exception as e:
-        logger.error(f"❌ LiveGraph Seed failed: {e}", exc_info=True)
+        logger.error(f"[ERROR] LiveGraph Seed failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -784,7 +790,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
             if active_mission and getattr(active_mission, "status", "") == "in_progress":
                 phase = str(getattr(active_mission, "phase", "strategy") or "strategy")
                 if phase != "done":
-                    logger.info(f"📊 ANALYZE_SESSION_DEFERRED: mission still active session={request.session_id}")
+                    logger.info(f"[GRAPH] ANALYZE_SESSION_DEFERRED: mission still active session={request.session_id}")
                     return AnalyzeSessionResponse(
                         status="deferred",
                         report={
@@ -818,7 +824,7 @@ async def analyze_session(request: AnalyzeSessionRequest):
                         "metadata": request.metadata or {},
                     }
                     await client.post(request.backend_url, json=payload)
-                    logger.info(f"📤 Session report sent to backend: {request.backend_url}")
+                    logger.info(f"[SEND] Session report sent to backend: {request.backend_url}")
             except Exception as e:
                 logger.warning(f"Failed to send report to backend: {e}")
 

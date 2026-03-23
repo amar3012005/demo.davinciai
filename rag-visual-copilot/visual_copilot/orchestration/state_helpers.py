@@ -54,7 +54,7 @@ def drop_reclick_safe_exclusions(excluded_ids: set[str], nodes: List[Any]) -> se
             excluded_ids.discard(nid)
             removed.append(nid)
     if removed:
-        logger.info(f"EXCLUSION_RELAX removed={len(removed)} reclick_safe_ids={removed[:4]}")
+        logger.debug(f"EXCLUSION_RELAX removed={len(removed)} reclick_safe_ids={removed[:4]}")
     return excluded_ids
 
 

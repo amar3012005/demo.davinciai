@@ -71,6 +71,23 @@ EVIDENCE_MISS_MAX = 3  # max consecutive iterations without evidence improvement
 PROGRESS_STALL_MAX = 4  # max actions without progress improvement before stuck
 
 
+def _is_valid_id_static(target_id: str, nodes: List[Any]) -> bool:
+    """Check if target_id exists in the current LiveGraph (no tool_executor import)."""
+    if not target_id:
+        return False
+    if target_id.lower() in {"?", "unknown", "none", "id", "missing"} or "t-?" in target_id:
+        return False
+    for n in nodes:
+        if str(getattr(n, "id", "")) == str(target_id):
+            return True
+    return False
+
+
+
+# (Action-Intent Cache removed — replaced by deterministic_engine.py)
+
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Last-Mile State Machine
 # ═══════════════════════════════════════════════════════════════════════
@@ -454,14 +471,12 @@ def _build_last_mile_page_context(
         # Log validation status
         if validation_result:
             if validation_result.is_valid:
-                logger.info(
-                    f"LAST_MILE_CONTEXT_VALID: On '{current_title}' ({current_node_id}) - "
-                    f"{len(validation_result.present_expected_controls)}/{len(expected_controls)} controls present"
+                logger.debug(
+                    f"[LAST_MILE] context_valid page='{current_title}' controls={len(validation_result.present_expected_controls)}/{len(expected_controls)}"
                 )
             else:
-                logger.warning(
-                    f"LAST_MILE_CONTEXT_INVALID: On '{current_title}' but expected '{expected_node_id}'. "
-                    f"Recovery: {validation_result.suggested_recovery}"
+                logger.debug(
+                    f"[LAST_MILE] context_invalid page='{current_title}' expected='{expected_node_id}' recovery={validation_result.suggested_recovery}"
                 )
 
         return LastMilePageContext(
@@ -574,9 +589,8 @@ def _should_enter_last_mile(mission: Any, query: str, schema: Any, is_zero_shot:
         # Check if it's NOT a navigation subgoal (doesn't start with "Click ")
         if not current_subgoal.lower().startswith("click "):
             # This is an extraction/question subgoal — trigger compound last-mile
-            logger.info(
-                f"LAST_MILE_TRIGGER: Final subgoal is extraction (not nav) — "
-                f"subgoal='{current_subgoal[:60]}'"
+            logger.debug(
+                f"[LAST_MILE] trigger final_subgoal_extraction subgoal='{current_subgoal[:60]}'"
             )
             return True, "final_subgoal_extraction"
     
@@ -639,7 +653,7 @@ def _validate_last_mile_step(step: Dict[str, Any], nodes: List[Any], excluded_id
         if resolved_id != target_id:
             step["target_id"] = resolved_id
             target_id = resolved_id
-            logger.info(f"LAST_MILE_STEP_RESOLVE original={original_target_id} resolved={resolved_id}")
+            logger.debug(f"[LAST_MILE] step_resolve original={original_target_id} resolved={resolved_id}")
         node = next((n for n in nodes if getattr(n, "id", "") == target_id and getattr(n, "interactive", False)), None)
 
     if not node:
@@ -778,18 +792,15 @@ async def _last_mile_llm_reasoning(prompt: str, app: Any = None) -> str:
                 content = result.get("content", "")
                 reasoning = result.get("reasoning", "")
                 if reasoning:
-                    if LOG_FULL_REASONING:
-                        logger.info(f"🧠 ReAct CoT FULL:\n{reasoning}")
-                    else:
-                        logger.info(f"🧠 ReAct CoT: {reasoning[:200]}...")
+                    logger.debug(f"[LAST_MILE] ReAct CoT len={len(reasoning)}: {reasoning[:200]}...")
                 if content:
                     return content
                 if reasoning:
-                    logger.warning(f"🧠 {model_name} content empty, using reasoning text")
+                    logger.debug(f"[LAST_MILE] {model_name} content empty, using reasoning text")
                     return reasoning
-                logger.warning(f"🧠 {model_name} returned empty content+reasoning, falling back to 8B")
+                logger.debug(f"[LAST_MILE] {model_name} returned empty content+reasoning, falling back to 8B")
             except Exception as e:
-                logger.warning(f"🧠 {model_name} failed ({e}), falling back to 8B")
+                logger.warning(f"[LAST_MILE] {model_name} failed ({e}), falling back to 8B")
         if hasattr(llm, "generate"):
             return await llm.generate(
                 prompt,
@@ -1062,7 +1073,7 @@ Reply in strict JSON:
             completion_answer=completion_answer,
         )
     except Exception as e:
-        logger.error(f"Last-mile planning failed: {e}")
+        logger.error(f"[LAST_MILE] planning failed: {e}")
         return LastMilePlan(
             is_done=False,
             is_impossible=False,
@@ -1097,11 +1108,21 @@ Every iteration you MUST follow this exact sequence:
    - If NO → state clearly why. "I see a list of models, but no pricing data yet to determine 'cheapest'."
 3. **ACT**: Execute ONE targeted action. State what new evidence you expect to see.
 
-## Tool Priority (STRICT ORDER — higher priority tools MUST be considered first):
-1. **complete_mission** — ALWAYS prefer this when readable content contains evidence that answers the goal. Include the specific text evidence.
+## Tool Priority — DEPENDS ON GOAL TYPE:
+
+### For ACTION goals (Create, Add, Click, Select, Open, Make, Delete, Remove):
+1. **click_element** — You MUST click the target button/link FIRST. Seeing a button is NOT completion.
+2. **wait_for_ui** — Wait for the UI to update after clicking.
+3. **complete_mission** — ONLY after the click succeeds and the result is visible (e.g., modal opened, new item created).
+**CRITICAL**: If you call complete_mission for an action goal without clicking first, it WILL BE REJECTED every time.
+
+### For INFORMATION goals (What, How, Show, Find, Check, question marks):
+1. **complete_mission** — ALWAYS prefer this when readable content contains evidence that answers the goal.
 2. **read_page_content** — Use to re-examine visible content against the goal before clicking.
-3. **type_text** — Only when you need to search/filter for missing information.
-4. **click_element** — Only when current page content is genuinely insufficient AND the target will lead to new evidence. You MUST state WHY current evidence is not enough.
+3. **click_element** — Only when current page content is genuinely insufficient.
+
+### Common tools:
+4. **type_text** — Only when you need to search/filter for missing information.
 5. **scroll_page** — Only when content may exist below the fold.
 6. **wait_for_ui** — Only when the page is visibly loading.
 7. **request_vision** — NEVER call this proactively. It is triggered automatically by the system when needed.
@@ -1707,7 +1728,7 @@ def _build_last_mile_page_context(current_url: str) -> Optional[LastMilePageCont
             route_summary=""
         )
     except Exception as e:
-        logger.warning(f"Failed to build LastMilePageContext: {e}")
+        logger.warning(f"[LAST_MILE] failed to build page context: {e}")
         return None
 
 def _render_page_context_for_onecall(ctx: Optional[LastMilePageContext]) -> str:
@@ -1764,9 +1785,8 @@ async def _run_onecall_constrained_fallback(
     )
     if vision_fallback:
         fallback_action = vision_fallback
-        logger.info(
-            f"LAST_MILE_FALLBACK_STRATEGY iter={iteration} "
-            f"type=vision_hint_click target={vision_fallback.get('target_id', 'N/A')}"
+        logger.debug(
+            f"[LAST_MILE] fallback iter={iteration} type=vision_hint_click target={vision_fallback.get('target_id', 'N/A')}"
         )
 
     if not fallback_action and iteration <= 4:
@@ -1775,8 +1795,8 @@ async def _run_onecall_constrained_fallback(
             "direction": "down",
             "speech": "Scrolling to reveal more relevant content.",
         }
-        logger.info(
-            f"LAST_MILE_FALLBACK_STRATEGY iter={iteration} type=scroll_page direction=down"
+        logger.debug(
+            f"[LAST_MILE] fallback iter={iteration} type=scroll_page direction=down"
         )
 
     if not fallback_action:
@@ -1866,7 +1886,7 @@ async def _generate_last_mile_onecall_decision(llm: Any, full_prompt: str) -> st
             )
             return (result.get("content") or "").strip()
         except Exception as e:
-            logger.error(f"One-call reasoning generation failed: {e}")
+            logger.error(f"[ONECALL] reasoning generation failed: {e}")
             return ""
     elif hasattr(llm, "generate"):
         # Fallback to standard generate
@@ -1972,7 +1992,7 @@ def _parse_last_mile_onecall_json(raw_json: str) -> Optional[LastMileDecision]:
             
         return None
     except Exception as e:
-        logger.error(f"Failed to parse LastMileDecision: {e} | Raw: {text[:100]}...")
+        logger.error(f"[ONECALL] parse failed: {e} | raw={text[:100]}...")
         return None
 
 def _validate_onecall_action(
@@ -1999,7 +2019,7 @@ def _validate_onecall_action(
         if not act.response or not act.evidence_refs:
             return LastMileValidationResult(False, "missing_evidence", "complete_mission requires 'response' and 'evidence_refs'")
 
-        # 🛡️ Stronger early rejection for fake completions
+        # Stronger early rejection for fake completions
         resp_lower = (act.response or "").lower()
         evidence_lower = (act.evidence_refs or "").lower()
         bad_markers = [
@@ -2144,7 +2164,7 @@ def _validate_onecall_action(
                 ]
             ).lower()
             if control_terms and not any(term in node_text for term in control_terms):
-                logger.warning(f"⚠️ unexpected_usage_control target='{act.target_id}' text='{node_text}'. Proceeding anyway.")
+                logger.debug(f"[LAST_MILE] unexpected_usage_control target='{act.target_id}' text='{node_text}'")
         
         return LastMileValidationResult(True, "ok", "", normalized_actions=[{
             "type": "click_element",
@@ -2291,7 +2311,7 @@ def _validate_onecall_decision(
         if decision.action:
             return LastMileValidationResult(False, "invalid_action", "execution_mode=pipeline must not have 'action'")
         if len(decision.actions) > 3:
-            logger.warning(f"LAST_MILE_PIPELINE_TRUNCATED: LLM proposed {len(decision.actions)} actions, truncating to 3")
+            logger.debug(f"[LAST_MILE] pipeline truncated from {len(decision.actions)} to 3 actions")
             decision.actions = decision.actions[:3]
             
         types = [a.type for a in decision.actions]
@@ -2319,7 +2339,7 @@ def _validate_onecall_decision(
         # AUTO-APPEND wait_for_ui: For latency and stability, UI action pipelines 
         # (clicks/types) must end in a wait to allow the page to settle before next turn.
         if not is_terminal and types and types[-1] not in ["wait_for_ui", "read_page_content"]:
-            logger.info(f"🛡️ AUTO-APPENDING wait_for_ui to pipeline pattern {joined_types}")
+            logger.debug(f"[LAST_MILE] auto-appending wait_for_ui to pipeline {joined_types}")
             # Note: We append to decision.actions so it gets validated/normalized in the next loop
             from visual_copilot.mission.last_mile import ProposedAction
             decision.actions.append(ProposedAction(type="wait_for_ui", seconds=2.0, why="Wait for UI settle."))
@@ -2327,7 +2347,7 @@ def _validate_onecall_decision(
             joined_types = "->".join(types)
 
         if joined_types not in allowed:
-            logger.warning(f"⚠️ Unusual pipeline pattern {joined_types}. Proceeding anyway to avoid retry loops.")
+            logger.debug(f"[LAST_MILE] unusual pipeline pattern {joined_types}, proceeding")
             
         # No duplicate target ids inside same pipeline
         clicked_ids_in_pipe = set()
@@ -2437,20 +2457,15 @@ async def run_compound_last_mile(
     if LAST_MILE_SEMANTIC_FINGERPRINT_ENABLED:
         initial_snapshot = build_page_state_snapshot(nodes, current_url, current_dom_hash)
         state.last_page_snapshot = initial_snapshot
-        logger.info(
-            f"LAST_MILE_SEMANTIC_INIT "
-            f"loading={initial_snapshot.loading_state} "
-            f"headings={initial_snapshot.heading_fingerprint[:8]}... "
-            f"interactives={initial_snapshot.interactive_fingerprint[:8]}..."
+        logger.debug(
+            f"[LAST_MILE] semantic_init loading={initial_snapshot.loading_state} headings={initial_snapshot.heading_fingerprint[:8]}..."
         )
 
     logger.info(
-        f"LAST_MILE_PHASE phase={state.phase.value} "
-        f"initial_evidence_hits={initial_evidence_hits} "
-        f"goal='{main_goal[:80]}' target_node={target_node.current_title if target_node else 'None'}"
+        f"[LAST_MILE] start phase={state.phase.value} evidence={initial_evidence_hits} goal='{main_goal[:40]}'"
     )
-    logger.info(
-        "LAST_MILE_MODE onecall_enabled=%s can_onecall=%s can_native_tools=%s",
+    logger.debug(
+        "[LAST_MILE] mode onecall_enabled=%s can_onecall=%s can_native_tools=%s",
         LAST_MILE_ONECALL_REASONING_ACTION_ENABLED,
         bool(app and hasattr(app.state, "mind_reader") and hasattr(getattr(app.state, "mind_reader", None), "llm") and hasattr(app.state.mind_reader.llm, "generate_with_reasoning")),
         bool(app and hasattr(app.state, "mind_reader") and hasattr(getattr(app.state, "mind_reader", None), "llm") and hasattr(app.state.mind_reader.llm, "generate_with_tools")),
@@ -2480,11 +2495,8 @@ async def run_compound_last_mile(
                 goal_relevance_score=float(initial_evidence_hits),
             )
 
-        logger.info(
-            f"LAST_MILE_VISIT_GRAPH_INIT "
-            f"mission={getattr(mission, 'mission_id', 'unknown')} "
-            f"visit={initial_visit.visit_id[:8]}... "
-            f"url={current_url[:60]}"
+        logger.debug(
+            f"[LAST_MILE] visit_graph_init mission={getattr(mission, 'mission_id', 'unknown')} visit={initial_visit.visit_id[:8]}..."
         )
 
     # ── Read-First Check: If evidence is already strong, push toward completion ──
@@ -2500,9 +2512,8 @@ async def run_compound_last_mile(
             f"Best excerpt: \"{initial_best_excerpt[:200]}\"\n"
             f"**You SHOULD call complete_mission with this evidence rather than clicking more links.**\n"
         )
-        logger.info(
-            f"LAST_MILE_READ_FIRST_HINT evidence_hits={initial_evidence_hits} "
-            f"excerpt='{initial_best_excerpt[:100]}'"
+        logger.debug(
+            f"[LAST_MILE] read_first_hint evidence={initial_evidence_hits} excerpt='{initial_best_excerpt[:60]}'"
         )
 
     messages = [
@@ -2538,7 +2549,7 @@ async def run_compound_last_mile(
     can_native_tools = bool(llm and hasattr(llm, "generate_with_tools"))
 
     if LAST_MILE_ONECALL_REASONING_ACTION_ENABLED and not can_onecall and not can_native_tools:
-        logger.warning("⚠️ LLM supports neither one-call reasoning nor native tools, falling back to legacy plan_last_mile")
+        logger.warning("[LAST_MILE] LLM supports neither one-call reasoning nor native tools, falling back to legacy")
         plan = await plan_last_mile(schema=schema, mission=mission, nodes=nodes, app=app)
         return {
             "action": {
@@ -2553,7 +2564,7 @@ async def run_compound_last_mile(
         }
 
     if not LAST_MILE_ONECALL_REASONING_ACTION_ENABLED and (not llm or not can_native_tools):
-        logger.warning("⚠️ LLM does not support generate_with_tools, falling back to legacy plan_last_mile")
+        logger.warning("[LAST_MILE] LLM does not support generate_with_tools, falling back to legacy")
         plan = await plan_last_mile(schema=schema, mission=mission, nodes=nodes, app=app)
         return {
             "action": {
@@ -2572,7 +2583,7 @@ async def run_compound_last_mile(
     force_action_after_vision_bootstrap = False
     if force_vision_bootstrap:
         try:
-            logger.info("👁️ LAST_MILE_FORCE_VISION_BOOTSTRAP start")
+            logger.debug("[LAST_MILE] vision_bootstrap start")
             _, vision_tool_result, _ = await execute_internal_tool(
                 tool_name="request_vision",
                 args={
@@ -2606,9 +2617,9 @@ async def run_compound_last_mile(
                 }
             )
             force_action_after_vision_bootstrap = True
-            logger.info("👁️ LAST_MILE_FORCE_VISION_BOOTSTRAP done")
+            logger.debug("[LAST_MILE] vision_bootstrap done")
         except Exception as vision_bootstrap_err:
-            logger.warning(f"⚠️ LAST_MILE_FORCE_VISION_BOOTSTRAP failed: {vision_bootstrap_err}")
+            logger.warning(f"[LAST_MILE] vision_bootstrap failed: {vision_bootstrap_err}")
 
     # ── Internal Compound Loop ──
     stagnancy_counter = 0
@@ -2635,7 +2646,7 @@ async def run_compound_last_mile(
             # Update stagnancy based on semantic classification
             if page_state_delta.loading_changed and LAST_MILE_LOADING_STATE_GUARD_ENABLED:
                 # Page is loading - don't count as stagnancy
-                logger.info(f"LAST_MILE_LOADING_GUARD classification={page_state_delta.classification}")
+                logger.debug(f"[LAST_MILE] loading_guard classification={page_state_delta.classification}")
                 # Reset stagnancy counters during loading
                 state.stall_count = 0
                 state.evidence_miss_streak = 0
@@ -2645,17 +2656,14 @@ async def run_compound_last_mile(
                 state.stall_count += 1
                 state.evidence_miss_streak += 1
                 state.consecutive_loading_states = 0
-                logger.info(f"LAST_MILE_SEMANTIC_STAGNANT stall={state.stall_count}")
+                logger.debug(f"[LAST_MILE] semantic_stagnant stall={state.stall_count}")
             else:
                 # Real progress - semantic change detected
                 state.stall_count = 0
                 state.evidence_miss_streak = 0
                 state.consecutive_loading_states = 0
-                logger.info(
-                    f"LAST_MILE_SEMANTIC_PROGRESS "
-                    f"classification={page_state_delta.classification} "
-                    f"new_headings={len(page_state_delta.new_headings)} "
-                    f"new_interactives={len(page_state_delta.added_interactive_labels)}"
+                logger.debug(
+                    f"[LAST_MILE] semantic_progress class={page_state_delta.classification} new_headings={len(page_state_delta.new_headings)} new_interactives={len(page_state_delta.added_interactive_labels)}"
                 )
 
             # Update snapshot for next iteration
@@ -2675,10 +2683,7 @@ async def run_compound_last_mile(
 
             if escalation:
                 logger.warning(
-                    f"LAST_MILE_ESCALATION_TRIGGERED "
-                    f"blockage={escalation.blockage_type} "
-                    f"mission={getattr(mission, 'mission_id', 'unknown')} "
-                    f"iteration={iteration}"
+                    f"[LAST_MILE] escalation blockage={escalation.blockage_type} iter={iteration}"
                 )
 
                 # Return escalation as terminal action
@@ -2729,11 +2734,8 @@ async def run_compound_last_mile(
                     site_map_node_id=target_node.current_node_id if target_node else None,
                 )
 
-                logger.info(
-                    f"LAST_MILE_VISIT_NEW "
-                    f"visit={new_visit.visit_id[:8]}... "
-                    f"parent={new_visit.parent_visit_id[:8] if new_visit.parent_visit_id else 'none'}... "
-                    f"url={current_url[:60]}"
+                logger.debug(
+                    f"[LAST_MILE] visit_new id={new_visit.visit_id[:8]}... url={current_url[:60]}"
                 )
 
                 # Add cross-domain context if needed
@@ -2763,7 +2765,7 @@ async def run_compound_last_mile(
             current_overlay_ids = _detect_overlay_active_ids(nodes)
             new_overlays = current_overlay_ids - state.last_overlay_ids
             if new_overlays:
-                logger.info(f"👁️ LAST_MILE_OVERLAY_DETECTED ids={new_overlays} (vision_happened={vision_happened_this_turn})")
+                logger.debug(f"[LAST_MILE] overlay_detected ids={new_overlays}")
                 try:
                     vision_happened_this_turn = True
                     _, vision_tool_result, _ = await execute_internal_tool(
@@ -2797,7 +2799,7 @@ async def run_compound_last_mile(
                     # Update tracked overlays to avoid re-triggering for same ones
                     state.last_overlay_ids = current_overlay_ids
                 except Exception as e:
-                    logger.warning(f"⚠️ LAST_MILE_OVERLAY_VISION failed: {e}")
+                    logger.warning(f"[LAST_MILE] overlay_vision failed: {e}")
             elif not current_overlay_ids:
                 # Clear tracked overlays if none are active
                 state.last_overlay_ids = set()
@@ -2806,8 +2808,7 @@ async def run_compound_last_mile(
         if state.should_hard_stop():
             state.exit_reason = "stuck_no_progress"
             logger.warning(
-                f"🛡️ LAST_MILE_PROGRESS_SCORE hard_stop iter={iteration} "
-                f"stall_count={state.stall_count} evidence_miss_streak={state.evidence_miss_streak}"
+                f"[LAST_MILE] hard_stop iter={iteration} stall={state.stall_count} miss_streak={state.evidence_miss_streak}"
             )
 
             # Check for escalation before hard stop
@@ -2823,9 +2824,7 @@ async def run_compound_last_mile(
 
                 if escalation:
                     logger.warning(
-                        f"LAST_MILE_ESCALATION_STAGNANCY "
-                        f"blockage={escalation.blockage_type} "
-                        f"stall_count={state.stall_count}"
+                        f"[LAST_MILE] escalation_stagnancy blockage={escalation.blockage_type} stall={state.stall_count}"
                     )
                     return {
                         "action": {
@@ -2847,12 +2846,8 @@ async def run_compound_last_mile(
             if LAST_MILE_VISIT_GRAPH_V1_ENABLED and state.visit_graph:
                 backtrack_suggestion = state.visit_graph.suggest_backtrack()
                 if backtrack_suggestion:
-                    logger.warning(
-                        f"LAST_MILE_BACKTRACK_SUGGESTION "
-                        f"current_evidence={state.visit_graph.get_current_visit().evidence_score:.1f} "
-                        f"better_visit={backtrack_suggestion.visit_id[:8]}... "
-                        f"better_score={backtrack_suggestion.evidence_score:.1f} "
-                        f"url={backtrack_suggestion.url[:60]}"
+                    logger.debug(
+                        f"[LAST_MILE] backtrack_suggestion better_visit={backtrack_suggestion.visit_id[:8]}... score={backtrack_suggestion.evidence_score:.1f}"
                     )
                     # Add to messages as hint
                     messages.append({
@@ -2868,7 +2863,7 @@ async def run_compound_last_mile(
             # Try vision once before giving up
             if not state.vision_used and LAST_MILE_VISION_POLICY_TRIGGER:
                 state.vision_used = True
-                logger.info("LAST_MILE_RABBIT_HOLE_GUARD: forcing vision before hard-stop")
+                logger.debug("[LAST_MILE] rabbit_hole_guard forcing vision before hard-stop")
                 messages.append({
                     "role": "user",
                     "content": (
@@ -2892,6 +2887,27 @@ async def run_compound_last_mile(
                 }
 
         state.phase = LastMilePhase.DECIDE_ACTION
+
+        # ── DOM-Diff Gate: skip LLM if DOM is completely unchanged ──
+        # If the page didn't change since last iteration (same hash), the LLM
+        # will produce the same output. Skip the expensive inference call.
+        new_dom_hash = _dom_signature_hash(nodes)
+        if (
+            iteration > 1
+            and new_dom_hash == last_dom_hash
+            and not vision_happened_this_turn
+            and state.stall_count >= 2
+        ):
+            logger.info(
+                f"[LAST_MILE] dom_diff_gate SKIP iter={iteration} dom_unchanged stall={state.stall_count}"
+            )
+            state.stall_count += 1
+            state.evidence_miss_streak += 1
+            state.record_action("skipped:dom_unchanged")
+            # Don't waste an LLM call — go straight to next iteration
+            # which will hit the hard-stop check if stall is high enough
+            continue
+        last_dom_hash = new_dom_hash
 
         try:
             tool_calls = None
@@ -2951,8 +2967,7 @@ async def run_compound_last_mile(
                 # ⚡ ONE-CALL REASONING-ACTION PATH
                 # ═══════════════════════════════════════════════════════════
                 logger.info(
-                    f"LAST_MILE_ONECALL_REQUEST iter={iteration} "
-                    f"mode=onecall_reasoning_action enabled={LAST_MILE_ONECALL_REASONING_ACTION_ENABLED}"
+                    f"[LAST_MILE] iter={iteration} phase=decide goal='{main_goal[:40]}'"
                 )
 
                 try:
@@ -2962,8 +2977,7 @@ async def run_compound_last_mile(
 
                     if not decision:
                         logger.warning(
-                            f"LAST_MILE_ONECALL_PARSE_FAILED iter={iteration} "
-                            f"reason=malformed_json raw_preview={raw_json[:150]}..."
+                            f"[ONECALL] parse_failed iter={iteration} raw={raw_json[:100]}..."
                         )
                         retry_msg = (
                             "Return ONLY valid JSON matching this exact minimal shape:\n"
@@ -2976,8 +2990,7 @@ async def run_compound_last_mile(
                         
                         if not decision:
                             logger.warning(
-                                f"LAST_MILE_ONECALL_PARSE_FAILED iter={iteration} "
-                                f"reason=retry_also_failed falling_back_to_native_tools"
+                                f"[ONECALL] parse_failed iter={iteration} retry_also_failed, falling back"
                             )
                             # Break out of one-call retry loop to avoid wasting iterations
                             break
@@ -2994,14 +3007,12 @@ async def run_compound_last_mile(
                         if not val_result.is_valid:
                             # Log completion blocked specifically for fake completions
                             if val_result.code in {"fake_completion", "low_confidence", "generic_evidence_refs"}:
-                                logger.warning(
-                                    f"LAST_MILE_ONECALL_COMPLETION_BLOCKED iter={iteration} "
-                                    f"code={val_result.code} reason={val_result.message[:100]}"
+                                logger.debug(
+                                    f"[ONECALL] completion_blocked iter={iteration} code={val_result.code}"
                                 )
                             else:
-                                logger.warning(
-                                    f"LAST_MILE_ONECALL_VALIDATION_FAILED iter={iteration} "
-                                    f"code={val_result.code} message={val_result.message[:100]} retryable={val_result.retryable}"
+                                logger.debug(
+                                    f"[ONECALL] validation_failed iter={iteration} code={val_result.code} retryable={val_result.retryable}"
                                 )
 
                             # Track repeat rejections
@@ -3021,11 +3032,24 @@ async def run_compound_last_mile(
                                     state.repeat_rejection_count = 1
 
                             # If same action rejected 2+ times, force different action type
+                            # AND inject vision target if available for deterministic grounding
                             if state.repeat_rejection_count >= 2:
+                                # ── DETERMINISTIC VISION GROUNDING ──
+                                # If vision identified a target, inject it directly
+                                vision_directive = ""
+                                if vision_target_id and _is_valid_id_static(vision_target_id, nodes):
+                                    vision_directive = (
+                                        f"\n**MANDATORY ACTION**: Vision identified target '{vision_target_id}' as the strongest control. "
+                                        f"You MUST click it using: "
+                                        f'{{"reasoning":{{"goal_status":"not_found","evidence_summary":"Must click before completing"}},'
+                                        f'"execution_mode":"single","action":{{"type":"click_element","target_id":"{vision_target_id}",'
+                                        f'"why":"Vision-identified target required before completion"}}}}'
+                                    )
                                 retry_msg = (
                                     f"VALIDATION_FAILED: {val_result.code}. You have proposed this same action {state.repeat_rejection_count} times and it was rejected.\n"
-                                    f"You MUST propose a DIFFERENT action type. If you were trying to complete, try reading or clicking first.\n"
+                                    f"You MUST propose a DIFFERENT action type. You CANNOT call complete_mission without first clicking a button.\n"
                                     f"Return corrected JSON ONLY. DO NOT invent IDs. Use IDs from current DOM list."
+                                    f"{vision_directive}"
                                 )
                             else:
                                 retry_msg = (
@@ -3050,9 +3074,8 @@ async def run_compound_last_mile(
                                 + f"\n\n[RETRY REQUEST]\n{retry_msg}"
                             )
 
-                            logger.info(
-                                f"LAST_MILE_ONECALL_RETRY iter={iteration} "
-                                f"code={val_result.code} triggering_retry=true repeat_count={state.repeat_rejection_count}"
+                            logger.debug(
+                                f"[ONECALL] retry iter={iteration} code={val_result.code} repeat_count={state.repeat_rejection_count}"
                             )
                             raw_json_retry = await _generate_last_mile_onecall_decision(llm, retry_prompt)
                             content = raw_json_retry
@@ -3066,6 +3089,36 @@ async def run_compound_last_mile(
                                     excluded_ids,
                                     page_ctx=target_node,
                                 )
+                                # ── DETERMINISTIC VISION OVERRIDE ──
+                                # If retry still produces complete_mission and vision has a target,
+                                # bypass the LLM entirely and emit the click
+                                if (
+                                    not val_result.is_valid
+                                    and state.repeat_rejection_count >= 2
+                                    and vision_target_id
+                                    and _is_valid_id_static(vision_target_id, nodes)
+                                ):
+                                    logger.debug(
+                                        f"[LAST_MILE] deterministic_vision_override iter={iteration} target={vision_target_id}"
+                                    )
+                                    # Build deterministic click action
+                                    target_node_match = next(
+                                        (n for n in nodes if str(getattr(n, "id", "")) == vision_target_id),
+                                        None,
+                                    )
+                                    target_label = (getattr(target_node_match, "text", "") or "button")[:50] if target_node_match else "button"
+                                    return {
+                                        "action": {
+                                            "type": "click",
+                                            "target_id": vision_target_id,
+                                            "speech": f"Let me click '{target_label}' to proceed.",
+                                            "force_click": False,
+                                        },
+                                        "thought": f"Deterministic vision override: clicking {vision_target_id} after {state.repeat_rejection_count} rejected complete_mission attempts",
+                                        "iterations": iteration,
+                                        "status": "action",
+                                        "diagnostics": {"last_mile_state": state.to_diagnostic()},
+                                    }
 
                         if decision and val_result and val_result.is_valid:
                             # ── Vision-based validation for one-call mode ──
@@ -3075,9 +3128,8 @@ async def run_compound_last_mile(
                                 # Check if vision says answer is not visible - block complete_mission
                                 if "answer_visible: false" in vision_hints.lower() or "answer visible now: no" in vision_hints.lower():
                                     if decision_action_type == "complete_mission":
-                                        logger.warning(
-                                            f"LAST_MILE_ONECALL_VISION_GATE blocked complete_mission at iter={iteration}; "
-                                            f"vision bootstrap indicates answer is not visible yet"
+                                        logger.debug(
+                                            f"[VISION_GATE] blocked complete_mission iter={iteration} reason=answer_not_visible"
                                         )
                                         messages.append({
                                             "role": "user",
@@ -3103,9 +3155,8 @@ async def run_compound_last_mile(
                                         "safest next probe: read" in vision_hints.lower()
                                     )
                                     if requires_action:
-                                        logger.warning(
-                                            f"LAST_MILE_ONECALL_VISION_GATE blocked complete_mission at iter={iteration}; "
-                                            f"vision suggested '{vision_tool}' for target '{vision_target_id}'"
+                                        logger.debug(
+                                            f"[VISION_GATE] blocked complete_mission iter={iteration} vision_suggested={vision_tool} target={vision_target_id}"
                                         )
                                         messages.append({
                                             "role": "user",
@@ -3122,9 +3173,8 @@ async def run_compound_last_mile(
                                     # Check if the clicked target matches vision
                                     clicked_target = decision.action.target_id if decision.action else ""
                                     if clicked_target and clicked_target != vision_target_id:
-                                        logger.warning(
-                                            f"LAST_MILE_ONECALL_VISION_GATE blocked click_element at iter={iteration}; "
-                                            f"vision suggested '{vision_target_id}', got '{clicked_target}'"
+                                        logger.debug(
+                                            f"[VISION_GATE] blocked click_element iter={iteration} expected={vision_target_id} got={clicked_target}"
                                         )
                                         messages.append({
                                             "role": "user",
@@ -3140,8 +3190,7 @@ async def run_compound_last_mile(
 
                             valid_normalized_actions = val_result.normalized_actions or []
                             logger.info(
-                                f"LAST_MILE_ONECALL_VALID iter={iteration} "
-                                f"mode={decision.execution_mode} actions_count={len(valid_normalized_actions)}"
+                                f"[LAST_MILE] iter={iteration} decision={valid_normalized_actions[0].get('type', 'unknown') if valid_normalized_actions else 'none'} target={valid_normalized_actions[0].get('target_id', 'N/A') if valid_normalized_actions else 'N/A'}"
                             )
                             
                             # Reset repeat rejection counter on valid action
@@ -3193,7 +3242,7 @@ async def run_compound_last_mile(
                                     )
                                 
                                 if is_terminal_tool:
-                                    logger.info(f"🛑 TERMINATING_PIPELINE: tool='{fake_name}' is terminal")
+                                    logger.debug(f"[LAST_MILE] pipeline_terminal tool={fake_name}")
                                     break
 
                             if frontend_actions:
@@ -3201,11 +3250,9 @@ async def run_compound_last_mile(
                                 status_str = "action"
                                 if is_terminal_action:
                                     status_str = "complete" if frontend_actions[-1].get("status", "success") == "success" else "impossible"
-                                    
+
                                 logger.info(
-                                    f"LAST_MILE_ONECALL_EXECUTED iter={iteration} "
-                                    f"status={status_str} action_type={frontend_actions[-1].get('type')} "
-                                    f"bundled={'yes' if decision.execution_mode == 'pipeline' else 'no'}"
+                                    f"[LAST_MILE] iter={iteration} result={status_str} action={frontend_actions[-1].get('type')}"
                                 )
                                 return {
                                     "action": frontend_actions if decision.execution_mode == "pipeline" else frontend_actions[0],
@@ -3229,13 +3276,12 @@ async def run_compound_last_mile(
                                     )
                                     state.record_action(f"{obs['tool_name']}:observed")
                                 logger.info(
-                                    f"LAST_MILE_ONECALL_EXECUTED iter={iteration} "
-                                    f"status=observation action_type={observation_results[-1]['tool_name']} bundled=no"
+                                    f"[LAST_MILE] iter={iteration} result=observation action={observation_results[-1]['tool_name']}"
                                 )
                                 continue
 
                     # ═══════════════════════════════════════════════════════════
-                    # 🛡️ ONE-CALL CONSTRAINED FALLBACK PATH
+                    # ONE-CALL CONSTRAINED FALLBACK PATH
                     # ═══════════════════════════════════════════════════════════
                     # Narrow fallback: prefer safe, constrained actions over full native reasoning
                     # Priority order:
@@ -3244,9 +3290,8 @@ async def run_compound_last_mile(
                     # 3. Safe click from validated vision hints (deterministic, DOM-validated)
                     # 4. Avoid full native tool reasoning unless explicitly allowed
                     
-                    logger.warning(
-                        f"LAST_MILE_ONECALL_FALLBACK_TO_NATIVE iter={iteration} "
-                        "reason=parse_or_validation_failed using_constrained_safe_fallback"
+                    logger.debug(
+                        f"[ONECALL] fallback_to_constrained iter={iteration} reason=parse_or_validation_failed"
                     )
                     return await _run_onecall_constrained_fallback(
                         iteration=iteration,
@@ -3262,8 +3307,7 @@ async def run_compound_last_mile(
 
                 except Exception as e:
                     logger.error(
-                        f"LAST_MILE_ONECALL_EXCEPTION iter={iteration} "
-                        f"error={str(e)[:100]} using_constrained_safe_fallback",
+                        f"[ONECALL] exception iter={iteration} error={str(e)[:100]}",
                         exc_info=True
                     )
                     return await _run_onecall_constrained_fallback(
@@ -3292,12 +3336,12 @@ async def run_compound_last_mile(
                 tool_calls = getattr(message, "tool_calls", None)
 
                 if content:
-                    logger.info(f"🧠 COMPOUND iter={iteration} thought: {content[:300]}")
+                    logger.debug(f"[LAST_MILE] compound iter={iteration} thought={content[:150]}")
 
                 if not tool_calls:
                     if not getattr(state, '_no_tool_retry_done', False):
                         state._no_tool_retry_done = True
-                        logger.warning(f"🛡️ COMPOUND NO_TOOL_CALLS iter={iteration} — re-prompting.")
+                        logger.debug(f"[LAST_MILE] compound no_tool_calls iter={iteration}, re-prompting")
                         messages.append({"role": "assistant", "content": content})
                         messages.append({
                             "role": "user",
@@ -3315,7 +3359,7 @@ async def run_compound_last_mile(
                             content = getattr(message, "content", None) or ""
                             tool_calls = getattr(message, "tool_calls", None)
                         except Exception as retry_err:
-                            logger.error(f"🔴 Compound retry failed: {retry_err}")
+                            logger.error(f"[LAST_MILE] compound retry failed: {retry_err}")
                             tool_calls = None
 
                     if not tool_calls:
@@ -3337,7 +3381,7 @@ async def run_compound_last_mile(
                         }
 
         except Exception as e:
-            logger.error(f"🔴 Compound call failed at iteration {iteration}: {e}")
+            logger.error(f"[LAST_MILE] compound call failed iter={iteration}: {e}")
             return await _run_onecall_constrained_fallback(
                 iteration=iteration,
                 state=state,
@@ -3369,7 +3413,7 @@ async def run_compound_last_mile(
             except json.JSONDecodeError:
                 tool_args = {}
 
-            logger.info(f"⚙️ COMPOUND TOOL iter={iteration} name={tool_name} args={tool_args}")
+            logger.debug(f"[LAST_MILE] compound_tool iter={iteration} name={tool_name} args={tool_args}")
 
             # ── Post-Vision Bootstrap Execution Gate ──
             # After forced vision bootstrap, first turn should check if vision suggested actions.
@@ -3400,9 +3444,8 @@ async def run_compound_last_mile(
                 if has_vision_actions and state.evidence_hits < EVIDENCE_RELEVANCE_THRESHOLD:
                     # Block complete_mission if vision provided actions
                     if tool_name == "complete_mission":
-                        logger.warning(
-                            "LAST_MILE_VISION_BOOTSTRAP_GATE blocked complete_mission at iter=1; "
-                            "vision provided action plan that was ignored"
+                        logger.debug(
+                            "[VISION_GATE] blocked complete_mission iter=1 reason=vision_actions_ignored"
                         )
                         messages.append({
                             "role": "tool",
@@ -3418,9 +3461,8 @@ async def run_compound_last_mile(
                     # Block click_element if it doesn't match vision target
                     elif tool_name == "click_element" and vision_target_id and vision_tool != "click_element":
                         # Vision suggested a different tool, block this click
-                        logger.warning(
-                            f"LAST_MILE_VISION_BOOTSTRAP_GATE blocked click_element at iter=1; "
-                            f"vision suggested '{vision_tool}' for target '{vision_target_id}'"
+                        logger.debug(
+                            f"[VISION_GATE] blocked click_element iter=1 vision_suggested={vision_tool} target={vision_target_id}"
                         )
                         messages.append({
                             "role": "tool",
@@ -3437,9 +3479,8 @@ async def run_compound_last_mile(
                         # Check if the clicked target matches vision
                         clicked_target = tool_args.get("target_id", "")
                         if clicked_target and clicked_target != vision_target_id:
-                            logger.warning(
-                                f"LAST_MILE_VISION_BOOTSTRAP_GATE blocked click_element at iter=1; "
-                                f"vision suggested '{vision_target_id}', got '{clicked_target}'"
+                            logger.debug(
+                                f"[VISION_GATE] blocked click_element iter=1 expected={vision_target_id} got={clicked_target}"
                             )
                             messages.append({
                                 "role": "tool",
@@ -3455,7 +3496,7 @@ async def run_compound_last_mile(
 
                 else:
                     # Vision didn't provide actions OR evidence is already strong - allow completion
-                    logger.info("LAST_MILE_VISION_BOOTSTRAP_GATE allowing action (no vision actions or strong evidence)")
+                    logger.debug("[VISION_GATE] allowing action (no vision actions or strong evidence)")
 
             # ── Read-First Enforcement: Reject clicks when evidence is strong ──
             # This gate should ONLY block clicks, NOT completions
@@ -3472,9 +3513,8 @@ async def run_compound_last_mile(
                         vision_brief_text = str(msg.get("content", ""))
                         if "Vision Action Plan" in vision_brief_text or "Next steps:" in vision_brief_text:
                             vision_override = True
-                            logger.info(
-                                f"LAST_MILE_READ_FIRST_GATE vision_override=True: "
-                                f"vision provided actionable guidance, allowing click despite strong evidence"
+                            logger.debug(
+                                "[LAST_MILE] read_first_gate vision_override=True, allowing click"
                             )
                             break
                 
@@ -3491,9 +3531,8 @@ async def run_compound_last_mile(
                         "entity not present", "target not present"
                     ])
                     if not has_justification:
-                        logger.warning(
-                            f"LAST_MILE_COMPLETION_GATE BLOCKED click at iter=1 "
-                            f"(evidence_hits={initial_evidence_hits}, no justification)"
+                        logger.debug(
+                            f"[LAST_MILE] completion_gate blocked click iter=1 evidence={initial_evidence_hits}"
                         )
                         messages.append({
                             "role": "tool",
@@ -3525,10 +3564,8 @@ async def run_compound_last_mile(
 
                 if state.is_semantic_repeat(click_label):
                     state.semantic_repeat_streak += 1
-                    logger.warning(
-                        f"LAST_MILE_RABBIT_HOLE_GUARD BLOCKED concept-neighbor click "
-                        f"iter={iteration} streak={state.semantic_repeat_streak} "
-                        f"label='{click_label[:80]}'"
+                    logger.debug(
+                        f"[LAST_MILE] rabbit_hole_guard blocked iter={iteration} streak={state.semantic_repeat_streak}"
                     )
 
                     # Check if vision should be triggered
@@ -3564,9 +3601,8 @@ async def run_compound_last_mile(
 
             # ── Blocked-click recovery: do not allow immediate scroll fallback ──
             if forbid_scroll_after_blocked_click and tool_name == "scroll_page":
-                logger.warning(
-                    "LAST_MILE_BLOCK_RECOVERY_GUARD blocked scroll after blocked click; "
-                    "forcing read/re-target"
+                logger.debug(
+                    "[LAST_MILE] block_recovery_guard blocked scroll after blocked click"
                 )
                 messages.append({
                     "role": "tool",
@@ -3636,9 +3672,8 @@ async def run_compound_last_mile(
                     if status == "success" and len(answer_text.strip()) < 10:
                         completion_gate_passed = False
                         completion_gate_reason = "weak_answer"
-                        logger.warning(
-                            f"LAST_MILE_COMPLETION_GATE weak answer (len={len(answer_text)}), "
-                            f"attempting evidence rescue"
+                        logger.debug(
+                            f"[LAST_MILE] completion_gate weak_answer len={len(answer_text)}, attempting rescue"
                         )
                         # Try to strengthen the answer with visible evidence
                         _, best_rescue, _ = _score_evidence_relevance(main_goal, nodes)
@@ -3662,9 +3697,7 @@ async def run_compound_last_mile(
 
                             if escalation and escalation.blockage_type == "ambiguity_wall":
                                 logger.warning(
-                                    f"LAST_MILE_ESCALATION_AMBIGUITY "
-                                    f"reason={completion_gate_reason} "
-                                    f"evidence={state.evidence_hits}"
+                                    f"[LAST_MILE] escalation_ambiguity reason={completion_gate_reason} evidence={state.evidence_hits}"
                                 )
                                 return {
                                     "action": {
@@ -3692,8 +3725,7 @@ async def run_compound_last_mile(
 
                 # For wait actions returned as terminal, attach bundled items and return to frontend
                 logger.info(
-                    f"🎯 COMPOUND ACTION iter={iteration} type={action_type} "
-                    f"target={frontend_action.get('target_id', 'N/A')}"
+                    f"[LAST_MILE] iter={iteration} result=action type={action_type} target={frontend_action.get('target_id', 'N/A')}"
                 )
 
                 state.exit_reason = f"action:{action_type}"
@@ -3709,8 +3741,8 @@ async def run_compound_last_mile(
                 state.record_action(f"onecall:{tool_name}")
                 if tool_name == "click_element":
                     excluded_ids.add(str(tool_args.get("target_id", "")))
-                logger.info(
-                    "ONECALL_IMMEDIATE_RETURN iter=%s tool=%s action_type=%s",
+                logger.debug(
+                    "[ONECALL] immediate_return iter=%s tool=%s action=%s",
                     iteration,
                     tool_name,
                     frontend_action.get("type", ""),
@@ -3773,10 +3805,8 @@ async def run_compound_last_mile(
             current_section=target_node.current_title if target_node else "",
         )
 
-        logger.info(
-            f"LAST_MILE_PROGRESS_SCORE iter={iteration} "
-            f"evidence_hits={state.evidence_hits} miss_streak={state.evidence_miss_streak} "
-            f"stall_count={state.stall_count} semantic_repeat={state.semantic_repeat_streak}"
+        logger.debug(
+            f"[LAST_MILE] progress iter={iteration} evidence={state.evidence_hits} stall={state.stall_count} miss_streak={state.evidence_miss_streak}"
         )
 
         # ── Early Vision Escalation: Trigger when evidence is weak after 2+ misses ──
@@ -3787,10 +3817,8 @@ async def run_compound_last_mile(
             and state.evidence_hits < EVIDENCE_RELEVANCE_THRESHOLD
         ):
             state.vision_used = True
-            logger.info(
-                f"👁️ LAST_MILE_VISION_ESCALATION iter={iteration} "
-                f"miss_streak={state.evidence_miss_streak} evidence_hits={state.evidence_hits} "
-                f"→ injecting vision request"
+            logger.debug(
+                f"[LAST_MILE] vision_escalation iter={iteration} miss_streak={state.evidence_miss_streak} evidence={state.evidence_hits}"
             )
             messages.append({
                 "role": "user",
@@ -3826,9 +3854,8 @@ async def run_compound_last_mile(
         if stagnancy_counter >= COMPOUND_STAGNANCY_THRESHOLD:
             # Before giving up, check if we have strong evidence that wasn't extracted
             if state.evidence_hits >= EVIDENCE_RELEVANCE_THRESHOLD:
-                logger.warning(
-                    f"🛡️ COMPOUND STAGNANCY OVERRIDE: Have strong evidence (hits={state.evidence_hits}) "
-                    "but LLM failed to extract — forcing evidence rescue"
+                logger.debug(
+                    f"[LAST_MILE] stagnancy_override evidence={state.evidence_hits}, forcing rescue"
                 )
                 # Force one more iteration with explicit extraction instruction
                 messages.append({
@@ -3848,8 +3875,7 @@ async def run_compound_last_mile(
             else:
                 state.exit_reason = "stagnancy"
                 logger.warning(
-                    f"🛡️ COMPOUND STAGNANCY iter={iteration} "
-                    f"unchanged_turns={stagnancy_counter} → forcing exit"
+                    f"[LAST_MILE] stagnancy iter={iteration} unchanged_turns={stagnancy_counter}, forcing exit"
                 )
                 return {
                     "action": {
@@ -3872,7 +3898,7 @@ async def run_compound_last_mile(
 
     # Max iterations reached
     state.exit_reason = "max_iterations"
-    logger.warning(f"⏱️ COMPOUND MAX_ITER reached ({COMPOUND_MAX_INTERNAL_ITERATIONS})")
+    logger.warning(f"[LAST_MILE] max_iterations reached ({COMPOUND_MAX_INTERNAL_ITERATIONS})")
     return {
         "action": {
             "type": "clarify",

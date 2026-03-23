@@ -134,7 +134,7 @@ async def analyse_page_dom(
         resp.raise_for_status()
         narration = resp.json()["choices"][0]["message"]["content"].strip()
 
-    logger.info(f"[{session_id}] 🗣️ DOM narration ({len(narration)} chars): {narration[:60]}...")
+    logger.info(f"[{session_id}] [NARRATE] DOM narration ({len(narration)} chars): {narration[:60]}...")
     return narration
 
 

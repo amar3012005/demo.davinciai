@@ -29,7 +29,7 @@ async def handle_terminal_mission_state(
         await mission_brain._save_mission(mission)
         return mission, None
 
-    logger.info("🏁 Mission already complete. Generating end dialogue...")
+    logger.info("[DONE] Mission already complete. Generating end dialogue...")
     end_result = await validate_and_end_mission(schema, nodes, mission, mission_brain, app, start_time)
     if end_result:
         return mission, end_result

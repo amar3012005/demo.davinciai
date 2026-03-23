@@ -176,7 +176,7 @@ class RAGConfig:
         
         # Backwards compatibility: migrate from gemini_* to llm_* if needed
         if not self.llm_api_key and self.gemini_api_key:
-            logger.info("🔄 Migrating from GEMINI_API_KEY to LLM_API_KEY (backwards compatibility)")
+            logger.info("[RESET] Migrating from GEMINI_API_KEY to LLM_API_KEY (backwards compatibility)")
             self.llm_api_key = self.gemini_api_key
             self.llm_provider = "gemini"
             if self.gemini_model:

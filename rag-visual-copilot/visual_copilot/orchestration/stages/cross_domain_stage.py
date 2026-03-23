@@ -29,12 +29,12 @@ async def run_cross_domain_gate(
         if not domain_known_for_hive:
             first_sg = getattr(schema, 'first_subgoal', None)
             if is_mid_mission:
-                logger.info("⏩ Mid-mission with unknown domain strategy: keeping mission mode (no zero-shot reset).")
+                logger.info("[SKIP] Mid-mission with unknown domain strategy: keeping mission mode (no zero-shot reset).")
                 return hive_response, False, None
             if first_sg:
-                logger.info("🧭 ZERO-SHOT MODE: Hive bypassed (unknown domain), using Mind Reader first_subgoal.")
+                logger.info("[ZERO-SHOT] ZERO-SHOT MODE: Hive bypassed (unknown domain), using Mind Reader first_subgoal.")
             else:
-                logger.info("🧭 ZERO-SHOT MODE: Hive bypassed (unknown domain), no first_subgoal.")
+                logger.info("[ZERO-SHOT] ZERO-SHOT MODE: Hive bypassed (unknown domain), no first_subgoal.")
             is_zero_shot = True
             return hive_response, is_zero_shot, None
 
@@ -46,7 +46,7 @@ async def run_cross_domain_gate(
         if is_explicit_jump:
             cross_response = await hive_interface.retrieve_cross_domain(schema)
         else:
-            logger.info("⏩ Cross-domain retrieval skipped: no explicit domain-jump intent.")
+            logger.info("[SKIP] Cross-domain retrieval skipped: no explicit domain-jump intent.")
 
         bridge_domain = getattr(cross_response, "cross_domain_target", None) if cross_response else None
         garbage_domains = {"all", "none", "null", "", "any"}
@@ -91,7 +91,7 @@ async def run_cross_domain_gate(
                     f"🌐 Cross-domain bridge target '{bridge_domain}' equals current host; continuing with semantic detective."
                 )
             else:
-                logger.info(f"🌐 Cross-Domain Bridge APPROVED: routing to '{bridge_domain}'")
+                logger.info(f"[CROSS-DOMAIN] Cross-Domain Bridge APPROVED: routing to '{bridge_domain}'")
                 return hive_response, is_zero_shot, {
                     "success": True,
                     "blocked": False,
@@ -107,14 +107,14 @@ async def run_cross_domain_gate(
                 }
 
         if is_mid_mission and not is_explicit_jump:
-            logger.info("⏩ Mid-mission strategy miss: staying in mission mode (skip zero-shot).")
+            logger.info("[SKIP] Mid-mission strategy miss: staying in mission mode (skip zero-shot).")
             is_zero_shot = False
         else:
             first_sg = getattr(schema, 'first_subgoal', None)
             if first_sg:
-                logger.info("🧭 ZERO-SHOT MODE: Mind Reader provided first_subgoal → fast path (no ReAct needed)")
+                logger.info("[ZERO-SHOT] ZERO-SHOT MODE: Mind Reader provided first_subgoal -> fast path (no ReAct needed)")
             else:
-                logger.info("🧭 ZERO-SHOT MODE: No first_subgoal → will use ReAct LLM Router.")
+                logger.info("[ZERO-SHOT] ZERO-SHOT MODE: No first_subgoal -> will use ReAct LLM Router.")
             is_zero_shot = True
 
     return hive_response, is_zero_shot, None

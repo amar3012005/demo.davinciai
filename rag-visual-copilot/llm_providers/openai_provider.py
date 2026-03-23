@@ -19,10 +19,10 @@ class OpenAIProvider(LLMProvider):
         """Initialize OpenAI client."""
         try:
             self._client = OpenAI(api_key=self.api_key)
-            logger.info(f"✅ OpenAI initialized: {self.model_name}")
+            logger.info(f"[OK] OpenAI initialized: {self.model_name}")
             return True
         except Exception as e:
-            logger.error(f"❌ OpenAI initialization failed: {e}")
+            logger.error(f"[ERROR] OpenAI initialization failed: {e}")
             return False
     
     def generate(

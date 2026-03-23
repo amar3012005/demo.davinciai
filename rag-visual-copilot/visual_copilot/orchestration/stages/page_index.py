@@ -61,7 +61,7 @@ def load_index(path: Optional[str] = None) -> Dict[str, Any]:
             with open(p, "r", encoding="utf-8") as f:
                 _cached_index = json.load(f)
                 _cached_index_path = p
-            logger.info(f"PageIndex loaded from {p} (domain={_cached_index.get('site_metadata', {}).get('domain', '?')})")
+            logger.debug(f"PageIndex loaded from {p} domain={_cached_index.get('site_metadata', {}).get('domain', '?')}")
             return _cached_index
 
     logger.warning("PageIndex site_map.json not found in any search path")
@@ -228,7 +228,7 @@ def _build_idf(index: Dict[str, Any]) -> None:
     _idf_weights = _idf_weights  # Ensure assignment
     _idf_built = True
     _last_index_hash = index_hash  # ← Store hash for change detection
-    logger.info(f"PageIndex IDF built: {len(_idf_weights)} terms, {n_docs} nodes")
+    logger.debug(f"PageIndex IDF built: {len(_idf_weights)} terms, {n_docs} nodes")
 
 
 def _goal_relevance_score(goal: str, node: Dict[str, Any]) -> float:
@@ -583,7 +583,7 @@ def traverse_index(
                 for c in n.get("children", []):
                     _walk(c, d + 1)
             _walk(target_node, 0)
-            logger.info(f"🎯 PageIndex Target Goal Subgraph ({target_node.get('node_id', '?')}):\n" + "\n".join(subgraph_lines))
+            logger.debug(f"PageIndex target subgraph node={target_node.get('node_id', '?')}:\n" + "\n".join(subgraph_lines))
         except Exception as subgraph_err:
             logger.warning(f"Failed to print PageIndex subgraph: {subgraph_err}")
 

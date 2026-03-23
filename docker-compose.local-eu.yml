@@ -112,10 +112,15 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       TENANT_ID: ${TENANT_ID:-tara}
       PORT: "4005"
+
+      # Embeddings microservice (local Docker service, overrides .env.eu production URL)
+      EMBEDDINGS_SERVICE_URL: http://embeddings-eu-local:4006/embed
     restart: unless-stopped
     depends_on:
       redis-eu-local:
         condition: service_healthy
+      embeddings-eu-local:
+        condition: service_started
     extra_hosts:
       - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
       - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"

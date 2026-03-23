@@ -44,7 +44,7 @@ async def run_detective_stage(
         logger.info(
             f"SEMANTIC_FALLBACK_AFTER_KEYWORD_MISS reason={label_policy.get('miss_reason') or 'unknown'}"
         )
-    logger.info(f"🔍 Step 6: Semantic Detective investigating (excluding {len(excluded_ids)} IDs)...")
+    logger.info(f"[SEARCH] Step 6: Semantic Detective investigating (excluding {len(excluded_ids)} IDs)...")
 
     _reject_all = getattr(app.state, "_detective_reject_signatures", {})
     if not hasattr(app.state, "_detective_reject_signatures"):
@@ -152,7 +152,7 @@ async def run_detective_stage(
         and hasattr(app.state.mind_reader, "llm")
     ):
         top_n = detective_report.candidates[:10]
-        logger.info(f"🧠 LLM deciding the absolute Best Match from top {len(top_n)} candidates...")
+        logger.info(f"[BRAIN] LLM deciding the absolute Best Match from top {len(top_n)} candidates...")
 
         previous_subgoal = ""
         if mission.current_subgoal_index > 0 and mission.current_subgoal_index - 1 < len(mission.subgoals):
@@ -198,7 +198,7 @@ async def run_detective_stage(
             if match:
                 chosen_idx = int(match.group())
                 if chosen_idx == -1:
-                    logger.warning("   🛑 LLM Reranker REJECTED all candidates. Forcing V1 Fallback.")
+                    logger.warning("   [STOP] LLM Reranker REJECTED all candidates. Forcing V1 Fallback.")
                     if detective_report.best_match:
                         detective_report.best_match.hybrid_score = 0.1
                         detective_report.best_match.hybrid_score = 0.1
@@ -256,11 +256,11 @@ async def run_detective_stage(
                         if detective_report.best_match.hybrid_score < 0.35:
                             detective_report.confidence = "low"
                 else:
-                    logger.warning(f"   ⚠️ LLM returned out of bounds index: {chosen_idx}")
+                    logger.warning(f"   [WARN] LLM returned out of bounds index: {chosen_idx}")
             else:
-                logger.warning(f"   ⚠️ LLM returned non-integer: '{llm_response}'")
+                logger.warning(f"   [WARN] LLM returned non-integer: '{llm_response}'")
         except Exception as e:
-            logger.error(f"   ⚠️ LLM reranking failed: {e}")
+            logger.error(f"   [WARN] LLM reranking failed: {e}")
 
     if label_policy.get("has_explicit_label") and detective_report.best_match:
         _best_node = next(
@@ -433,7 +433,7 @@ async def run_detective_stage(
                 tier3_result["fallback_tier"] = "tier3_after_detective"
                 return tier3_result
 
-            logger.warning("   🚫 All 3 tiers failed. Blocking action.")
+            logger.warning("   [BLOCKED] All 3 tiers failed. Blocking action.")
 
             # Record the failure in mission history so the amnesia guard
             # can detect it on the next request and invalidate this mission,
@@ -447,7 +447,7 @@ async def run_detective_stage(
                     })
                     await mission_brain._save_mission(mission)
             except Exception as _save_err:
-                logger.warning(f"   ⚠️ Could not persist failure marker: {_save_err}")
+                logger.warning(f"   [WARN] Could not persist failure marker: {_save_err}")
 
             return {
                 "success": False,
@@ -462,7 +462,7 @@ async def run_detective_stage(
                 "fallback_tier": "tier3_failed",
             }
 
-        logger.info("🛡️ Step 7: Mission Brain auditing action...")
+        logger.info("[GUARD] Step 7: Mission Brain auditing action...")
         approved, reason = await mission_brain.audit_action(
             mission_id=mission.mission_id,
             action_type=detective_report.recommended_action,
@@ -472,7 +472,7 @@ async def run_detective_stage(
         )
 
         if not approved:
-            logger.warning(f"   🚫 Action BLOCKED: {reason}")
+            logger.warning(f"   [BLOCKED] Action BLOCKED: {reason}")
             await mission_brain.advance_subgoal(
                 mission.mission_id,
                 is_zero_shot=getattr(schema, "zero_shot_mode", False) or is_zero_shot,
@@ -484,7 +484,7 @@ async def run_detective_stage(
                 "action": None,
             }
 
-        logger.info(f"   ✅ Action APPROVED: {detective_report.recommended_action}")
+        logger.info(f"   [OK] Action APPROVED: {detective_report.recommended_action}")
         action_type = detective_report.recommended_action
         node_id = detective_report.best_match.node_id if detective_report.best_match else ""
         text_to_type = ""

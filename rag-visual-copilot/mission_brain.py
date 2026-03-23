@@ -126,7 +126,7 @@ class MissionBrain:
         self._memory_state: Dict[str, MissionState] = {}
         
         logger.info(
-            f"🧠 MissionBrain initialized: "
+            f"[MISSION] MissionBrain initialized: "
             f"Redis={REDIS_AVAILABLE and redis_client is not None}"
         )
 
@@ -166,8 +166,8 @@ class MissionBrain:
             # If goals are non-empty and have zero overlap, it's a new mission.
             if new_terms and old_terms and not (new_terms & old_terms):
                 logger.warning(
-                    f"🗑️ MISSION GOAL MISMATCH: incoming='{new_goal}' mission='{old_goal}' "
-                    f"→ invalidating mission {existing.mission_id} to start fresh."
+                    f"MISSION GOAL MISMATCH: incoming='{new_goal}' mission='{old_goal}' "
+                    f"-> invalidating mission {existing.mission_id} to start fresh."
                 )
                 existing.status = "failed" # Invalidate so _load_session_mission won't find it again
                 await self._save_mission(existing)
@@ -175,16 +175,16 @@ class MissionBrain:
 
         if existing:
             if existing.status == "in_progress":
-                logger.info(
-                    f"🧠 Resuming mission: {existing.mission_id} "
+                logger.debug(
+                    f"[MISSION] resuming: {existing.mission_id} "
                     f"(subgoal {existing.current_subgoal_index}/{len(existing.subgoals)}, "
                     f"history: {len(existing.action_history)} actions)"
                 )
                 return existing
             elif existing.status == "completed":
                 logger.info(
-                    f"🏁 Mission already completed: {existing.mission_id} "
-                    f"— returning for terminal state check"
+                    f"[MISSION] already completed: {existing.mission_id} "
+                    f"- returning for terminal state check"
                 )
                 return existing
 
@@ -256,7 +256,7 @@ class MissionBrain:
         await self._save_mission(mission)
         
         logger.info(
-            f"🧠 Mission created: {mission_id} "
+            f"[MISSION] created: {mission_id} "
             f"({len(subgoals)} subgoals, {len(constraints)} constraints)"
         )
         
@@ -372,16 +372,16 @@ class MissionBrain:
 
             # Check terminal states
             if parsed.get("is_done"):
-                logger.info("ReAct: goal already visible on screen — signalling done")
+                logger.info("ReAct: goal already visible on screen -- signalling done")
                 return ["Extract and present the answer to the user"]
 
             if parsed.get("is_impossible"):
-                logger.warning(f"ReAct: task impossible — {parsed.get('why', 'unknown reason')}")
+                logger.warning(f"ReAct: task impossible -- {parsed.get('why', 'unknown reason')}")
                 return []
 
             if parsed.get("decide") == "clarify":
                 next_step = parsed.get("next_step", "Ask user for clarification")
-                logger.info(f"ReAct: clarification needed — {next_step}")
+                logger.info(f"ReAct: clarification needed -- {next_step}")
                 return [next_step]
 
             # Extract actionable subgoal
@@ -459,7 +459,7 @@ class MissionBrain:
             mission, action_type, target_text
         )
         if not blocking_result[0]:
-            logger.info(f"🚫 Action blocked: {blocking_result[1]}")
+            logger.info(f"[BLOCKED] Action blocked: {blocking_result[1]}")
             return blocking_result
         
         # Check 2: History (avoid loops)
@@ -467,7 +467,7 @@ class MissionBrain:
             mission, action_type, target_id
         )
         if not history_result[0]:
-            logger.info(f"🚫 Action blocked (history): {history_result[1]}")
+            logger.info(f"[BLOCKED] Action blocked (history): {history_result[1]}")
             return history_result
         
         # Check 3: Constraint status update
@@ -476,7 +476,7 @@ class MissionBrain:
         # Save updated constraints
         await self._save_mission(mission)
         
-        logger.debug(f"✅ Action approved: {action_type} on {target_id}")
+        logger.debug(f"[OK] Action approved: {action_type} on {target_id}")
         return True, "Action approved"
 
     def _check_blocking_constraints(
@@ -614,7 +614,7 @@ class MissionBrain:
                             constraint.status = ConstraintStatus.FILLED
                             constraint.value = keyword
                             logger.info(
-                                f"✅ Constraint fulfilled: {constraint_name} = {keyword}"
+                                f"Constraint fulfilled: {constraint_name} = {keyword}"
                             )
                             break
 
@@ -680,13 +680,13 @@ class MissionBrain:
         
         if mission.current_subgoal_index >= len(mission.subgoals):
             mission.status = "completed"
-            logger.info(f"✅ Mission completed: {mission_id}")
+            logger.info(f"[OK] Mission completed: {mission_id}")
         else:
             logger.info(
-                f"📍 Advanced to subgoal {mission.current_subgoal_index}: "
+                f"Advanced to subgoal {mission.current_subgoal_index}: "
                 f"{mission.subgoals[mission.current_subgoal_index]}"
             )
-        
+
         await self._save_mission(mission)
         return True
 
@@ -720,10 +720,10 @@ class MissionBrain:
         
         if mission.current_subgoal_index >= len(mission.subgoals):
             mission.status = "completed"
-            logger.info(f"✅ Mission completed (verified: {verification_reason}): {mission_id}")
+            logger.info(f"[OK] Mission completed (verified: {verification_reason}): {mission_id}")
         else:
             logger.info(
-                f"📍 Advanced to subgoal {mission.current_subgoal_index} (verified: {verification_reason}): "
+                f"Advanced to subgoal {mission.current_subgoal_index} (verified: {verification_reason}): "
                 f"{mission.subgoals[mission.current_subgoal_index]}"
             )
         
@@ -766,7 +766,7 @@ class MissionBrain:
                 mission.action_history.append(action_key)
         else:
             # Failed action - might want to track separately
-            logger.warning(f"❌ Failed action: {action_type} on {target_id}")
+            logger.warning(f"[ERROR] Failed action: {action_type} on {target_id}")
         
         await self._save_mission(mission)
         return True

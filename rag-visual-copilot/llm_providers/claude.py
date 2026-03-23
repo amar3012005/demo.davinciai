@@ -19,10 +19,10 @@ class ClaudeProvider(LLMProvider):
         """Initialize Claude client."""
         try:
             self._client = Anthropic(api_key=self.api_key)
-            logger.info(f"✅ Claude initialized: {self.model_name}")
+            logger.info(f"[OK] Claude initialized: {self.model_name}")
             return True
         except Exception as e:
-            logger.error(f"❌ Claude initialization failed: {e}")
+            logger.error(f"[ERROR] Claude initialization failed: {e}")
             return False
     
     def generate(

@@ -73,9 +73,9 @@ INSTRUCTIONS:
         reason = decision.get("reason", "No reason provided")
 
         if arrived:
-            logger.info(f"🎯 LLM DOM CHECK (ARRIVED): {reason}")
+            logger.info(f"[ARRIVAL_CHECK] arrived=true reason={reason}")
         else:
-            logger.debug(f"🔍 LLM DOM CHECK (NOT ARRIVED): {reason}")
+            logger.debug(f"[ARRIVAL_CHECK] arrived=false reason={reason}")
 
         return arrived, reason
     except Exception as e:
@@ -103,9 +103,8 @@ async def validate_and_end_mission(schema, nodes, mission, mission_brain, app, s
         validation = json.loads(match.group()) if match else json.loads(raw)
 
         logger.info(
-            f"🏁 Mission Validator: complete={validation.get('is_complete')}, "
-            f"confidence={validation.get('confidence')}, "
-            f"evidence={validation.get('evidence', '')[:100]}"
+            f"[MISSION_VALIDATE] complete={validation.get('is_complete')} "
+            f"confidence={validation.get('confidence')}"
         )
 
         if not validation.get("is_complete"):
@@ -128,7 +127,7 @@ async def validate_and_end_mission(schema, nodes, mission, mission_brain, app, s
         end_data = json.loads(end_match.group()) if end_match else json.loads(end_raw)
 
         speech = end_data.get("speech", f"All done with {schema.target_entity}! What's next?")
-        logger.info(f"🎤 Mission End Speech: {speech}")
+        logger.debug(f"[MISSION_END] speech={speech[:80]}")
 
         if mission:
             mission.status = "completed"
@@ -146,7 +145,7 @@ async def validate_and_end_mission(schema, nodes, mission, mission_brain, app, s
         }
 
     except Exception as e:
-        logger.error(f"❌ Mission validation/end failed: {e}")
+        logger.error(f"[MISSION_VALIDATE] failed: {e}")
         if mission:
             mission.status = "paused"
             await mission_brain._save_mission(mission)

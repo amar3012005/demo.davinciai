@@ -41,13 +41,13 @@ class OpenRouterProvider(LLMProvider):
             )
             if response.status_code == 200:
                 self._client = True  # Flag that we're initialized
-                logger.info(f"✅ OpenRouter initialized: {self.model_name} (reasoning={'enabled' if self.enable_reasoning else 'disabled'})")
+                logger.info(f"[OK] OpenRouter initialized: {self.model_name} (reasoning={'enabled' if self.enable_reasoning else 'disabled'})")
                 return True
             else:
                 logger.error(f"OpenRouter initialization failed: HTTP {response.status_code}")
                 return False
         except Exception as e:
-            logger.error(f"❌ OpenRouter initialization failed: {e}")
+            logger.error(f"[ERROR] OpenRouter initialization failed: {e}")
             return False
     
     def generate(
@@ -105,7 +105,7 @@ class OpenRouterProvider(LLMProvider):
             enable_reasoning = kwargs.get("enable_reasoning", self.enable_reasoning)
             if enable_reasoning and "nemotron" in self.model_name.lower():
                 payload["reasoning"] = {"enabled": True}
-                logger.debug(f"🧠 Reasoning enabled for {self.model_name}")
+                logger.debug(f"[BRAIN] Reasoning enabled for {self.model_name}")
             
             if stream:
                 # Streaming mode
@@ -144,7 +144,7 @@ class OpenRouterProvider(LLMProvider):
                                             # Extract reasoning_details if present
                                             if 'reasoning_details' in delta:
                                                 reasoning_details = delta['reasoning_details']
-                                                logger.debug(f"🧠 Reasoning details: {reasoning_details}")
+                                                logger.debug(f"[BRAIN] Reasoning details: {reasoning_details}")
                                     
                                     except json.JSONDecodeError:
                                         continue
@@ -175,7 +175,7 @@ class OpenRouterProvider(LLMProvider):
                 reasoning_details = message.get('reasoning_details')
                 
                 if reasoning_details:
-                    logger.debug(f"🧠 Reasoning details: {reasoning_details}")
+                    logger.debug(f"[BRAIN] Reasoning details: {reasoning_details}")
                 
                 # Store in conversation history
                 self.conversation_history.append({

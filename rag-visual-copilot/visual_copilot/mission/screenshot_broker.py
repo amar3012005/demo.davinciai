@@ -40,14 +40,14 @@ def register_session_websocket(app: Any, session_id: str, websocket: Any) -> Non
     if not hasattr(app.state, "active_websockets"):
         app.state.active_websockets = {}
     app.state.active_websockets[session_id] = websocket
-    logger.debug(f"📸 WS registered for session={session_id}")
+    logger.debug(f"WS registered for session={session_id}")
 
 
 def unregister_session_websocket(app: Any, session_id: str) -> None:
     """Remove session WebSocket on disconnect."""
     ws_map = getattr(getattr(app, "state", None), "active_websockets", None) or {}
     ws_map.pop(session_id, None)
-    logger.debug(f"📸 WS unregistered for session={session_id}")
+    logger.debug(f"WS unregistered for session={session_id}")
 
 
 def get_session_websocket(app: Any, session_id: str) -> Optional[Any]:
@@ -99,24 +99,24 @@ async def request_screenshot(
                 "request_id": request_id,
                 "reason": reason,
             })
-            logger.info(f"📸 SCREENSHOT_REQUEST sent session={session_id} rid={request_id} reason='{reason}'")
+            logger.debug(f"SCREENSHOT_REQUEST sent session={session_id} rid={request_id} reason='{reason}'")
 
             result = await asyncio.wait_for(future, timeout=SCREENSHOT_TIMEOUT)
             if result:
-                logger.info(f"📸 SCREENSHOT_RECEIVED session={session_id} rid={request_id} size={len(result) // 1024}KB")
+                logger.debug(f"SCREENSHOT_RECEIVED session={session_id} rid={request_id} size={len(result) // 1024}KB")
                 # Also update the cache so any parallel readers see the fresh image
                 cache = getattr(getattr(app, "state", None), "latest_screenshots", None)
                 if cache is not None:
                     cache[session_id] = result
             else:
-                logger.warning(f"📸 SCREENSHOT_EMPTY session={session_id} rid={request_id}")
+                logger.warning(f"SCREENSHOT_EMPTY session={session_id} rid={request_id}")
             return result
 
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ SCREENSHOT_TIMEOUT session={session_id} rid={request_id} after {SCREENSHOT_TIMEOUT}s")
+            logger.warning(f"SCREENSHOT_TIMEOUT session={session_id} rid={request_id} after {SCREENSHOT_TIMEOUT}s")
             return None
         except Exception as e:
-            logger.error(f"❌ SCREENSHOT_ERROR session={session_id} rid={request_id}: {e}")
+            logger.error(f"SCREENSHOT_ERROR session={session_id} rid={request_id}: {e}")
             return None
         finally:
             _pending.pop(key, None)
@@ -126,15 +126,13 @@ async def request_screenshot(
         if cache and session_id in cache:
             cached = cache[session_id]
             size_kb = len(cached) // 1024 if cached else 0
-            logger.info(
-                f"📸 SCREENSHOT_CACHE_HIT session={session_id} size={size_kb}KB "
-                f"(no WebSocket — using Orchestrator-pushed screenshot)"
+            logger.debug(
+                f"SCREENSHOT_CACHE_HIT session={session_id} size={size_kb}KB"
             )
             return cached
         logger.warning(
-            f"📸 SCREENSHOT_UNAVAILABLE session={session_id} — "
-            f"no WebSocket and no cached screenshot. "
-            f"Ensure Orchestrator is calling POST /api/v1/push_screenshot."
+            f"SCREENSHOT_UNAVAILABLE session={session_id} — "
+            f"no WebSocket and no cached screenshot"
         )
         return None
 
@@ -152,7 +150,7 @@ def resolve_screenshot(session_id: str, request_id: str, image_b64: Optional[str
     if future and not future.done():
         future.set_result(image_b64)
         return True
-    logger.warning(f"📸 SCREENSHOT_RESOLVE_MISS session={session_id} rid={request_id} (no pending future)")
+    logger.warning(f"SCREENSHOT_RESOLVE_MISS session={session_id} rid={request_id}")
     return False
 
 

@@ -44,6 +44,40 @@ def _get_vision_rate_limiter() -> asyncio.Semaphore:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Screenshot Dedup Cache — skip duplicate vision calls
+# ═══════════════════════════════════════════════════════════════════════
+
+import hashlib as _hashlib
+
+# session_id -> (screenshot_hash, vision_result_str)
+_vision_dedup_cache: Dict[str, Tuple[str, str]] = {}
+
+
+def _hash_screenshot(b64_data: str) -> str:
+    """Fast hash of screenshot data for dedup (first 2048 chars + length)."""
+    sig = f"{len(b64_data)}:{b64_data[:2048]}"
+    return _hashlib.md5(sig.encode("utf-8")).hexdigest()[:16]
+
+
+def _get_cached_vision(session_id: str, screenshot_hash: str) -> Optional[str]:
+    """Return cached vision result if screenshot is unchanged."""
+    entry = _vision_dedup_cache.get(session_id)
+    if entry and entry[0] == screenshot_hash:
+        return entry[1]
+    return None
+
+
+def _set_vision_cache(session_id: str, screenshot_hash: str, result: str) -> None:
+    """Cache vision result keyed by session + screenshot hash."""
+    _vision_dedup_cache[session_id] = (screenshot_hash, result)
+
+
+def clear_vision_cache(session_id: str) -> None:
+    """Clear vision cache for a session (call on session end or new goal)."""
+    _vision_dedup_cache.pop(session_id, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Click Tracking for Semantic Guardrails
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -784,7 +818,7 @@ async def _call_groq_vision(
             )
             return result
         except Exception as e:
-            logger.warning(f"👁️ VISION PROVIDER FAILED, trying direct Groq HTTP fallback: {e}")
+            logger.warning(f"[VISION] provider failed, trying direct Groq HTTP fallback: {e}")
 
     # Fallback path: direct Groq HTTP (same reliability pattern as pre-router/analyse_page)
     api_key = os.getenv("GROQ_API_KEY") or os.getenv("LLM_API_KEY")
@@ -825,7 +859,7 @@ async def _call_groq_vision(
                 result = resp.json()["choices"][0]["message"]["content"].strip()
         return result
     except Exception as e:
-        logger.error(f"👁️ VISION CALL FAILED (direct fallback): {e}")
+        logger.error(f"[VISION] direct fallback call failed: {e}")
         return f"System: Groq Vision call failed ({e}). Rely on the provided DOM text."
 
 
@@ -885,7 +919,7 @@ async def execute_internal_tool(
         tool_result_str (str): Text to feed back to LLM if non-terminal.
         frontend_action (dict | None): Payload to return to frontend if terminal.
     """
-    logger.info(f"⚙️ EXECUTING TOOL: {tool_name} | Args: {args}")
+    logger.info(f"[TOOL_EXEC] {tool_name}")
 
     # ── read_page_content: Non-terminal tool to re-examine visible content ──
     if tool_name == "read_page_content":
@@ -916,17 +950,13 @@ async def execute_internal_tool(
         
         # If we have good content, suggest the LLM extract an answer
         if result_lines and len(result_lines) >= 3:
-            logger.info(
-                f"📖 READ_PAGE_CONTENT: focus='{focus}' results={len(result_lines)} — "
-                "suggesting answer extraction"
-            )
             content_text += (
                 "\n\n[SYSTEM: The content above contains information relevant to the goal. "
                 "After reviewing this, call complete_mission with a comprehensive answer "
                 "extracted from these excerpts.]"
             )
-        
-        logger.info(f"📖 READ_PAGE_CONTENT: focus='{focus}' results={len(result_lines)}")
+
+        logger.debug(f"[READ_CONTENT] focus='{focus}' results={len(result_lines)}")
         return False, f"Page Content (focus: {focus or 'general'}):\n{content_text}", None
 
     if tool_name == "click_element":
@@ -942,10 +972,8 @@ async def execute_internal_tool(
             
             # If no target_id provided, resolve intent to ID
             if not target_id or not _is_valid_id(target_id, nodes):
-                logger.info(
-                    f"🎯 INTENT_BASED_ACTION: Resolving intent to target ID | "
-                    f"intent={intent}"
-                )
+                logger.debug(f"[INTENT_RESOLVE] click: resolving intent text_label='{intent.get('text_label', '')}'")
+
                 
                 resolved_id, resolve_reason = _resolve_intent_to_target_id(
                     intent=intent,
@@ -954,10 +982,7 @@ async def execute_internal_tool(
                 )
                 
                 if not resolved_id:
-                    logger.warning(
-                        f"🎯 INTENT_RESOLUTION_FAILED: {resolve_reason} | "
-                        f"intent={intent}"
-                    )
+                    logger.warning(f"[INTENT_RESOLVE] click failed: {resolve_reason}")
                     return (
                         False,
                         f"Could not find element matching intent: {intent}. "
@@ -966,23 +991,18 @@ async def execute_internal_tool(
                         None,
                     )
                 
-                logger.info(
-                    f"🎯 INTENT_RESOLVED: {intent} -> {resolved_id} ({resolve_reason})"
-                )
+                logger.debug(f"[INTENT_RESOLVE] click: resolved -> {resolved_id} ({resolve_reason})")
                 target_id = resolved_id
                 args["target_id"] = target_id  # Update for downstream logic
             else:
-                logger.info(
-                    f"🎯 INTENT_WITH_EXPLICIT_ID: Using provided target_id={target_id} "
-                    f"(intent was advisory: {intent})"
-                )
+                logger.debug(f"[INTENT_RESOLVE] click: using explicit target_id={target_id}")
         else:
             # Legacy path: direct target_id
             target_id = args.get("target_id", "")
         
         # Continue with existing validation using resolved/provided target_id
         if not _is_valid_id(target_id, nodes):
-            logger.warning(f"🛡️ GUARDRAIL: Hallucinated ID -> {target_id}")
+            logger.warning(f"[GUARDRAIL] hallucinated ID: {target_id}")
             return (
                 False,
                 f"Error: ID '{target_id}' does not exist in the current DOM. "
@@ -991,7 +1011,7 @@ async def execute_internal_tool(
                 None,
             )
         if excluded_ids and target_id in excluded_ids:
-            logger.warning(f"🛡️ GUARDRAIL: Re-click blocked -> {target_id} (already clicked)")
+            logger.warning(f"[GUARDRAIL] re-click blocked: {target_id}")
             return (
                 False,
                 f"Error: ID '{target_id}' was already clicked in a previous step. "
@@ -1005,11 +1025,8 @@ async def execute_internal_tool(
         # EXCEPTION: If force_click is True (vision override), bypass this gate.
         force_click = args.get("force_click", False)
         if not force_click and not _is_clickable_interactive_node(target_node):
-            logger.warning(
-                f"🛡️ CLICKABILITY_GATE rejected non-clickable target -> {target_id} "
-                f"(tag='{getattr(target_node, 'tag', '') if target_node else ''}' "
-                f"role='{getattr(target_node, 'role', '') if target_node else ''}')"
-            )
+            logger.warning(f"[CLICKABILITY_GATE] rejected {target_id} tag='{getattr(target_node, 'tag', '') if target_node else ''}'")
+
             return (
                 False,
                 f"REJECTED: Target '{target_id}' is not a clickable control on the current page. "
@@ -1028,10 +1045,7 @@ async def execute_internal_tool(
 
         # Anti-recursion guard: block redundant sidebar/nav section reclicks.
         if not force_click and _is_same_section_reclick_blocked(nodes, target_node):
-            logger.warning(
-                "🛡️ SECTION_RECLICK_GUARD blocked redundant section nav click "
-                f"(target={target_id}, text='{(getattr(target_node, 'text', '') or '')[:40]}')"
-            )
+            logger.warning(f"[SECTION_RECLICK_GUARD] blocked {target_id}")
             return (
                 False,
                 "REJECTED: You are already in this section. Look for local controls.",
@@ -1048,20 +1062,14 @@ async def execute_internal_tool(
             if best_entity is not None:
                 best_id = str(getattr(best_entity, "id", "") or "")
                 if best_id and best_id != target_id:
-                    logger.info(
-                        "🎯 ENTITY_GUARD override click target "
-                        f"{target_id} -> {best_id} for goal='{main_goal[:80]}'"
-                    )
+                    logger.debug(f"[ENTITY_GUARD] override {target_id} -> {best_id}")
                     target_id = best_id
                     target_node = best_entity
                     target_text = (getattr(target_node, "text", "") or "").lower()
                     target_has_entity = True
             elif not target_is_search:
                 qualifier_hint = " ".join(qualifier_terms[:2]) if qualifier_terms else "requested qualifier"
-                logger.warning(
-                    "🛡️ ENTITY_GUARD blocked generic click without visible entity/search target "
-                    f"(target={target_id}, goal='{main_goal[:80]}')"
-                )
+                logger.warning(f"[ENTITY_GUARD] blocked generic click {target_id}")
                 return (
                     False,
                     "REJECTED: Entity target is not visible yet. Do not click generic navigation. "
@@ -1091,10 +1099,7 @@ async def execute_internal_tool(
             
             if _should_force_click(text_label, context, target_node):
                 force_click = True
-                logger.info(
-                    f"🖱️  FORCE_CLICK AUTO-ENABLED for {target_id} | "
-                    f"reason=radix_or_dropdown_pattern detected"
-                )
+                logger.debug(f"[CLICK] force_click auto-enabled for {target_id}")
 
         return False, f"Action 'click_element' on '{target_id}' queued. You may queue more actions, or call `wait_for_ui` to execute the queue.", {
             "type": "click",
@@ -1116,10 +1121,8 @@ async def execute_internal_tool(
             
             # If no target_id provided, resolve intent to ID
             if not target_id or not _is_valid_id(target_id, nodes):
-                logger.info(
-                    f"⌨️ INTENT_BASED_TYPE: Resolving intent to target ID | "
-                    f"intent={intent}"
-                )
+                logger.debug(f"[INTENT_RESOLVE] type: resolving intent text_label='{intent.get('text_label', '')}'")
+
                 
                 resolved_id, resolve_reason = _resolve_intent_to_target_id(
                     intent=intent,
@@ -1128,10 +1131,7 @@ async def execute_internal_tool(
                 )
                 
                 if not resolved_id:
-                    logger.warning(
-                        f"⌨️ INTENT_TYPE_RESOLUTION_FAILED: {resolve_reason} | "
-                        f"intent={intent}"
-                    )
+                    logger.warning(f"[INTENT_RESOLVE] type failed: {resolve_reason}")
                     return (
                         False,
                         f"Could not find input element matching intent: {intent}. "
@@ -1140,16 +1140,11 @@ async def execute_internal_tool(
                         None,
                     )
                 
-                logger.info(
-                    f"⌨️ INTENT_TYPE_RESOLVED: {intent} -> {resolved_id} ({resolve_reason})"
-                )
+                logger.debug(f"[INTENT_RESOLVE] type: resolved -> {resolved_id} ({resolve_reason})")
                 target_id = resolved_id
                 args["target_id"] = target_id
             else:
-                logger.info(
-                    f"⌨️ INTENT_TYPE_WITH_EXPLICIT_ID: Using provided target_id={target_id} "
-                    f"(intent was advisory: {intent})"
-                )
+                logger.debug(f"[INTENT_RESOLVE] type: using explicit target_id={target_id}")
         else:
             # Legacy path: direct target_id
             target_id = args.get("target_id", "")
@@ -1157,7 +1152,7 @@ async def execute_internal_tool(
         text = args.get("text", "")
         press_enter = args.get("press_enter", True)
         if not _is_valid_id(target_id, nodes):
-            logger.warning(f"🛡️ GUARDRAIL: Hallucinated ID -> {target_id}")
+            logger.warning(f"[GUARDRAIL] hallucinated ID: {target_id}")
             return (
                 False,
                 f"Error: ID '{target_id}' does not exist in the current DOM. "
@@ -1182,7 +1177,7 @@ async def execute_internal_tool(
 
     elif tool_name == "request_vision":
         # ═══════════════════════════════════════════════════════════════════
-        # 👁️ REAL VISION — Groq llama-4-scout-17b-16e-instruct
+        # REAL VISION — Groq llama-4-scout-17b-16e-instruct
         #
         # Flow:
         #   1. Try to get a fresh screenshot via the broker (WS round-trip)
@@ -1223,7 +1218,7 @@ async def execute_internal_tool(
             f"Already-clicked IDs: {', '.join(sorted(already_clicked_ids)) if already_clicked_ids else 'none'}\n"
             "Do not suggest clicking a sidebar/nav section that is already active or listed as a completed subgoal."
         )
-        logger.info(f"👁️ VISION REQUESTED: {enriched_reason}")
+        logger.info(f"[VISION] requested: reason='{reason[:80]}' url={current_url[:60]}")
 
 
         image_b64 = None
@@ -1238,13 +1233,13 @@ async def execute_internal_tool(
                         reason=enriched_reason,
                 )
                 if image_b64:
-                    logger.info("👁️ Using fresh broker screenshot (primary)")
+                    logger.debug("[VISION] using fresh broker screenshot")
             except Exception as e:
-                logger.error(f"👁️ Screenshot broker error: {e}")
+                logger.error(f"[VISION] screenshot broker error: {e}")
 
         # 2) Fallback to screenshot from current request
         if not image_b64 and screenshot_b64:
-            logger.info("👁️ Using pre-captured screenshot_b64 fallback")
+            logger.debug("[VISION] using pre-captured screenshot fallback")
             image_b64 = screenshot_b64
 
         # 3) Then try session-level cached screenshot saved by app.py
@@ -1253,19 +1248,28 @@ async def execute_internal_tool(
                 cache = getattr(app.state, "latest_screenshots", None) or {}
                 cached_b64 = cache.get(session_id)
                 if cached_b64:
-                    logger.info("👁️ Using app.state.latest_screenshots cache fallback")
+                    logger.debug("[VISION] using cached screenshot fallback")
                     image_b64 = cached_b64
             except Exception as e:
-                logger.warning(f"👁️ Screenshot cache lookup failed: {e}")
+                logger.warning(f"[VISION] screenshot cache lookup failed: {e}")
 
         if image_b64:
-            vision_result = await _call_groq_vision(
-                image_b64=image_b64,
-                reason=enriched_reason,
-                nodes=nodes,
-                app=app,
-            )
-            logger.info(f"👁️ VISION RAW_RESULT:\n{vision_result}\n")
+            # ── Screenshot Dedup: skip vision API if screenshot unchanged ──
+            ss_hash = _hash_screenshot(image_b64)
+            cached_vision = _get_cached_vision(session_id or "", ss_hash) if session_id else None
+            if cached_vision:
+                logger.info(f"[VISION] dedup_hit: reusing cached result (hash={ss_hash})")
+                vision_result = cached_vision
+            else:
+                vision_result = await _call_groq_vision(
+                    image_b64=image_b64,
+                    reason=enriched_reason,
+                    nodes=nodes,
+                    app=app,
+                )
+                if session_id:
+                    _set_vision_cache(session_id, ss_hash, vision_result)
+            logger.debug(f"[VISION] raw result length={len(vision_result)}")
             # Parse structured hints from vision response
             try:
                 from visual_copilot.mission.screenshot_broker import parse_vision_response
@@ -1289,15 +1293,14 @@ async def execute_internal_tool(
                 vision_result += hint_suffix
                 brief_text = _render_vision_reasoning_brief(hints, nodes)
                 logger.info(
-                    f"👁️ VISION HINTS: answer_visible={hints['answer_visible']} "
+                    f"[VISION] answer_visible={hints['answer_visible']} "
                     f"target={hints['best_target_id']} tool={hints['recommended_tool']} "
                     f"plan_steps={len(actions)}"
                 )
-                logger.info(f"👁️ VISION BRIEF:\n{brief_text}")
                 # Use plain-text reasoning brief in compound loop context (avoid raw JSON blobs).
                 vision_result = brief_text
             except Exception as hint_err:
-                logger.warning(f"👁️ Vision hint parsing failed: {hint_err}")
+                logger.warning(f"[VISION] hint parsing failed: {hint_err}")
 
             return False, vision_result, None
         else:
@@ -1330,10 +1333,7 @@ async def execute_internal_tool(
         # explicit visible text evidence.
         url_evidence = _extract_url_evidence(current_url, main_goal)
         if url_evidence.get("matches_goal"):
-            logger.info(
-                f"🎯 URL_EVIDENCE_MATCH: {url_evidence.get('goal_match_reason')} | "
-                f"goal='{main_goal[:60]}' url={current_url[:80]}"
-            )
+            logger.info(f"[COMPLETION_GATE] URL evidence match: {url_evidence.get('goal_match_reason')}")
             # URL confirms goal is met - allow completion
             # Inject URL evidence into response if not already present
             if not evidence_refs or len(evidence_refs) < 20:
@@ -1355,32 +1355,82 @@ async def execute_internal_tool(
             and session_clicks == 0
             and not url_evidence.get("matches_goal")
         ):
-            logger.warning(
-                "🛡️ COMPLETION_GATE interaction_required_blocked: no click before completion | "
-                f"goal='{main_goal[:80]}' action='{schema_action}' response='{response[:80]}'"
-            )
-            
-            # Build specific guidance about what to click
+            logger.warning(f"[COMPLETION_GATE] interaction required, no clicks yet | action='{schema_action}'")
+
+            # ── DETERMINISTIC GROUNDING: find the best clickable target ──
+            # Instead of just rejecting, find the actual button to click
+            # Priority: 1) expected_controls matched to DOM, 2) vision-identified target
+            best_target_id = None
+            best_target_label = ""
+            goal_lower = main_goal.lower()
+
+            # Try to find the best control from expected_controls matched against live DOM
+            if expected_controls:
+                for control in expected_controls:
+                    control_lower = control.lower()
+                    # Match goal intent to control
+                    goal_matches_control = (
+                        ("create" in goal_lower and "create" in control_lower) or
+                        ("new" in goal_lower and ("new" in control_lower or "create" in control_lower)) or
+                        ("add" in goal_lower and ("add" in control_lower or "create" in control_lower)) or
+                        ("delete" in goal_lower and "delete" in control_lower) or
+                        ("remove" in goal_lower and "remove" in control_lower)
+                    )
+                    if goal_matches_control or (not best_target_label and expected_controls):
+                        # Ground the control label to a live DOM element
+                        for n in nodes:
+                            if not getattr(n, "interactive", False):
+                                continue
+                            node_text = (getattr(n, "text", "") or "").lower().strip()
+                            node_tag = getattr(n, "tag", "").lower()
+                            node_role = getattr(n, "role", "").lower()
+                            is_button = node_tag in ("button", "a") or node_role in ("button", "link")
+                            if is_button and control_lower in node_text:
+                                best_target_id = str(getattr(n, "id", ""))
+                                best_target_label = control
+                                break
+                    if best_target_id:
+                        break
+
+            # Fallback: scan DOM for any button matching goal keywords
+            if not best_target_id:
+                goal_action_keywords = []
+                for kw in ["create", "add", "new", "delete", "remove", "submit", "save", "confirm"]:
+                    if kw in goal_lower:
+                        goal_action_keywords.append(kw)
+                if goal_action_keywords:
+                    for n in nodes:
+                        if not getattr(n, "interactive", False):
+                            continue
+                        node_text = (getattr(n, "text", "") or "").lower().strip()
+                        node_tag = getattr(n, "tag", "").lower()
+                        node_role = getattr(n, "role", "").lower()
+                        is_button = node_tag in ("button", "a") or node_role in ("button", "link")
+                        if is_button and any(kw in node_text for kw in goal_action_keywords):
+                            best_target_id = str(getattr(n, "id", ""))
+                            best_target_label = node_text[:50]
+                            break
+
+            # If we found a concrete target, return a DETERMINISTIC CLICK action
+            if best_target_id:
+                logger.info(f"[COMPLETION_GATE] deterministic click -> {best_target_id} label='{best_target_label}'")
+                return True, "", {
+                    "type": "click",
+                    "target_id": best_target_id,
+                    "speech": f"Let me click '{best_target_label}' to proceed.",
+                    "force_click": False,
+                }
+
+            # No target found — return rejection with specific guidance
             guidance = ""
             if expected_controls:
-                # Find the most relevant control for the goal
-                goal_lower = main_goal.lower()
-                for control in expected_controls:
-                    if "create" in goal_lower and "create" in control.lower():
-                        guidance = f" Click the '{control}' button to start the creation flow."
-                        break
-                    elif "new" in goal_lower and "new" in control.lower():
-                        guidance = f" Click the '{control}' button to create a new item."
-                        break
-                if not guidance and expected_controls:
-                    guidance = f" Click the '{expected_controls[0]}' button to proceed."
-            
+                guidance = f" Look for a '{expected_controls[0]}' button and click it."
+
             return (
                 False,
-                f"REJECTED: This goal is action-oriented and requires at least one concrete UI interaction "
-                f"before completion. You must CLICK a button first, then complete after the action succeeds."
-                f"{guidance} After clicking, wait for the page to update, then call complete_mission with the "
-                f"actual result (e.g., the new API key value shown on screen).",
+                f"REJECTED: Action-oriented goal requires a UI click before completion."
+                f"{guidance} You MUST use click_element with a valid target_id from the DOM list. "
+                f"Do NOT call complete_mission again until you have clicked.",
                 None,
             )
 
@@ -1413,10 +1463,8 @@ async def execute_internal_tool(
                 )
             ):
                 logger.warning(
-                    "🛡️ COMPLETION_GATE goal_not_achieved_blocked: "
-                    f"entity_click_seen={entity_click_seen} dom_joint={dom_joint_evidence} anchor_satisfied={anchor_satisfied} "
-                    f"entity_terms={entity_terms} qualifier_terms={qualifier_terms} "
-                    f"response='{response[:90]}'"
+                    f"[COMPLETION_GATE] goal not achieved: entity_click={entity_click_seen} "
+                    f"dom_joint={dom_joint_evidence} anchor={anchor_satisfied}"
                 )
                 return (
                     False,
@@ -1429,10 +1477,7 @@ async def execute_internal_tool(
         # ── Low-Confidence Interception: HELP CONSTRUCT BETTER ANSWER instead of just rejecting ──
         if status == "success" and answer_confidence == "low":
             # Instead of rejecting, help extract better evidence from the page
-            logger.warning(
-                f"🛡️ COMPLETION_GATE low-confidence detected: "
-                f"response='{response[:80]}' evidence='{evidence_refs[:50]}'"
-            )
+            logger.warning(f"[COMPLETION_GATE] low-confidence answer, attempting evidence rescue")
             
             # Extract comprehensive answer from readable nodes
             readable = [
@@ -1456,9 +1501,7 @@ async def execute_internal_tool(
                 
                 if best_excerpts:
                     comprehensive_answer = "\n\n".join(best_excerpts[:5])
-                    logger.info(
-                        f"🛡️ COMPLETION_GATE evidence_rescue: expanded {len(response)} → {len(comprehensive_answer)} chars"
-                    )
+                    logger.info(f"[COMPLETION_GATE] evidence rescue: {len(response)} -> {len(comprehensive_answer)} chars")
                     return True, "", {
                         "type": "answer",
                         "speech": comprehensive_answer,
@@ -1490,10 +1533,7 @@ async def execute_internal_tool(
             # We can't check the goal here directly, but evidence_refs may hint at mismatch
             # The main enforcement is in the system prompt; this is a safety net
             if has_money and not has_tokens and answer_confidence != "high":
-                logger.warning(
-                    f"🛡️ COMPLETION_GATE metric_mismatch_suspect: "
-                    f"response has money refs but no token refs, confidence={answer_confidence}"
-                )
+                logger.warning(f"[COMPLETION_GATE] metric mismatch: money refs without token refs, confidence={answer_confidence}")
                 return (
                     False,
                     "WARNING: Your answer contains dollar amounts/cost data but no token/usage metrics. "
@@ -1522,10 +1562,7 @@ async def execute_internal_tool(
             if entity_tokens:
                 found_count = sum(1 for et in entity_tokens if et in evidence_lower)
                 if found_count == 0 or (len(entity_tokens) > 1 and found_count < len(entity_tokens) / 2):
-                    logger.warning(
-                        f"🛡️ COMPLETION_GATE ENTITY_ANCHOR blocked: requested '{target_entity}' "
-                        f"not adequately found in evidence. Response: '{response[:80]}'"
-                    )
+                    logger.warning(f"[COMPLETION_GATE] entity anchor blocked: '{target_entity}' not found in evidence")
                     return (
                         False,
                         f"REJECTED: Target entity '{target_entity}' not adequately found in your response or evidence. "
@@ -1536,10 +1573,7 @@ async def execute_internal_tool(
 
         # Completion gate: warn if answer is suspiciously short/empty for success
         if status == "success" and len(response.strip()) < 15 and not evidence_refs:
-            logger.warning(
-                f"LAST_MILE_COMPLETION_GATE weak_completion: response='{response[:50]}' "
-                f"confidence={answer_confidence} evidence_refs='{evidence_refs[:50]}'"
-            )
+            logger.warning(f"[COMPLETION_GATE] weak completion: response_len={len(response.strip())} confidence={answer_confidence}")
             # Try to extract better evidence from readable nodes
             readable = [
                 n for n in nodes
@@ -1555,7 +1589,7 @@ async def execute_internal_tool(
                 )
                 if best_text and len(best_text) > len(response):
                     response = best_text[:500]
-                    logger.info(f"LAST_MILE_COMPLETION_GATE evidence_rescue len={len(response)}")
+                    logger.debug(f"[COMPLETION_GATE] evidence rescue len={len(response)}")
 
         return True, "", {
             "type": "answer",
