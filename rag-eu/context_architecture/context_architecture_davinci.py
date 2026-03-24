@@ -656,17 +656,23 @@ T: Natürlich! Wie viele Kundenanrufe bearbeitet Ihr Team aktuell pro Monat?
                 txt = cls._escape(d.get("text", d.get("content", "")))[:900]
                 kb += f"[{src}] {txt}\n"
 
-        # HiveMind KB (tenant memory + knowledge base)
+        # HiveMind KB (tenant memory + knowledge base + team solutions)
         hivemind_kb = ""
         hivemind_insights = ((hive_mind or {}).get("insights") or {})
         tenant_memory = hivemind_insights.get("tenant_memory") or ""
         knowledge_base = hivemind_insights.get("knowledge_base") or ""
+        team_solutions = hivemind_insights.get("team_solutions") or ""
+
         if tenant_memory:
             hivemind_kb += cls._escape(str(tenant_memory))[:8000]
         if knowledge_base:
             if hivemind_kb:
                 hivemind_kb += "\n"
             hivemind_kb += cls._escape(str(knowledge_base))[:8000]
+        if team_solutions:
+            if hivemind_kb:
+                hivemind_kb += "\n"
+            hivemind_kb += cls._escape(str(team_solutions))[:8000]
 
         # Unambiguous language directive
         if lang == "de":
