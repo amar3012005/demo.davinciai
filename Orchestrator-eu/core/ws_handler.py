@@ -1415,6 +1415,7 @@ class OrchestratorWSHandler:
         allow_single_word = {
             "yes", "no", "ok", "okay", "stop", "wait", "go", "one", "two", "three",
             "ja", "nein", "halt", "warte", "weiter", "stopp", "hallo", "bitte",
+            "hello", "hi", "hey", "start", "begin", "continue", "thanks",
         }
         if lowered in allow_single_word:
             return False
@@ -1432,6 +1433,13 @@ class OrchestratorWSHandler:
         start_time = data.get("start_time")
         end_time = data.get("end_time")
 
+        # If STT service didn't provide any confidence metrics, assume it's valid
+        # (metrics are optional; absence doesn't indicate low quality)
+        metrics_available = (no_speech_prob is not None or
+                            avg_logprob is not None or
+                            compression_ratio is not None or
+                            start_time is not None)
+
         speech_ms = None
         if start_time is not None and end_time is not None:
             try:
@@ -1442,18 +1450,21 @@ class OrchestratorWSHandler:
         if len(stripped) < 2:
             return True
 
+        # Only apply temporal rejection if we have timing data
         if speech_ms is not None and speech_ms < 450 and len(stripped) < 8:
             return True
 
-        if no_speech_prob is not None and no_speech_prob >= 0.72:
-            return True
-
-        if avg_logprob is not None and avg_logprob <= -0.9:
-            if len(stripped) < 18 or (no_speech_prob is not None and no_speech_prob > 0.25):
+        # Only apply confidence-based rejection if metrics are available
+        if metrics_available:
+            if no_speech_prob is not None and no_speech_prob >= 0.72:
                 return True
 
-        if compression_ratio is not None and compression_ratio >= 2.4 and len(stripped) < 40:
-            return True
+            if avg_logprob is not None and avg_logprob <= -0.9:
+                if len(stripped) < 18 or (no_speech_prob is not None and no_speech_prob > 0.25):
+                    return True
+
+            if compression_ratio is not None and compression_ratio >= 2.4 and len(stripped) < 40:
+                return True
 
         if re.match(r"^[aeiouäöüAEIOUÄÖÜ]+$", stripped):
             return True
