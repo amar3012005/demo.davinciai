@@ -475,6 +475,7 @@ export default function AIAssistantPanel({
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: 16000,
+                    channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true
@@ -483,8 +484,8 @@ export default function AIAssistantPanel({
             setMicStream(stream);
             startVoiceCall(stream);
         } catch (err) {
-            console.error("Mic access failed:", err);
-            console.error("Microphone access denied");
+            console.error("❌ Microphone access failed:", err);
+            alert("Please enable microphone access to use voice chat");
         }
     };
 
@@ -573,35 +574,25 @@ export default function AIAssistantPanel({
             audioCtxRef.current = audioCtx;
             lastPlaybackTimeRef.current = audioCtx.currentTime;
 
-            const micAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-            const source = micAudioCtx.createMediaStreamSource(stream);
-            const processor = micAudioCtx.createScriptProcessor(2048, 1, 1);
-            processor.onaudioprocess = (e) => {
+            // Audio capture - MUST match working implementation exactly
+            const mic = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            const src = mic.createMediaStreamSource(stream);
+            const proc = mic.createScriptProcessor(2048, 1, 1);
+            proc.onaudioprocess = (e) => {
+                // Send audio only if WebSocket is connected
                 if (ws.readyState === WebSocket.OPEN && wsConnectedRef.current) {
-                    const inputData = e.inputBuffer.getChannelData(0);
-                    const pcmData = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                    const inp = e.inputBuffer.getChannelData(0);
+                    const pcm = new Int16Array(inp.length);
+                    for (let i = 0; i < inp.length; i++) {
+                        pcm[i] = Math.max(-1, Math.min(1, inp[i])) * 0x7FFF;
                     }
-                    if (isCustomProtocol) {
-                        ws.send(pcmData.buffer);
-                    } else {
-                        const uint8 = new Uint8Array(pcmData.buffer);
-                        let binary = '';
-                        for (let i = 0; i < uint8.length; i++) {
-                            binary += String.fromCharCode(uint8[i]);
-                        }
-                        const base64 = btoa(binary);
-                        ws.send(JSON.stringify({
-                            event: "media_input",
-                            media: { payload: base64 }
-                        }));
-                    }
+                    // Send raw binary audio buffer directly
+                    ws.send(pcm.buffer);
                 }
             };
-            source.connect(processor);
-            processor.connect(micAudioCtx.destination);
-            audioWorkletRef.current = processor;
+            src.connect(proc);
+            proc.connect(mic.destination);
+            audioWorkletRef.current = proc;
 
             if (!isCustomProtocol) {
                 pingIntervalRef.current = setInterval(() => {
