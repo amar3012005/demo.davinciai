@@ -1136,6 +1136,15 @@ class RAGEngine:
                             if dt in raw_categories:
                                 raw_categories[dt].append(r)
 
+                        # DEBUG: Log all retrieved chunks before stratification
+                        logger.info(f"🧠 DEBUG RAW POOL: {len(results)} total chunks retrieved")
+                        for cat_name, cat_items in raw_categories.items():
+                            if cat_items:
+                                logger.info(f"  {cat_name}: {len(cat_items)} items")
+                                for idx, item in enumerate(cat_items[:3]):  # Log top 3 of each category
+                                    text_preview = (item.get("text") or "")[:100]
+                                    logger.info(f"    [{idx+1}] score={item.get('score', 0):.3f} text={text_preview}")
+
                         # Filter and slice according to 3/2/1/1 strategy (or 10 for dashboard)
                         if dashboard_mode:
                             filtered_results = results[:unified_limit]
@@ -1170,6 +1179,10 @@ class RAGEngine:
                                 issue = payload.get("issue", r["text"])
                                 solution = payload.get("solution", r["summary"])
                                 hm_entries.append(f"Issue: {issue}\nSolution: {solution}")
+                                # DEBUG: Log the extracted case memory
+                                logger.info(f"  📋 Case Memory ID:{r.get('id')} score={r['score']:.3f}")
+                                logger.info(f"     Issue: {issue[:150]}")
+                                logger.info(f"     Solution: {solution[:150]}")
                                 processed["case_memories"].append({
                                     "id": r.get("id"),
                                     "text": issue,
@@ -1243,6 +1256,18 @@ class RAGEngine:
                         if total_chunks > 0:
                             total_chars = sum(len(c["text"]) + len(c.get("summary", "")) for c in processed["case_memories"]) + sum(len(s["text"]) for s in processed["skills"]) + sum(len(r["text"]) for r in processed["rules"]) + sum(len(k["text"]) for k in processed.get("general_kb", []))
                             logger.info(f"🧠 HiveMind retrieval: {total_chunks} chunks ({total_chars} chars)")
+                            # DEBUG: Show breakdown
+                            logger.info(f"  Case_Memory: {len(processed['case_memories'])} | General_KB: {len(processed.get('general_kb', []))} | Skills: {len(processed['skills'])} | Rules: {len(processed['rules'])}")
+                            if processed.get("general_kb"):
+                                for idx, kb_item in enumerate(processed["general_kb"]):
+                                    kb_text = kb_item.get("text", "")
+                                    kb_topic = kb_item.get("topic", "unknown")
+                                    logger.info(f"    [KB {idx+1}] topic={kb_topic} score={kb_item.get('score', 0):.3f}")
+                                    logger.info(f"             text={kb_text[:200]}")
+                            if processed.get("case_memories"):
+                                for idx, cm_item in enumerate(processed["case_memories"][:2]):
+                                    logger.info(f"    [CM {idx+1}] Issue: {cm_item.get('text', '')[:100]}")
+                                    logger.info(f"             Solution: {cm_item.get('summary', '')[:100]}")
 
 
                         return processed, search_time

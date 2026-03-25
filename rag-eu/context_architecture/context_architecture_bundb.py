@@ -765,16 +765,23 @@ T: Gern. Worum soll es in dem Gespräch ungefähr gehen?
                 txt = cls._escape(d.get("text", d.get("content", "")))[:900]
                 kb += f"[{src}] {txt}\n"
 
+        # HiveMind KB: Separate knowledge base facts from case memories
+        # RULE: Knowledge base facts take priority. Case memories are supplementary.
         hivemind_kb = ""
         hivemind_insights = ((hive_mind or {}).get("insights") or {})
-        tenant_memory = hivemind_insights.get("tenant_memory") or ""
-        knowledge_base = hivemind_insights.get("knowledge_base") or ""
-        if tenant_memory:
-            hivemind_kb += cls._escape(str(tenant_memory))[:8000]
+        knowledge_base = hivemind_insights.get("knowledge_base") or ""  # Facts (high priority)
+        tenant_memory = hivemind_insights.get("tenant_memory") or ""     # Case memories (lower priority)
+
+        # First: Core facts from knowledge base
         if knowledge_base:
+            hivemind_kb += cls._escape(str(knowledge_base))[:12000]  # Increased for facts
+
+        # Second: Case memories (lower priority, supplementary context)
+        if tenant_memory:
             if hivemind_kb:
-                hivemind_kb += "\n"
-            hivemind_kb += cls._escape(str(knowledge_base))[:8000]
+                hivemind_kb += "\n---\n"
+            hivemind_kb += "# Past Resolutions (case memories—use only if not contradicted by facts above):\n"
+            hivemind_kb += cls._escape(str(tenant_memory))[:6000]  # Limited to prevent override
 
         if lang == "en":
             lang_line = (

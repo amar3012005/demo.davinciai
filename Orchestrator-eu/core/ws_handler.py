@@ -3972,9 +3972,11 @@ class OrchestratorWSHandler:
                     # Fallback: start timer with full duration if start time missing
                     await self._start_server_side_playback_timer(session, session.audio_playback_duration)
                 elif not cancellation_task:
-                    # SAFETY NET: If duration calculation failed, force a short timer to ensure we return to LISTENING
-                    logger.warning(f"[{session.session_id}] ⚠️ TTS duration missing - starting fallback timer (1.0s) to prevent state lock")
-                    await self._start_server_side_playback_timer(session, 1.0)
+                    # SAFETY NET: If duration calculation failed, force MINIMUM timer to enforce state duration rules
+                    # Use MIN_STATE_DURATION for SPEAKING state (1.5s) to match state_manager requirements
+                    min_duration = 1.5  # Must match StateManager.MIN_STATE_DURATIONS[State.SPEAKING]
+                    logger.warning(f"[{session.session_id}] ⚠️ TTS duration missing - starting fallback timer ({min_duration}s) to enforce state minimum")
+                    await self._start_server_side_playback_timer(session, min_duration)
         
         except asyncio.CancelledError:
             logger.debug(f"[{session.session_id}] TTS streaming cancelled")
@@ -4384,10 +4386,13 @@ class OrchestratorWSHandler:
                 pass
 
         # Validate playback_done timing - ignore premature messages
-        if session.audio_playback_start_time and session.audio_playback_duration:
+        # FALLBACK: If duration is missing, enforce minimum SPEAKING state duration (1.5s)
+        enforced_duration = session.audio_playback_duration or 1.5
+
+        if session.audio_playback_start_time:
             elapsed = time.time() - session.audio_playback_start_time
             # Keep a small margin for browser clock drift.
-            if elapsed + 0.08 < session.audio_playback_duration:
+            if elapsed + 0.08 < enforced_duration:
                 # If we are in deferred barge-in validation, do NOT transition to LISTENING yet.
                 # Wait for LLM validation to complete in _handle_stt_result().
                 # Browser may have finished playing, but we stay in SPEAKING until LLM verdict.

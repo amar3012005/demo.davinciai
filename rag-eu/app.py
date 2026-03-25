@@ -2009,6 +2009,103 @@ async def analyze_session(request: AnalyzeSessionRequest):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
+async def _validate_case_against_kb(rag_engine, issue_text: str, solution_text: str, tenant_id: str) -> dict:
+    """
+    Validate that a case memory doesn't contradict existing knowledge base facts.
+    Returns {'conflicts': False} if valid, or {'conflicts': True, 'reason': '...'} if invalid.
+
+    RULE: Case memories are for answering questions with certainty based on past responses.
+          They should NOT contradict or override facts from the knowledge base.
+
+    Strategy:
+    1. Extract claim keywords from the solution
+    2. Search knowledge base for related facts
+    3. Check for contradictions
+    """
+    try:
+        solution_lower = solution_text.lower()
+        issue_lower = issue_text.lower()
+
+        # PROTECTED FACTS: Per-tenant core facts that case memories must never contradict
+        # Format: (keyword_in_case): (protected_phrases_must_include, protected_phrases_must_exclude)
+        PROTECTED_CLAIMS_BY_TENANT = {
+            "davinci": {
+                "founder": (["amar"], ["schneider", "maximilian"]),
+                "founder of davinci": (["amar"], ["schneider", "maximilian"]),
+                "founder of tara": (["amar"], ["schneider", "maximilian"]),
+                "ceo": (["amar"], ["schneider", "maximilian"]),
+                "company": ([], ["unknown founder", "unknown ceo"]),
+            },
+            "bundb": {
+                # bundb (B&B Markenagentur) - add tenant-specific protected facts
+                "company": (["b&b", "markenagentur"], ["unknown"]),
+                "agency": (["markenagentur"], ["unknown"]),
+            },
+            # Default: minimal protection for unknown tenants
+            "default": {
+                "company": ([], ["unknown founder", "unknown ceo"]),
+            }
+        }
+
+        # Get tenant-specific protected claims
+        PROTECTED_CLAIMS = PROTECTED_CLAIMS_BY_TENANT.get(
+            tenant_id.lower(),
+            PROTECTED_CLAIMS_BY_TENANT["default"]
+        )
+
+        # Check if this case is about any protected topic
+        for protected_keyword, (must_include, must_exclude) in PROTECTED_CLAIMS.items():
+            if protected_keyword in issue_lower or protected_keyword in solution_lower:
+                # This case is about a protected topic - validate strictly
+
+                # Check for excluded phrases (contradictions)
+                for excluded in must_exclude:
+                    if excluded in solution_lower:
+                        # Found an excluded/forbidden word - this is a contradiction
+                        # UNLESS the required phrases are positively affirmed first
+                        required_present = False
+
+                        if must_include:  # If there are required affirmations
+                            for req in must_include:
+                                if req in solution_lower:
+                                    # Check it's not in a negating context (not preceded by "not", "except", etc.)
+                                    idx = solution_lower.find(req)
+                                    context_before = solution_lower[max(0, idx-30):idx]
+
+                                    # Check for negation patterns
+                                    has_negation = any(neg in context_before for neg in
+                                                      ["not ", "except ", "no ", "neither ", "without ", "non-"])
+
+                                    if not has_negation:
+                                        required_present = True
+                                        break
+
+                        # If excluded word found and required word not positively affirmed, reject
+                        if not required_present:
+                            return {
+                                "conflicts": True,
+                                "reason": f"Case contradicts protected topic '{protected_keyword}': mentions '{excluded}' but protected claim requires {must_include}."
+                            }
+
+                # Check for required affirmations
+                if must_include:
+                    for required in must_include:
+                        # If this is a founder-related case, it MUST mention the correct founder
+                        if "founder" in protected_keyword and required not in solution_lower:
+                            return {
+                                "conflicts": True,
+                                "reason": f"Founder-related case doesn't confirm '{required}'. Case memories about founders must be factually correct."
+                            }
+
+        # Log validation pass
+        logger.info(f"✅ Case memory validation PASSED for: {issue_text[:60]}")
+        return {"conflicts": False}
+
+    except Exception as e:
+        logger.warning(f"⚠️ Case validation check failed (allowing case): {e}")
+        return {"conflicts": False}  # Default: allow if validation fails
+
+
 @app.post("/api/v1/save_case", response_model=SaveCaseResponse)
 async def save_case(request: SaveCaseRequest):
     """
@@ -2053,12 +2150,28 @@ async def save_case(request: SaveCaseRequest):
                 message="Missing issue/solution and distillation failed"
             )
         
-        # 3. Save each effective case to Qdrant
+        # 3. Validate and save each effective case to Qdrant
         saved_count = 0
         for issue_text, solution_text in effective_cases:
+            # VALIDATION: Check if this case contradicts knowledge base facts
+            # Prevent storing case memories that violate established facts
+            conflict_check = await _validate_case_against_kb(
+                app.state.rag_engine,
+                issue_text,
+                solution_text,
+                effective_tenant_id
+            )
+            if conflict_check.get("conflicts"):
+                logger.warning(
+                    f"🚫 Case memory rejected: contradicts KB facts\n"
+                    f"   Issue: {issue_text[:80]}\n"
+                    f"   Conflict: {conflict_check.get('reason', 'unknown')}"
+                )
+                continue  # Skip saving this case
+
             # Embed the issue for vector storage
             issue_vector = app.state.rag_engine.embeddings.embed_query(issue_text)
-            
+
             # Save to Qdrant
             await app.state.rag_engine.qdrant.upsert_case(
                 user_id=request.user_id,
