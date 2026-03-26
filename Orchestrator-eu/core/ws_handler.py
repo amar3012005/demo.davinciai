@@ -3870,6 +3870,7 @@ class OrchestratorWSHandler:
                     break
             
             # Synthesize text
+            logger.info(f"[{session.session_id}] 🔊 TTS SYNTH START: voice={session.voice_id_override}, tenant={session.tenant_id}, text='{text[:60]}...'")
             await session.tts_client.synthesize(
                 text,
                 language,
@@ -3878,7 +3879,8 @@ class OrchestratorWSHandler:
                 pronunciation_dict_id=session.pronunciation_dict_id_override,
                 tenant_id=session.tenant_id,
             )
-            
+            logger.info(f"[{session.session_id}] 🔊 TTS SYNTH SENT, waiting for audio queue...")
+
             # Default values (standard for our STT/TTS stack)
             sample_rate = session.tts_sample_rate or 44100
             encoding = session.tts_format or "pcm_f32le" # Default to f32 for HD Cartesia
@@ -3899,7 +3901,8 @@ class OrchestratorWSHandler:
                     break
                 
                 msg_type = data.get("type")
-                
+                logger.info(f"[{session.session_id}] 🔊 TTS QUEUE MSG: type={msg_type}, keys={list(data.keys())[:5]}")
+
                 # Handle Metadata (crucial for setting correct sample rate/format)
                 if msg_type == "metadata":
                     sample_rate = data.get("sample_rate", sample_rate)
@@ -3954,6 +3957,7 @@ class OrchestratorWSHandler:
                         chunk_counter += 1
                 elif msg_type == "complete":
                     session.tts_generation_complete = True
+                    logger.info(f"[{session.session_id}] 🔊 TTS COMPLETE: chunks_processed={chunk_counter}, total_bytes={session.tts_total_bytes}, duration={session.audio_playback_duration}")
                     break
             
             # Flush remaining buffer and signal completion (only if still connected)
@@ -4365,6 +4369,16 @@ class OrchestratorWSHandler:
 
         if state_mgr.state != State.SPEAKING:
             logger.debug(f"[{session.session_id}] Playback done in non-SPEAKING state (ignored)")
+            return
+
+        # Do not accept browser completion for turns that never actually started
+        # audio playback. This happens when the frontend receives only a final
+        # marker or other metadata without any real audio chunk.
+        if session.audio_playback_start_time is None:
+            logger.warning(
+                f"[{session.session_id}] ⏸️ Ignoring playback_done with no playback start "
+                f"(turn={session.audio_playback_turn_id}, duration={session.audio_playback_duration})"
+            )
             return
 
         msg_turn_id = msg.get("playback_turn_id") or msg.get("turn_id")

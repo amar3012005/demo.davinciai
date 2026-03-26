@@ -1,13 +1,14 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, PhoneOff, Activity, Zap, MessageSquare, Mic, Volume2, Clock } from "lucide-react";
+import { Play, PhoneOff, MessageSquare, Clock } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/context/ThemeContext";
 import { apiFetch } from "@/lib/api";
 
 // Dynamic import to avoid SSR issues with Three.js
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const Orb = dynamic<any>(() => import("@/components/ui/orb").then(mod => mod.Orb), {
     ssr: false,
     loading: () => (
@@ -23,6 +24,10 @@ const Orb = dynamic<any>(() => import("@/components/ui/orb").then(mod => mod.Orb
     )
 });
 
+// ═══════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════
+
 interface TranscriptMessage {
     id: string;
     role: 'user' | 'agent';
@@ -31,14 +36,46 @@ interface TranscriptMessage {
     isFinal: boolean;
 }
 
-// HUD-style Metric Display
-function HUDMetric({ label, value, unit = '', color = '#22c55e', delay = 0 }: {
+interface CallMetrics {
+    latency: number;
+    logprob: number;
+    noSpeech: number;
+    ratio: number;
+    chunks: number;
+    ttft: number;
+    ttfc: number;
+}
+
+interface AudioChainNodes {
+    gain: GainNode;
+    highpass: BiquadFilterNode;
+    lowpass: BiquadFilterNode;
+}
+
+type AgentState = 'listening' | 'talking' | 'thinking' | null;
+
+// ═══════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════
+
+const CALL_LIMIT = 300; // 5 minutes
+const CALL_WARNING_TIME = 270; // 30s warning
+
+const getWsBaseUrl = (): string => {
+    return `wss://demo.davinciai.eu:8030/ws`;
+};
+
+// ═══════════════════════════════════════════════════════════
+// HUD Components
+// ═══════════════════════════════════════════════════════════
+
+function HUDMetric({ label, value, unit = '', delay = 0 }: {
     label: string;
     value: string | number;
     unit?: string;
     color?: string;
     delay?: number;
-}) {
+}): React.ReactElement {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
 
@@ -96,11 +133,10 @@ function HUDMetric({ label, value, unit = '', color = '#22c55e', delay = 0 }: {
     );
 }
 
-// HUD Status Indicator
-function HUDStatus({ state, isDark }: { state: 'listening' | 'talking' | 'thinking' | null, isDark: boolean }) {
+function HUDStatus({ state, isDark }: { state: AgentState; isDark: boolean }): React.ReactElement | null {
     if (!state) return null;
 
-    const config = {
+    const config: Record<string, { color: string; label: string; sublabel: string }> = {
         listening: { color: '#22c55e', label: 'RX', sublabel: 'RECEIVING' },
         talking: { color: '#3b82f6', label: 'TX', sublabel: 'TRANSMITTING' },
         thinking: { color: '#f59e0b', label: 'PROC', sublabel: 'PROCESSING' }
@@ -163,15 +199,18 @@ function HUDStatus({ state, isDark }: { state: 'listening' | 'talking' | 'thinki
     );
 }
 
+// ═══════════════════════════════════════════════════════════
+// Main Component
+// ═══════════════════════════════════════════════════════════
+
 export default function AIAssistantPanel({
     agentId,
     fallbackAgent,
-    layoutMode = 'panel'
 }: {
     agentId: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fallbackAgent?: any;
-    layoutMode?: 'panel' | 'phone';
-}) {
+}): React.ReactElement {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
     const [isMounted, setIsMounted] = useState(false);
@@ -180,69 +219,197 @@ export default function AIAssistantPanel({
         setIsMounted(true);
     }, []);
 
-    // Call State
+    // ── Call State ──────────────────────────────────────────
     const [isCallActive, setIsCallActive] = useState(false);
-    const [agentState, setAgentState] = useState<'listening' | 'talking' | 'thinking' | null>(null);
+    const [agentState, setAgentState] = useState<AgentState>(null);
     const [callDuration, setCallDuration] = useState(0);
     const [userVolume, setUserVolume] = useState(0);
-    const [metrics, setMetrics] = useState({
-        latency: 0,
-        logprob: 0,
-        noSpeech: 0,
-        ratio: 0,
-        chunks: 0,
-        ttft: 0,
-        ttfc: 0
-    });
+    const [agentIsSpeaking, setAgentIsSpeaking] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | null>(null);
     const [micStream, setMicStream] = useState<MediaStream | null>(null);
+    const [metrics, setMetrics] = useState<CallMetrics>({
+        latency: 0, logprob: 0, noSpeech: 0, ratio: 0, chunks: 0, ttft: 0, ttfc: 0
+    });
 
-    // Transcript State
+    // ── Transcript State ───────────────────────────────────
     const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
     const [currentTranscript, setCurrentTranscript] = useState<string>('');
     const transcriptContainerRef = useRef<HTMLDivElement>(null);
 
-    // Voice Agent WebSocket
+    // ── WebSocket & Audio Refs ──────────────────────────────
     const wsRef = useRef<WebSocket | null>(null);
-    const audioWsRef = useRef<WebSocket | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const wsConnectedRef = useRef(false);
-    const audioStreamActiveRef = useRef(false);
-    const sessionIdRef = useRef<string | null>(null);
     const audioWorkletRef = useRef<ScriptProcessorNode | null>(null);
     const binaryQueueRef = useRef<ArrayBuffer[]>([]);
-    const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | null>(null);
-    const [agentIsSpeaking, setAgentIsSpeaking] = useState(false);
     const lastPlaybackTimeRef = useRef(0);
     const playbackStartTimeRef = useRef<number | null>(null);
     const audioStreamCompleteRef = useRef(false);
-    // Match server audio format: pcm_s16le at 16000 Hz
+    const playedAudioThisTurnRef = useRef(false);
     const audioConfigRef = useRef({ format: 'pcm_s16le', sampleRate: 16000 });
-    const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-    // Audio Enhancements Refs
+    const currentPlaybackTurnIdRef = useRef<number | null>(null);
+    const minAcceptedPlaybackTurnIdRef = useRef(0);
     const activeSourcesRef = useRef(new Set<AudioBufferSourceNode>());
     const outputGainRef = useRef<GainNode | null>(null);
     const telephonyHighpassRef = useRef<BiquadFilterNode | null>(null);
     const telephonyLowpassRef = useRef<BiquadFilterNode | null>(null);
-    const minAcceptedPlaybackTurnIdRef = useRef(0);
-    const currentPlaybackTurnIdRef = useRef<number | null>(null);
-
-    const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const animationFrameRef = useRef<number | null>(null);
+    const sessionIdRef = useRef<string | null>(null);
 
-    const [agentData, setAgentData] = useState<any>(null);
-    const [isLoadingAgent, setIsLoadingAgent] = useState(true);
-    const isPhoneLayout = layoutMode === 'phone';
-
-    // Turn Timing Refs
+    // ── Turn Timing Refs ───────────────────────────────────
     const turnStartTimeRef = useRef<number | null>(null);
     const hasTtftForTurnRef = useRef(false);
     const hasTtfcForTurnRef = useRef(false);
-    const agentResponseBufferRef = useRef<string>("");
     const currentAgentMessageRef = useRef<string>("");
 
-    // Audio Chain Initialization
-    const ensureOutputChain = () => {
+    // ── Agent Data ─────────────────────────────────────────
+    const [agentData, setAgentData] = useState<Record<string, unknown> | null>(null);
+    const [isLoadingAgent, setIsLoadingAgent] = useState(true);
+
+    // ── Demo Mode ──────────────────────────────────────────
+    const [loginMode, setLoginMode] = useState<string>('demo');
+
+    // ── Resolved config (mirrors TaraVoiceWidget config) ───
+    const config = useMemo(() => {
+        let tenantId = 'davinci';
+        if (typeof window !== 'undefined') {
+            try {
+                const stored = localStorage.getItem('tenant');
+                if (stored) {
+                    const info = JSON.parse(stored);
+                    tenantId = info?.subdomain || info?.tenant_id || 'davinci';
+                }
+            } catch {
+                // ignore parse errors
+            }
+        }
+
+        const agent = agentData || fallbackAgent || {};
+        return {
+            tenantId,
+            agentId: (agent as any).agent_id as string || agentId || 'davinci',
+            agentName: (agent as any).agent_name as string || 'DAVINCIAI',
+            language: (agent as any).language_primary as string || 'de',
+        };
+    }, [agentData, fallbackAgent, agentId]);
+
+    // ── Fetch Agent Data ───────────────────────────────────
+    useEffect(() => {
+        if (!agentId) return;
+
+        const fetchAgent = async (): Promise<void> => {
+            if (agentId === "agent-demo-001") {
+                setAgentData(fallbackAgent as any || null);
+                setIsLoadingAgent(false);
+                return;
+            }
+
+            try {
+                const response = await apiFetch(`/api/agents/${agentId}`);
+                if (!response.ok) {
+                    if (fallbackAgent) setAgentData(fallbackAgent as any);
+                    return;
+                }
+                const data = await response.json();
+                setAgentData(data);
+            } catch {
+                if (fallbackAgent) setAgentData(fallbackAgent as any);
+            } finally {
+                setIsLoadingAgent(false);
+            }
+        };
+
+        fetchAgent();
+    }, [agentId, fallbackAgent]);
+
+    // ── Retrieve login mode ────────────────────────────────
+    useEffect(() => {
+        const storedLoginMode = localStorage.getItem('login_mode') || 'demo';
+        setLoginMode(storedLoginMode);
+    }, []);
+
+    // ── Auto-scroll transcript ─────────────────────────────
+    useEffect(() => {
+        if (transcriptContainerRef.current) {
+            transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+        }
+    }, [transcripts, currentTranscript]);
+
+    // ── Sync agent state from connectionStatus + speaking ──
+    useEffect(() => {
+        if (connectionStatus === 'connected') {
+            setAgentState(agentIsSpeaking ? 'talking' : 'listening');
+        } else if (connectionStatus === 'connecting') {
+            setAgentState('thinking');
+        } else if (!isCallActive) {
+            setAgentState(null);
+        }
+    }, [agentIsSpeaking, connectionStatus, isCallActive]);
+
+    // ── Demo call limit enforcement ────────────────────────
+    useEffect(() => {
+        if (isCallActive && callDuration >= CALL_LIMIT) {
+            endCall();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [callDuration, isCallActive]);
+
+    // ── Volume Analyzer for Responsive Orb ─────────────────
+    useEffect(() => {
+        if (!micStream) return;
+
+        const ac = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+        const an = ac.createAnalyser();
+        const src = ac.createMediaStreamSource(micStream);
+        src.connect(an);
+        an.fftSize = 256;
+
+        const arr = new Uint8Array(an.frequencyBinCount);
+        const up = (): void => {
+            an.getByteFrequencyData(arr);
+            let s = 0;
+            for (let i = 0; i < arr.length; i++) s += arr[i];
+            setUserVolume(Math.min(1, s / arr.length / 30));
+            animationFrameRef.current = requestAnimationFrame(up);
+        };
+        up();
+
+        return () => {
+            if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+            ac.close();
+        };
+    }, [micStream]);
+
+    // ═══════════════════════════════════════════════════════
+    // VOICE LOGIC — Direct port from TaraVoiceWidget.jsx
+    // ═══════════════════════════════════════════════════════
+
+    const checkPlaybackComplete = useCallback((): void => {
+        if (!audioCtxRef.current) return;
+        if (audioCtxRef.current.currentTime >= lastPlaybackTimeRef.current - 0.1) {
+            setAgentIsSpeaking(false);
+            if (
+                audioStreamCompleteRef.current &&
+                playedAudioThisTurnRef.current &&
+                wsRef.current?.readyState === WebSocket.OPEN
+            ) {
+                const duration = playbackStartTimeRef.current ? Date.now() - playbackStartTimeRef.current : 0;
+                wsRef.current.send(JSON.stringify({
+                    type: 'playback_done',
+                    duration_ms: duration,
+                    playback_turn_id: currentPlaybackTurnIdRef.current,
+                    timestamp: Date.now() / 1000
+                }));
+                playbackStartTimeRef.current = null;
+                audioStreamCompleteRef.current = false;
+                playedAudioThisTurnRef.current = false;
+                currentPlaybackTurnIdRef.current = null;
+            }
+        }
+    }, []);
+
+    const ensureOutputChain = useCallback((): AudioChainNodes | null => {
         if (!audioCtxRef.current) return null;
         const ctx = audioCtxRef.current;
         if (!outputGainRef.current) outputGainRef.current = ctx.createGain();
@@ -257,220 +424,347 @@ export default function AIAssistantPanel({
             telephonyLowpassRef.current.frequency.value = 3400;
         }
         return { gain: outputGainRef.current, highpass: telephonyHighpassRef.current, lowpass: telephonyLowpassRef.current };
-    };
+    }, []);
 
-    const stopPlayback = () => {
+    const stopPlayback = useCallback((): void => {
         if (Number.isFinite(currentPlaybackTurnIdRef.current)) {
-            minAcceptedPlaybackTurnIdRef.current = Math.max(minAcceptedPlaybackTurnIdRef.current, (currentPlaybackTurnIdRef.current || 0) + 1);
+            minAcceptedPlaybackTurnIdRef.current = Math.max(
+                minAcceptedPlaybackTurnIdRef.current,
+                (currentPlaybackTurnIdRef.current || 0) + 1
+            );
         }
         for (const source of activeSourcesRef.current) {
-            try { 
-                source.onended = null; 
-                source.stop(); 
-            } catch (_) { }
+            try { source.onended = null; source.stop(); } catch (_) { /* noop */ }
         }
         activeSourcesRef.current.clear();
         binaryQueueRef.current = [];
         currentPlaybackTurnIdRef.current = null;
         audioStreamCompleteRef.current = false;
+        playedAudioThisTurnRef.current = false;
         playbackStartTimeRef.current = null;
-        if (audioCtxRef.current) {
-            lastPlaybackTimeRef.current = audioCtxRef.current.currentTime;
-        }
+        if (audioCtxRef.current) lastPlaybackTimeRef.current = audioCtxRef.current.currentTime;
         setAgentIsSpeaking(false);
-    };
+    }, []);
 
-    // Login Mode & Demo Call Limit
-    const [loginMode, setLoginMode] = useState<string>('demo');
-    const DEMO_CALL_LIMIT = 300;
-    const DEMO_WARNING_TIME = 270;
+    const playAudioChunk = useCallback((data: ArrayBuffer | string, forceInt16 = false): void => {
+        let f32: Float32Array;
+        const fmt = audioConfigRef.current.format;
+        const sr = audioConfigRef.current.sampleRate;
 
-    // Auto-scroll transcript
-    useEffect(() => {
-        if (transcriptContainerRef.current) {
-            transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+        if (data instanceof ArrayBuffer) {
+            if (fmt === 'pcm_s16le' || forceInt16) {
+                const i16 = new Int16Array(data);
+                f32 = new Float32Array(i16.length);
+                for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768.0;
+            } else {
+                f32 = new Float32Array(data);
+            }
+        } else {
+            const bs = atob(data);
+            const by = new Uint8Array(bs.length);
+            for (let i = 0; i < bs.length; i++) by[i] = bs.charCodeAt(i);
+            if (fmt === 'pcm_s16le' || forceInt16) {
+                const i16 = new Int16Array(by.buffer);
+                f32 = new Float32Array(i16.length);
+                for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768.0;
+            } else {
+                f32 = new Float32Array(by.buffer);
+            }
         }
-    }, [transcripts, currentTranscript]);
 
-    // Helper to mark turn start
-    const markTurnStart = () => {
+        if (audioCtxRef.current) {
+            playedAudioThisTurnRef.current = true;
+            const buf = audioCtxRef.current.createBuffer(1, f32.length, sr);
+            buf.copyToChannel(f32 as Float32Array<ArrayBuffer>, 0);
+            const s = audioCtxRef.current.createBufferSource();
+            s.buffer = buf;
+
+            const chain = ensureOutputChain();
+            if (!chain) return;
+
+            chain.gain.gain.value = 1.0;
+            try { chain.gain.disconnect(); chain.highpass.disconnect(); chain.lowpass.disconnect(); s.disconnect(); } catch (_) { /* noop */ }
+
+            s.connect(chain.gain);
+            chain.gain.connect(audioCtxRef.current.destination);
+
+            const now = audioCtxRef.current.currentTime;
+            let at = lastPlaybackTimeRef.current;
+            // Initial buffer offset (50ms) for first chunk
+            if (!playbackStartTimeRef.current) {
+                playbackStartTimeRef.current = Date.now();
+                at = now + 0.05;
+            }
+            // Drift correction: jump to current time if falling behind
+            if (at < now) at = now;
+
+            activeSourcesRef.current.add(s);
+            s.onended = () => { activeSourcesRef.current.delete(s); checkPlaybackComplete(); };
+            s.start(at);
+            lastPlaybackTimeRef.current = at + buf.duration;
+        }
+    }, [checkPlaybackComplete, ensureOutputChain]);
+
+    const endCall = useCallback((): void => {
+        if (wsRef.current) {
+            if (wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: 'interrupt', timestamp: Date.now() / 1000 }));
+            }
+            wsRef.current.close();
+            wsRef.current = null;
+        }
+
+        stopPlayback();
+
+        if (audioCtxRef.current) {
+            audioCtxRef.current.close();
+            audioCtxRef.current = null;
+        }
+        outputGainRef.current = null;
+        telephonyHighpassRef.current = null;
+        telephonyLowpassRef.current = null;
+
+        if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
+        if (micStream) micStream.getTracks().forEach(t => t.stop());
+
+        setIsCallActive(false);
+        setConnectionStatus(null);
+        setAgentIsSpeaking(false);
+        wsConnectedRef.current = false;
+        setAgentState(null);
+        setMicStream(null);
+        setCallDuration(0);
+        setTranscripts([]);
+        setCurrentTranscript('');
+        currentAgentMessageRef.current = '';
+        setMetrics({ latency: 0, logprob: 0, noSpeech: 0, ratio: 0, chunks: 0, ttft: 0, ttfc: 0 });
+    }, [micStream, stopPlayback]);
+
+    // ── Helper to mark turn start ──────────────────────────
+    const markTurnStart = useCallback((): void => {
         turnStartTimeRef.current = performance.now();
         hasTtftForTurnRef.current = false;
         hasTtfcForTurnRef.current = false;
-        agentResponseBufferRef.current = "";
-    };
+    }, []);
 
-    const VOICE_API_KEY = process.env.NEXT_PUBLIC_VOICE_API_KEY || "sk_car_ChbYsPTQzZjruzRRPLy2zK";
+    // ── Start Voice Call (direct port from TaraVoiceWidget) ─
+    const startVoiceCall = useCallback((stream: MediaStream): void => {
+        setConnectionStatus('connecting');
+        setCallDuration(0);
+        setTranscripts([]);
+        setCurrentTranscript('');
 
-    // Fetch Agent Data
-    useEffect(() => {
-        if (!agentId) return;
+        const base = getWsBaseUrl();
+        const nws = String(base).replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
+        const uid = 'user_' + Date.now();
+        const wsUrl = `${nws}?tenant_id=${encodeURIComponent(config.tenantId)}&agent_id=${encodeURIComponent(config.agentId)}&session_type=webcall&user_id=${encodeURIComponent(uid)}&agent_name=${encodeURIComponent(config.agentName)}`;
 
-        const fetchAgent = async () => {
-            if (agentId === "agent-demo-001") {
-                setAgentData(fallbackAgent);
-                setIsLoadingAgent(false);
+        const ws = new WebSocket(wsUrl);
+        ws.binaryType = "arraybuffer";
+        wsRef.current = ws;
+
+        ws.onopen = (): void => {
+            wsConnectedRef.current = true;
+            sessionIdRef.current = 'session_' + Date.now();
+
+            const sessionConfig = {
+                type: 'session_config',
+                config: {
+                    mode: 'voice',
+                    tenant_id: config.tenantId,
+                    agent_id: config.agentId,
+                    agent_name: config.agentName,
+                    user_id: uid,
+                    stt_mode: 'audio',
+                    tts_mode: 'audio',
+                    language: config.language
+                }
+            };
+            ws.send(JSON.stringify(sessionConfig));
+
+            ws.send(JSON.stringify({
+                type: 'start_session',
+                flow_config: {
+                    policy_mode: 'sales',
+                    conversation_policy: 'sales',
+                    policy_flags: {
+                        enable_strategic_policy: true,
+                        enable_stage_aware_retrieval: true,
+                        enable_micro_reasoning: true
+                    }
+                },
+                timestamp: Date.now() / 1000
+            }));
+
+            // Playback AudioContext at 16000 sampleRate
+            const ac = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ sampleRate: 16000 });
+            audioCtxRef.current = ac;
+            lastPlaybackTimeRef.current = ac.currentTime;
+
+            // Mic capture AudioContext at 16000 sampleRate
+            const mic = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ sampleRate: 16000 });
+            const src = mic.createMediaStreamSource(stream);
+            const proc = mic.createScriptProcessor(2048, 1, 1);
+            proc.onaudioprocess = (e: AudioProcessingEvent): void => {
+                if (ws.readyState === WebSocket.OPEN && wsConnectedRef.current) {
+                    const inp = e.inputBuffer.getChannelData(0);
+                    const pcm = new Int16Array(inp.length);
+                    for (let i = 0; i < inp.length; i++) {
+                        pcm[i] = Math.max(-1, Math.min(1, inp[i])) * 0x7FFF;
+                    }
+                    ws.send(pcm.buffer);
+                }
+            };
+            src.connect(proc);
+            proc.connect(mic.destination);
+            audioWorkletRef.current = proc;
+        };
+
+        ws.onmessage = (e: MessageEvent): void => {
+            // Binary audio data → queue for later dequeue on audio_chunk
+            if (e.data instanceof ArrayBuffer) {
+                binaryQueueRef.current.push(e.data);
                 return;
             }
 
-            try {
-                const response = await apiFetch(`/api/agents/${agentId}`);
-                if (!response.ok) {
-                    if (fallbackAgent?.websocket_url) {
-                        setAgentData(fallbackAgent);
+            const d = JSON.parse(e.data as string);
+
+            // ── session_ready / state_update listening → mark connected ──
+            if (d.type === 'session_ready' || (d.type === 'state_update' && d.state === 'listening')) {
+                wsConnectedRef.current = true;
+                if (d.audio_format || d.format) audioConfigRef.current.format = d.audio_format || d.format;
+                if (d.sample_rate) audioConfigRef.current.sampleRate = d.sample_rate;
+
+                if (connectionStatus !== 'connected') {
+                    setConnectionStatus('connected');
+                    setIsCallActive(true);
+                    if (!callTimerRef.current) {
+                        callTimerRef.current = setInterval(() => setCallDuration(x => x + 1), 1000);
                     }
-                    return;
                 }
-                const data = await response.json();
-                setAgentData(data);
-            } catch (err) {
-                if (fallbackAgent?.websocket_url) {
-                    setAgentData(fallbackAgent);
+            }
+
+            // ── state_update thinking/interrupt/listening → stopPlayback ──
+            if (d.type === 'state_update' && (d.state === 'thinking' || d.state === 'interrupt' || d.state === 'listening')) {
+                stopPlayback();
+            }
+
+            // ── transcript handling (enterprise feature) ──
+            if (d.type === 'transcript') {
+                if (d.is_final && d.text && d.text.trim()) {
+                    markTurnStart();
+                    setTranscripts(prev => [...prev, {
+                        id: crypto.randomUUID(),
+                        role: 'user',
+                        text: d.text,
+                        timestamp: Date.now(),
+                        isFinal: true
+                    }]);
+                    setCurrentTranscript('');
+                } else if (d.text && !d.is_final) {
+                    setCurrentTranscript(d.text);
                 }
-            } finally {
-                setIsLoadingAgent(false);
+                setMetrics(prev => ({
+                    ...prev,
+                    latency: d.latency_ms || prev.latency,
+                    logprob: d.avg_logprob || prev.logprob,
+                    noSpeech: d.no_speech_prob || prev.noSpeech,
+                    ratio: d.compression_ratio || prev.ratio,
+                    chunks: prev.chunks + 1
+                }));
             }
-        };
 
-        fetchAgent();
-    }, [agentId, fallbackAgent]);
-
-    // Retrieve login mode
-    useEffect(() => {
-        const storedLoginMode = localStorage.getItem('login_mode') || 'demo';
-        setLoginMode(storedLoginMode);
-    }, []);
-
-    // Demo Mode Call Limit Enforcement
-    useEffect(() => {
-        if (loginMode === 'demo' && isCallActive) {
-            if (callDuration === DEMO_WARNING_TIME) {
-                console.warn('Demo call will end in 30 seconds');
+            // ── agent_response handling (enterprise feature) ──
+            if (d.type === 'agent_response') {
+                if (d.text && d.text.trim()) {
+                    if (d.is_streaming) {
+                        if (turnStartTimeRef.current && !hasTtftForTurnRef.current) {
+                            const ttft = Math.round(performance.now() - turnStartTimeRef.current);
+                            setMetrics(prev => ({ ...prev, ttft }));
+                            hasTtftForTurnRef.current = true;
+                        }
+                        currentAgentMessageRef.current = d.text;
+                        setCurrentTranscript(currentAgentMessageRef.current);
+                    } else {
+                        setTranscripts(prev => [...prev, {
+                            id: crypto.randomUUID(),
+                            role: 'agent' as const,
+                            text: d.text,
+                            timestamp: Date.now(),
+                            isFinal: true
+                        }]);
+                        currentAgentMessageRef.current = '';
+                        setCurrentTranscript('');
+                    }
+                }
             }
-            if (callDuration >= DEMO_CALL_LIMIT) {
-                endCall();
-                console.warn('Demo call limit reached');
-            }
-        }
-    }, [callDuration, loginMode, isCallActive]);
 
-    // Volume Analyzer for Responsive Orb
-    useEffect(() => {
-        if (!micStream) return;
+            // ── audio_chunk → dequeue binary or play base64 ──
+            if (d.type === 'audio_chunk') {
+                const turnId = Number(d.playback_turn_id);
+                if (Number.isFinite(turnId)) {
+                    if (turnId < minAcceptedPlaybackTurnIdRef.current) {
+                        if (d.binary_sent && binaryQueueRef.current.length > 0) binaryQueueRef.current.shift();
+                        return;
+                    }
+                    currentPlaybackTurnIdRef.current = turnId;
+                }
+                if (d.sample_rate) audioConfigRef.current.sampleRate = d.sample_rate;
 
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const analyser = audioContext.createAnalyser();
-        const source = audioContext.createMediaStreamSource(micStream);
-        source.connect(analyser);
-        analyser.fftSize = 256;
+                const hasBinaryAudio = Boolean(d.binary_sent && binaryQueueRef.current.length > 0);
+                const hasInlineAudio = Boolean(d.data || d.audio);
+                const hasAudioPayload = hasBinaryAudio || hasInlineAudio;
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const updateVolume = () => {
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                sum += dataArray[i];
-            }
-            const average = sum / dataArray.length;
-            setUserVolume(Math.min(1, average / 30));
-            animationFrameRef.current = requestAnimationFrame(updateVolume);
-        };
+                if (hasAudioPayload) {
+                    setAgentIsSpeaking(true);
+                    audioStreamCompleteRef.current = false;
+                }
 
-        updateVolume();
-
-        return () => {
-            if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-            audioContext.close();
-        };
-    }, [micStream]);
-
-    // Sync agent state
-    useEffect(() => {
-        if (connectionStatus === 'connected') {
-            setAgentState(agentIsSpeaking ? 'talking' : 'listening');
-        } else if (connectionStatus === 'connecting') {
-            setAgentState('thinking');
-        } else {
-            setAgentState(null);
-        }
-    }, [agentIsSpeaking, connectionStatus]);
-
-    // Connect to dedicated audio WebSocket
-    const connectAudioWebSocket = (sessionId: string, baseWsUrl: string, resolvedTenantId?: string) => {
-        if (!sessionId || !baseWsUrl) {
-            console.warn('⚠️ Cannot connect audio WebSocket: missing sessionId or baseWsUrl');
-            return;
-        }
-
-        const baseUrl = baseWsUrl.replace(/\/ws\/?(\?.*)?$/, '');
-        // Use the explicitly passed tenant ID, or try to parse from URL, or read from localStorage
-        let tenantId: string = resolvedTenantId || '';
-        if (!tenantId) {
-            try { tenantId = new URL(baseWsUrl).searchParams.get('tenant_id') || ''; } catch { /* ignore */ }
-        }
-        if (!tenantId) {
-            const stored = typeof window !== 'undefined' ? localStorage.getItem('tenant') : null;
-            const info = stored ? JSON.parse(stored) : null;
-            tenantId = info?.subdomain || info?.tenant_id || 'davinci';
-        }
-        const audioUrl = `${baseUrl}/stream?session_id=${encodeURIComponent(sessionId)}&tenant_id=${encodeURIComponent(tenantId)}`;
-
-        console.log('🔊 Connecting dedicated audio WebSocket:', audioUrl);
-
-        const audioWs = new WebSocket(audioUrl);
-        audioWs.binaryType = 'arraybuffer';
-        audioWsRef.current = audioWs;
-
-        audioWs.onopen = () => {
-            console.log('✅ Dedicated audio stream connected');
-            audioStreamActiveRef.current = true;
-        };
-
-        audioWs.onmessage = (e) => {
-            if (e.data instanceof ArrayBuffer) {
-                if (!playbackStartTimeRef.current) playbackStartTimeRef.current = Date.now();
-                setAgentIsSpeaking(true);
-                audioStreamCompleteRef.current = false;
-
-                if (turnStartTimeRef.current && !hasTtfcForTurnRef.current) {
+                // TTFC metric
+                if (hasAudioPayload && turnStartTimeRef.current && !hasTtfcForTurnRef.current) {
                     const ttfc = Math.round(performance.now() - turnStartTimeRef.current);
                     setMetrics(prev => ({ ...prev, ttfc }));
                     hasTtfcForTurnRef.current = true;
                 }
 
-                playAudioChunk(e.data);
-            } else {
-                try {
-                    const data = JSON.parse(e.data);
-                    if (data.type === 'stream_complete') {
-                        console.log('🎵 Audio stream marked complete');
-                        audioStreamCompleteRef.current = true;
-                        // For dedicated audio streams, we don't clear agentIsSpeaking here, 
-                        // we let playAudioChunk's onended do it via checkPlaybackComplete
-                    }
-                } catch (err) {
-                    console.warn('⚠️ Non-JSON message on audio stream:', e.data);
+                if (hasBinaryAudio) {
+                    const c = binaryQueueRef.current.shift();
+                    if (c) playAudioChunk(c, audioConfigRef.current.format === 'pcm_s16le');
+                } else if (hasInlineAudio) {
+                    const a = d.data || d.audio;
+                    if (a) playAudioChunk(a);
                 }
+
+                if (d.is_final) {
+                    audioStreamCompleteRef.current = true;
+                    checkPlaybackComplete();
+                }
+            }
+
+            // ── explicit audio_complete only ──
+            if (d.type === 'audio_complete') {
+                audioStreamCompleteRef.current = true;
+                checkPlaybackComplete();
+            }
+
+            // ── interrupt / clear / playback_stop ──
+            if (d.type === 'interrupt' || d.type === 'clear' || d.type === 'playback_stop') {
+                stopPlayback();
+            }
+
+            // ── ping → pong ──
+            if (d.type === 'ping' && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() / 1000 }));
             }
         };
 
-        audioWs.onclose = (event) => {
-            console.log(`🔌 Audio WebSocket closed: ${event.code}`);
-            audioStreamActiveRef.current = false;
-            audioWsRef.current = null;
-        };
+        ws.onclose = (): void => { endCall(); };
+        ws.onerror = (): void => { endCall(); };
+    }, [config, connectionStatus, checkPlaybackComplete, playAudioChunk, stopPlayback, endCall, markTurnStart]);
 
-        audioWs.onerror = (event) => {
-            console.error('❌ Audio WebSocket error:', event);
-            audioStreamActiveRef.current = false;
-        };
-    };
-
-    const startCall = async () => {
-        if (!agentData) {
-            console.warn("Agent data not loaded yet");
-            return;
-        }
+    // ── Start Call (get mic then start WS) ─────────────────
+    const startCall = useCallback(async (): Promise<void> => {
+        if (!agentData) return;
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
@@ -484,493 +778,28 @@ export default function AIAssistantPanel({
             setMicStream(stream);
             startVoiceCall(stream);
         } catch (err) {
-            console.error("❌ Microphone access failed:", err);
-            alert("Please enable microphone access to use voice chat");
-        }
-    };
-
-    const startVoiceCall = async (stream: MediaStream) => {
-        setConnectionStatus('connecting');
-        setAgentState('thinking');
-        setCallDuration(0);
-        setTranscripts([]);
-        setCurrentTranscript('');
-
-        const customWsUrl = agentData.websocket_url;
-        const cartesiaId = agentData.cartesia_agent_id;
-        const selectedVoice = agentData.voice || agentData.voice_name || agentData.voice_id;
-        const isCustomProtocol = !!customWsUrl && customWsUrl !== "not_set";
-        const normalizedCustomWsUrl = isCustomProtocol
-            ? String(customWsUrl).replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://')
-            : customWsUrl;
-        const baseUrl = normalizedCustomWsUrl ? String(normalizedCustomWsUrl).replace(/\/ws\/?(\?.*)?$/, '') : '';
-        const wsUrlTemp = isCustomProtocol
-            ? `${baseUrl}/ws`
-            : `wss://api.cartesia.ai/agents/stream/${cartesiaId}?api_key=${VOICE_API_KEY}&cartesia-version=2025-04-16`;
-
-        const userId = typeof window !== 'undefined' ? (localStorage.getItem('user_id') || localStorage.getItem('access_token') || "anonymous_user") : "anonymous_user";
-        const storedTenant = typeof window !== 'undefined' ? localStorage.getItem('tenant') : null;
-        const tenantInfo = storedTenant ? JSON.parse(storedTenant) : null;
-        // Use subdomain for WebSocket/API compatibility (simple name, not UUID)
-        const tenantId = tenantInfo?.subdomain || tenantInfo?.tenant_id || "davinci";
-        const agentIdToUse = agentData?.agent_id || agentId || "tara";
-        const agentName = agentData?.agent_name || "Tara AI";
-        let defaultSessionId = crypto.randomUUID();
-
-        const wsUrl = isCustomProtocol
-            ? `${baseUrl}/ws?tenant_id=${encodeURIComponent(tenantId)}&agent_id=${encodeURIComponent(agentIdToUse)}&session_type=webcall&user_id=${encodeURIComponent(userId)}&agent_name=${encodeURIComponent(agentName)}&session_id=${encodeURIComponent(defaultSessionId)}`
-            : wsUrlTemp;
-
-        const ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-            wsConnectedRef.current = true;
-            const sessionId = crypto.randomUUID();
-            sessionIdRef.current = sessionId;
-
-            if (isCustomProtocol) {
-                console.log(`🚀 Handshake for ${agentName} (Tenant: ${tenantId})`);
-                ws.send(JSON.stringify({
-                    type: 'session_config',
-                    config: {
-                        mode: 'voice',
-                        tenant_id: tenantId,
-                        agent_id: agentIdToUse,
-                        agent_name: agentName,
-                        user_id: userId,
-                        session_type: 'webcall',
-                        stt_mode: 'audio',
-                        tts_mode: 'audio',
-                        language: agentData.language_primary || 'de',
-                    }
-                }));
-
-                ws.send(JSON.stringify({
-                    type: 'start_session',
-                    flow_config: {
-                        policy_mode: 'sales',
-                        conversation_policy: 'sales',
-                        policy_flags: {
-                            enable_strategic_policy: true,
-                            enable_stage_aware_retrieval: true,
-                            enable_micro_reasoning: true
-                        }
-                    },
-                    timestamp: Date.now() / 1000
-                }));
-                // NOTE: Audio streams through main /ws, not separate /stream endpoint
-                // connectAudioWebSocket(sessionId, wsUrlTemp, tenantId);
-            } else {
-                ws.send(JSON.stringify({
-                    event: "start",
-                    config: { input_format: "pcm_44100" }
-                }));
-            }
-
-            // Use 16000 sample rate for both playback and recording (matches server config)
-            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-            audioCtxRef.current = audioCtx;
-            lastPlaybackTimeRef.current = audioCtx.currentTime;
-
-            // Audio capture - MUST match working implementation exactly
-            const mic = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-            const src = mic.createMediaStreamSource(stream);
-            const proc = mic.createScriptProcessor(2048, 1, 1);
-            proc.onaudioprocess = (e) => {
-                // Send audio only if WebSocket is connected
-                if (ws.readyState === WebSocket.OPEN && wsConnectedRef.current) {
-                    const inp = e.inputBuffer.getChannelData(0);
-                    const pcm = new Int16Array(inp.length);
-                    for (let i = 0; i < inp.length; i++) {
-                        pcm[i] = Math.max(-1, Math.min(1, inp[i])) * 0x7FFF;
-                    }
-                    // Send raw binary audio buffer directly
-                    ws.send(pcm.buffer);
-                }
-            };
-            src.connect(proc);
-            proc.connect(mic.destination);
-            audioWorkletRef.current = proc;
-
-            if (!isCustomProtocol) {
-                pingIntervalRef.current = setInterval(() => {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: "ping" }));
-                    }
-                }, 20000);
-            }
-        };
-
-        ws.onmessage = async (e) => {
-            if (e.data instanceof ArrayBuffer) {
-                binaryQueueRef.current.push(e.data);
-                return;
-            }
-
-            const data = JSON.parse(e.data);
-
-            if (isCustomProtocol) {
-                if (data.type === 'session_ready' || (data.type === 'state_update' && data.state === 'listening')) {
-                    wsConnectedRef.current = true;
-
-                    if (data.audio_format || data.format) {
-                        audioConfigRef.current.format = data.audio_format || data.format;
-                    }
-                    if (data.sample_rate) {
-                        audioConfigRef.current.sampleRate = data.sample_rate;
-                    }
-
-                    if (connectionStatus !== 'connected') {
-                        setConnectionStatus('connected');
-                        setIsCallActive(true);
-                        setAgentState('listening');
-                        if (!callTimerRef.current) {
-                            callTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000);
-                        }
-                    }
-                } else if (data.type === 'transcript') {
-                    if (data.is_final && data.text && data.text.trim()) {
-                        markTurnStart();
-                        setTranscripts(prev => [...prev, {
-                            id: crypto.randomUUID(),
-                            role: 'user',
-                            text: data.text,
-                            timestamp: Date.now(),
-                            isFinal: true
-                        }]);
-                        setCurrentTranscript('');
-                    } else if (data.text && !data.is_final) {
-                        setCurrentTranscript(data.text);
-                    }
-                    setMetrics(prev => ({
-                        ...prev,
-                        latency: data.latency_ms || prev.latency,
-                        logprob: data.avg_logprob || prev.logprob,
-                        noSpeech: data.no_speech_prob || prev.noSpeech,
-                        ratio: data.compression_ratio || prev.ratio,
-                        chunks: prev.chunks + 1
-                    }));
-                } else if (data.type === 'agent_response') {
-                    if (data.text && data.text.trim()) {
-                        if (data.is_streaming) {
-                            if (turnStartTimeRef.current && !hasTtftForTurnRef.current) {
-                                const ttft = Math.round(performance.now() - turnStartTimeRef.current);
-                                setMetrics(prev => ({ ...prev, ttft }));
-                                hasTtftForTurnRef.current = true;
-                            }
-                            // One turn at a time: if it's a new response start, or we're streaming
-                            currentAgentMessageRef.current = data.text; // Update with latest chunk for current turn
-                            setCurrentTranscript(currentAgentMessageRef.current);
-                        } else {
-                            const newAgentMsg = {
-                                id: crypto.randomUUID(),
-                                role: 'agent' as const,
-                                text: data.text,
-                                timestamp: Date.now(),
-                                isFinal: true
-                            };
-                            setTranscripts(prev => [...prev, newAgentMsg]);
-                            currentAgentMessageRef.current = '';
-                            setCurrentTranscript('');
-                        }
-                    }
-                } else if (data.type === 'audio_chunk') {
-                    const turnId = Number(data.playback_turn_id);
-                    if (Number.isFinite(turnId)) {
-                        if (turnId < minAcceptedPlaybackTurnIdRef.current) {
-                            if (data.binary_sent && binaryQueueRef.current.length > 0) binaryQueueRef.current.shift();
-                            return;
-                        }
-                        currentPlaybackTurnIdRef.current = turnId;
-                    }
-
-                    if (data.sample_rate) {
-                        audioConfigRef.current.sampleRate = data.sample_rate;
-                    }
-                    if (data.format || data.audio_format) {
-                        audioConfigRef.current.format = data.format || data.audio_format;
-                    }
-
-                    if (!playbackStartTimeRef.current) playbackStartTimeRef.current = Date.now();
-                    setAgentIsSpeaking(true);
-                    audioStreamCompleteRef.current = false;
-
-                    if (turnStartTimeRef.current && !hasTtfcForTurnRef.current) {
-                        const ttfc = Math.round(performance.now() - turnStartTimeRef.current);
-                        setMetrics(prev => ({ ...prev, ttfc }));
-                        hasTtfcForTurnRef.current = true;
-                    }
-
-                    if (isCustomProtocol && data.binary_sent && binaryQueueRef.current.length > 0) {
-                        const binChunk = binaryQueueRef.current.shift();
-                        if (binChunk) {
-                            playAudioChunk(binChunk, audioConfigRef.current.format === 'pcm_s16le');
-                        }
-                    } else {
-                        const audioB64 = data.data || data.audio;
-                        if (audioB64) {
-                            playAudioChunk(audioB64);
-                        }
-                    }
-
-                    if (data.is_final) {
-                        audioStreamCompleteRef.current = true;
-                        // Don't call checkPlaybackComplete() here — let source.onended handle it
-                        // Calling it synchronously causes playback_done to fire before audio plays
-                    }
-                } else if (data.type === 'audio_complete' || data.is_final) {
-                    audioStreamCompleteRef.current = true;
-                    // Don't call checkPlaybackComplete() synchronously — let source.onended handle it
-                    // Fallback: if no audio sources are active (no chunks received), check after delay
-                    setTimeout(() => {
-                        if (audioStreamCompleteRef.current && activeSourcesRef.current.size === 0) {
-                            checkPlaybackComplete();
-                        }
-                    }, 2000);
-                } else if (data.type === 'interrupt' || data.type === 'clear' || data.type === 'playback_stop' || (data.type === 'state_update' && (data.state === 'listening' || data.state === 'thinking'))) {
-                    stopPlayback();
-                } else if (data.type === 'ping') {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() / 1000 }));
-                    }
-                }
-            } else {
-                if (data.event === 'ack') {
-                    wsConnectedRef.current = true;
-                    setConnectionStatus('connected');
-                    setIsCallActive(true);
-                    setAgentState('listening');
-                    if (!callTimerRef.current) {
-                        callTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000);
-                    }
-                } else if (data.event === 'media_output') {
-                    setAgentIsSpeaking(true);
-                    if (data.media?.payload) {
-                        if (turnStartTimeRef.current && !hasTtfcForTurnRef.current) {
-                            const ttfc = Math.round(performance.now() - turnStartTimeRef.current);
-                            setMetrics(prev => ({ ...prev, ttfc }));
-                            hasTtfcForTurnRef.current = true;
-                        }
-                        playAudioChunk(data.media.payload, true);
-                    }
-                } else if (data.type === "transcript") {
-                    if (data.is_final && data.text && data.text.trim()) {
-                        markTurnStart();
-                        setTranscripts(prev => [...prev, {
-                            id: crypto.randomUUID(),
-                            role: 'user',
-                            text: data.text,
-                            timestamp: Date.now(),
-                            isFinal: true
-                        }]);
-                        setCurrentTranscript('');
-                    } else if (data.text && !data.is_final) {
-                        setCurrentTranscript(data.text);
-                    }
-                } else if (data.event === 'clear') {
-                    setAgentIsSpeaking(false);
-                    lastPlaybackTimeRef.current = audioCtxRef.current?.currentTime || 0;
-                }
-            }
-        };
-
-        ws.onclose = (event) => {
-            console.log(`🔌 WebSocket closed: ${event.code}`);
-            endCall();
-        };
-
-        ws.onerror = (event) => {
-            console.error('❌ WebSocket error occurred:', event);
-            console.error("Connection error: voice orchestrator may be offline");
-            endCall();
-        };
-    };
-
-    const playAudioChunk = (data: string | ArrayBuffer, forceInt16 = false) => {
-        let float32: Float32Array;
-        const format = audioConfigRef.current.format;
-        const sampleRate = audioConfigRef.current.sampleRate;
-
-        if (data instanceof ArrayBuffer) {
-            if (format === 'pcm_s16le' || forceInt16) {
-                const int16 = new Int16Array(data);
-                float32 = new Float32Array(int16.length);
-                for (let i = 0; i < int16.length; i++) {
-                    float32[i] = int16[i] / 32768.0;
-                }
-            } else {
-                float32 = new Float32Array(data);
-            }
-        } else {
-            const binaryString = atob(data);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            if (format === 'pcm_s16le' || forceInt16) {
-                const int16 = new Int16Array(bytes.buffer);
-                float32 = new Float32Array(int16.length);
-                for (let i = 0; i < int16.length; i++) {
-                    float32[i] = int16[i] / 32768.0;
-                }
-            } else {
-                float32 = new Float32Array(bytes.buffer);
+            if (typeof window !== 'undefined') {
+                window.alert("Please enable microphone access to use voice chat");
             }
         }
+    }, [agentData, startVoiceCall]);
 
-        if (audioCtxRef.current) {
-            const buffer = audioCtxRef.current.createBuffer(1, float32.length, sampleRate);
-            buffer.copyToChannel(float32 as any, 0);
+    // ═══════════════════════════════════════════════════════
+    // Formatting helpers
+    // ═══════════════════════════════════════════════════════
 
-            const source = audioCtxRef.current.createBufferSource();
-            source.buffer = buffer;
-            
-            const chain = ensureOutputChain();
-            if (!chain) return;
-
-            // Apply "Telephony" style audio enhancement by default for the dashboard panel
-            source.connect(chain.highpass);
-            chain.highpass.connect(chain.lowpass);
-            chain.lowpass.connect(chain.gain);
-            chain.gain.connect(audioCtxRef.current.destination);
-
-            const now = audioCtxRef.current.currentTime;
-            let startAt = lastPlaybackTimeRef.current;
-            
-            // Drift correction & initial buffer
-            if (!playbackStartTimeRef.current) {
-                playbackStartTimeRef.current = Date.now();
-                startAt = now + 0.05;
-            }
-            if (startAt < now) {
-                startAt = now;
-            }
-
-            activeSourcesRef.current.add(source);
-            source.onended = () => {
-                activeSourcesRef.current.delete(source);
-                checkPlaybackComplete();
-            };
-            
-            source.start(startAt);
-            lastPlaybackTimeRef.current = startAt + buffer.duration;
-        }
-    };
-
-    const checkPlaybackComplete = () => {
-        if (!audioCtxRef.current) return;
-        if (audioCtxRef.current.currentTime >= lastPlaybackTimeRef.current - 0.1) {
-            setAgentIsSpeaking(false);
-            if (audioStreamCompleteRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-                const duration = playbackStartTimeRef.current ? Date.now() - playbackStartTimeRef.current : 0;
-                wsRef.current.send(JSON.stringify({
-                    type: 'playback_done',
-                    duration_ms: duration,
-                    playback_turn_id: currentPlaybackTurnIdRef.current,
-                    timestamp: Date.now() / 1000
-                }));
-                playbackStartTimeRef.current = null;
-                audioStreamCompleteRef.current = false;
-                currentPlaybackTurnIdRef.current = null;
-            }
-        }
-    };
-
-    const endCall = async () => {
-        const finalDuration = callDuration;
-        const finalMetrics = { ...metrics };
-        const finalAgentId = agentId;
-
-        if (wsRef.current) {
-            if (agentData?.websocket_url && agentData.websocket_url !== "not_set" && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ type: 'interrupt', timestamp: Date.now() / 1000 }));
-            }
-            wsRef.current.close();
-            wsRef.current = null;
-        }
-
-        if (audioWsRef.current) {
-            audioWsRef.current.close();
-            audioWsRef.current = null;
-            audioStreamActiveRef.current = false;
-        }
-
-        stopPlayback();
-
-        if (finalDuration > 0) {
-            try {
-                const response = await fetch(`/api/metrics`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        call_id: sessionIdRef.current,
-                        agent_id: finalAgentId,
-                        duration_seconds: finalDuration,
-                        status: 'completed',
-                        ttft_ms: finalMetrics.ttft,
-                        ttfc_ms: finalMetrics.ttfc,
-                        compression_ratio: finalMetrics.ratio,
-                        cost_tokens: Math.ceil(finalDuration / 60) * 100
-                    })
-                });
-                if (response.ok) {
-                    console.log("AIAssistantPanel: Call metrics synced successfully");
-                }
-            } catch (err) {
-                console.error("AIAssistantPanel: Failed to sync call metrics:", err);
-            }
-        }
-
-        if (audioCtxRef.current) {
-            audioCtxRef.current.close();
-            audioCtxRef.current = null;
-        }
-        
-        // Clean up audio enhancement nodes
-        outputGainRef.current = null;
-        telephonyHighpassRef.current = null;
-        telephonyLowpassRef.current = null;
-
-        if (pingIntervalRef.current) {
-            clearInterval(pingIntervalRef.current);
-            pingIntervalRef.current = null;
-        }
-        if (callTimerRef.current) {
-            clearInterval(callTimerRef.current);
-            callTimerRef.current = null;
-        }
-        if (micStream) {
-            micStream.getTracks().forEach(track => track.stop());
-        }
-
-        setIsCallActive(false);
-        setConnectionStatus(null);
-        setAgentIsSpeaking(false);
-        wsConnectedRef.current = false;
-        setAgentState(null);
-        setMicStream(null);
-        setCallDuration(0);
-        setTranscripts([]);
-        setCurrentTranscript('');
-        currentAgentMessageRef.current = '';
-        setMetrics({
-            latency: 0,
-            logprob: 0,
-            noSpeech: 0,
-            ratio: 0,
-            chunks: 0,
-            ttft: 0,
-            ttfc: 0
-        });
-    };
-
-    const formatDuration = (seconds: number) => {
+    const formatDuration = (seconds: number): string => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
+
+    const remaining = CALL_LIMIT - callDuration;
+    const isWarning = remaining <= 30 && isCallActive;
+
+    // ═══════════════════════════════════════════════════════
+    // Loading State
+    // ═══════════════════════════════════════════════════════
 
     if (!isMounted || isLoadingAgent || !agentData) {
         return (
@@ -1008,6 +837,10 @@ export default function AIAssistantPanel({
         );
     }
 
+    // ═══════════════════════════════════════════════════════
+    // RENDER
+    // ═══════════════════════════════════════════════════════
+
     return (
         <motion.div
             initial={{ opacity: 0 }}
@@ -1025,7 +858,6 @@ export default function AIAssistantPanel({
                 overflow: 'hidden'
             }}
         >
-
             {/* Header - Compact HUD Style */}
             <div style={{
                 display: 'flex',
@@ -1059,7 +891,7 @@ export default function AIAssistantPanel({
                             margin: 0,
                             letterSpacing: '0.02em'
                         }}>
-                            {agentData?.agent_name || "TARA"}
+                            {(agentData as any)?.agent_name as string || "TARA"}
                         </h3>
                     </div>
                 </div>
@@ -1084,7 +916,7 @@ export default function AIAssistantPanel({
                         >
                             <Clock size={12} />
                             <motion.span
-                                animate={loginMode === 'demo' && callDuration >= DEMO_WARNING_TIME ? {
+                                animate={loginMode === 'demo' && callDuration >= CALL_WARNING_TIME ? {
                                     color: ['#ef4444', '#f87171', '#ef4444']
                                 } : {}}
                                 transition={{ duration: 1, repeat: Infinity }}
@@ -1099,6 +931,11 @@ export default function AIAssistantPanel({
                             </motion.span>
                             {loginMode === 'demo' && (
                                 <span style={{ fontSize: '9px', opacity: 0.6, fontFamily: 'JetBrains Mono, monospace' }}>/5:00</span>
+                            )}
+                            {isWarning && (
+                                <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+                                    {remaining}s
+                                </span>
                             )}
                         </motion.div>
                     ) : (
@@ -1125,7 +962,7 @@ export default function AIAssistantPanel({
                 </AnimatePresence>
             </div>
 
-            {/* Main Content - Compact Layout */}
+            {/* Main Content */}
             <div style={{
                 flex: 1,
                 display: 'flex',
@@ -1135,7 +972,7 @@ export default function AIAssistantPanel({
                 position: 'relative',
                 zIndex: 1
             }}>
-                {/* Orb Container - 180px as requested */}
+                {/* Orb Container - 180px */}
                 <div style={{
                     width: '180px',
                     height: '180px',
@@ -1191,7 +1028,27 @@ export default function AIAssistantPanel({
                     <HUDStatus state={agentState} isDark={isDark} />
                 </div>
 
-                {/* Transcript Area - Compact */}
+                {/* HUD Metrics Row */}
+                {isCallActive && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        style={{
+                            display: 'flex',
+                            gap: '6px',
+                            flexWrap: 'wrap',
+                            justifyContent: 'center',
+                            width: '100%'
+                        }}
+                    >
+                        <HUDMetric label="TTFC" value={metrics.ttfc} unit="ms" delay={0} />
+                        <HUDMetric label="Latency" value={metrics.latency} unit="ms" delay={0.05} />
+                        <HUDMetric label="Duration" value={formatDuration(callDuration)} delay={0.1} />
+                        <HUDMetric label="Chunks" value={metrics.chunks} delay={0.15} />
+                    </motion.div>
+                )}
+
+                {/* Transcript Area */}
                 <div style={{
                     flex: 1,
                     width: '100%',
@@ -1321,7 +1178,7 @@ export default function AIAssistantPanel({
                                     transition={{ duration: 1, repeat: Infinity }}
                                     style={{ marginLeft: '4px' }}
                                 >
-                                    ▊
+                                    |
                                 </motion.span>
                             </motion.div>
                         )}
@@ -1329,7 +1186,7 @@ export default function AIAssistantPanel({
                 </div>
             </div>
 
-            {/* Call Button - Compact */}
+            {/* Call Button */}
             <div style={{
                 marginTop: '12px',
                 paddingTop: '12px',
