@@ -717,11 +717,18 @@ export default function AIAssistantPanel({
 
                     if (data.is_final) {
                         audioStreamCompleteRef.current = true;
-                        checkPlaybackComplete();
+                        // Don't call checkPlaybackComplete() here — let source.onended handle it
+                        // Calling it synchronously causes playback_done to fire before audio plays
                     }
                 } else if (data.type === 'audio_complete' || data.is_final) {
                     audioStreamCompleteRef.current = true;
-                    checkPlaybackComplete();
+                    // Don't call checkPlaybackComplete() synchronously — let source.onended handle it
+                    // Fallback: if no audio sources are active (no chunks received), check after delay
+                    setTimeout(() => {
+                        if (audioStreamCompleteRef.current && activeSourcesRef.current.size === 0) {
+                            checkPlaybackComplete();
+                        }
+                    }, 2000);
                 } else if (data.type === 'interrupt' || data.type === 'clear' || data.type === 'playback_stop' || (data.type === 'state_update' && (data.state === 'listening' || data.state === 'thinking'))) {
                     stopPlayback();
                 } else if (data.type === 'ping') {
@@ -856,7 +863,7 @@ export default function AIAssistantPanel({
         if (!audioCtxRef.current) return;
         if (audioCtxRef.current.currentTime >= lastPlaybackTimeRef.current - 0.1) {
             setAgentIsSpeaking(false);
-            if (audioStreamCompleteRef.current && wsRef.current?.readyState === WebSocket.OPEN && agentData?.websocket_url && agentData.websocket_url !== "not_set") {
+            if (audioStreamCompleteRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
                 const duration = playbackStartTimeRef.current ? Date.now() - playbackStartTimeRef.current : 0;
                 wsRef.current.send(JSON.stringify({
                     type: 'playback_done',
