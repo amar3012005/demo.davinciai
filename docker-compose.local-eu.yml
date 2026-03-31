@@ -146,7 +146,8 @@ services:
       AGENT_ID: ${AGENT_ID:-tara}
       TENANT_ID: ${TENANT_ID:-tara}
 
-      RAG_SERVICE_URL: http://rag-eu-local:4001
+      RAG_SERVICE_URL: https://core.hivemind.davinciai.eu:8050
+      RAG_STREAM_ENDPOINT: /api/tara/stream
       STT_SERVICE_URL: http://stt-eu-local:4002
       TTS_SERVICE_URL: http://tts-eu-local:4003
       VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu-local:4005
@@ -187,8 +188,6 @@ services:
     depends_on:
       redis-eu-local:
         condition: service_healthy
-      rag-eu-local:
-        condition: service_started
       visual-copilot-eu-local:
         condition: service_started
       tts-eu-local:

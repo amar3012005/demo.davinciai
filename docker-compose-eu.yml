@@ -262,7 +262,8 @@ services:
     environment:
       # Internal service URLs (hardcoded — never change per-env)
       REDIS_URL: redis://redis-eu:6379/0
-      RAG_SERVICE_URL: http://rag-eu:4001
+      RAG_SERVICE_URL: https://core.hivemind.davinciai.eu:8050
+      RAG_STREAM_ENDPOINT: /api/tara/stream
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
       VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu:4005
@@ -321,8 +322,6 @@ services:
     depends_on:
       redis-eu:
         condition: service_healthy
-      rag-eu:
-        condition: service_started
       tts-eu:
         condition: service_started
       visual-copilot-eu:

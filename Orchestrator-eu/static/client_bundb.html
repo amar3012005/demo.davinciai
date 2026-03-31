@@ -754,6 +754,7 @@
                 this.sessionId = null;
                 this.state = 'idle';
                 this.audioContext = null;
+                this.micAudioContext = null;
                 this.audioQueue = [];
                 this.binaryQueue = [];
                 this.isProcessingQueue = false;
@@ -764,6 +765,7 @@
                 this.currentPlaybackTurnId = null;
                 this.minAcceptedPlaybackTurnId = 0;
                 this.audioStreamComplete = false;
+                this.playedAudioThisTurn = false;
                 this.playbackFallbackTimer = null;
                 this.chunkCount = 0;
                 this.isMicActive = false;
@@ -842,6 +844,7 @@
                     this.addLog('WebSocket connected', 'success');
                     this.updateStatus('connected', 'Connected');
                     await this.initAudio();
+                    this.sessionId = 'session_' + Date.now();
 
                     this.startSessionBtn.classList.add('hidden');
                     this.endSessionBtn.classList.remove('hidden');
@@ -1173,10 +1176,15 @@
                     source.connect(this.audioContext.destination);
 
                     const startTime = Math.max(this.nextPlayTime, this.audioContext.currentTime);
+                    if (!this.playbackStartTime) {
+                        this.playbackStartTime = Date.now();
+                    }
                     this.nextPlayTime = startTime + buffer.duration;
+                    this.playedAudioThisTurn = true;
 
                     source.onended = () => {
                         this.activeSources.delete(source);
+                        this.checkPlaybackComplete();
                         resolve();
                     };
 
@@ -1186,18 +1194,44 @@
             }
 
             stopAudioPlayback() {
+                if (Number.isFinite(this.currentPlaybackTurnId)) {
+                    this.minAcceptedPlaybackTurnId = Math.max(
+                        this.minAcceptedPlaybackTurnId,
+                        this.currentPlaybackTurnId + 1
+                    );
+                }
                 this.audioQueue = [];
                 this.activeSources.forEach(source => {
                     try { source.stop(); } catch (e) {}
                 });
                 this.activeSources.clear();
                 this.nextPlayTime = 0;
+                this.currentPlaybackTurnId = null;
+                this.audioStreamComplete = false;
+                this.playedAudioThisTurn = false;
+                this.playbackStartTime = null;
             }
 
             checkPlaybackComplete() {
                 if (this.audioStreamComplete && this.audioQueue.length === 0 && !this.isProcessingQueue) {
                     this.addLog('Playback complete', 'info');
+                    if (
+                        this.playedAudioThisTurn &&
+                        this.ws &&
+                        this.ws.readyState === WebSocket.OPEN
+                    ) {
+                        const duration = this.playbackStartTime ? Date.now() - this.playbackStartTime : 0;
+                        this.send({
+                            type: 'playback_done',
+                            duration_ms: duration,
+                            playback_turn_id: this.currentPlaybackTurnId,
+                            timestamp: Date.now() / 1000
+                        });
+                    }
                     this.audioStreamComplete = false;
+                    this.playedAudioThisTurn = false;
+                    this.playbackStartTime = null;
+                    this.currentPlaybackTurnId = null;
                 }
             }
 
@@ -1216,7 +1250,8 @@
                             sampleRate: MIC_SAMPLE_RATE,
                             channelCount: 1,
                             echoCancellation: true,
-                            noiseSuppression: true
+                            noiseSuppression: true,
+                            autoGainControl: true
                         }
                     });
 
@@ -1225,12 +1260,12 @@
                     this.micButton.innerHTML = '<span class="material-icons-round">mic_off</span>';
                     this.addLog('Microphone started', 'success');
 
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: MIC_SAMPLE_RATE });
-                    const source = this.audioContext.createMediaStreamSource(stream);
-                    const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    this.micAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: MIC_SAMPLE_RATE });
+                    const source = this.micAudioContext.createMediaStreamSource(stream);
+                    const processor = this.micAudioContext.createScriptProcessor(2048, 1, 1);
 
                     source.connect(processor);
-                    processor.connect(this.audioContext.destination);
+                    processor.connect(this.micAudioContext.destination);
 
                     processor.onaudioprocess = (e) => {
                         const inputData = e.inputBuffer.getChannelData(0);
@@ -1265,9 +1300,9 @@
                     this.micStream.getTracks().forEach(track => track.stop());
                     this.micStream = null;
                 }
-                if (this.audioContext) {
-                    this.audioContext.close();
-                    this.audioContext = null;
+                if (this.micAudioContext) {
+                    this.micAudioContext.close();
+                    this.micAudioContext = null;
                 }
 
                 this.isMicActive = false;

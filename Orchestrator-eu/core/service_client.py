@@ -12,6 +12,7 @@ import aiohttp
 import ssl
 import unicodedata
 import time
+import os
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from dataclasses import dataclass
 import re
@@ -713,6 +714,18 @@ class RAGClient:
     def __init__(self, config: RAGConfig, skip_ssl: bool = False):
         self.config = config
         self.skip_ssl = skip_ssl
+
+    @staticmethod
+    def _resolve_tenant_env(tenant_id: Optional[str], field: str) -> Optional[str]:
+        if not tenant_id:
+            return None
+        safe_tenant = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(tenant_id).lower())
+        safe_field = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(field).lower())
+        return (
+            os.getenv(f"{safe_tenant}_{safe_field}")
+            or os.getenv(f"{safe_tenant.upper()}_{safe_field.upper()}")
+            or None
+        )
     
     async def query(self, 
                    query: str, 
@@ -854,13 +867,33 @@ class RAGClient:
                 if interruption_type:
                     payload["interruption_type"] = interruption_type
 
+                hivemind_user_id = self._resolve_tenant_env(tenant_id, "hivemind_user_id")
+                hivemind_api_key = self._resolve_tenant_env(tenant_id, "hivemind_apikey")
+                headers = {}
+                if hivemind_api_key:
+                    headers["Authorization"] = f"Bearer {hivemind_api_key}"
+                if hivemind_user_id:
+                    payload["hivemind_user_id"] = hivemind_user_id
+
                 # Use the correct streaming endpoint for Daytona RAG
                 url = base_url if base_url else self.config.url
                 stream_url = f"{url}{self.config.stream_endpoint}"
+                masked_key = "unset"
+                if hivemind_api_key:
+                    masked_key = f"{hivemind_api_key[:2]}***{hivemind_api_key[-2:]}" if len(hivemind_api_key) >= 8 else "***"
+                logger.info(
+                    "🧠 HIVEMIND stream request | tenant=%s | session=%s | endpoint=%s | hivemind_user_id=%s | hivemind_api_key=%s",
+                    tenant_id or "unknown",
+                    session_id,
+                    stream_url,
+                    hivemind_user_id or "unset",
+                    masked_key,
+                )
                 
                 async with session.post(
                     stream_url,
                     json=payload,
+                    headers=headers,
                     ssl=ssl_context,
                     timeout=aiohttp.ClientTimeout(total=30)
                 ) as resp:
@@ -870,8 +903,18 @@ class RAGClient:
                             if line_str:  # Parse NDJSON (not SSE)
                                 try:
                                     data = json.loads(line_str)
+                                    event_type = str(data.get("type", "")).strip().lower()
                                     token = data.get("text", "")
-                                    is_final = data.get("is_final", False)
+                                    if not token:
+                                        token = data.get("content", "")
+                                    is_final = bool(data.get("is_final", False))
+
+                                    # HIVEMIND stream_tara emits NDJSON events like:
+                                    # {"type":"text","content":"..."} and {"type":"done", ...}
+                                    if event_type == "text":
+                                        is_final = False
+                                    elif event_type == "done":
+                                        is_final = True
                                     
                                     logger.debug(f"RAG streaming received: '{token}' (is_final={is_final})")
                                     
@@ -891,7 +934,14 @@ class RAGClient:
                                     logger.error(f"RAG JSON parse error: {e} for line: {line_str}")
                                     continue
                     else:
-                        logger.error(f"RAG streaming error: HTTP {resp.status}")
+                        error_text = await resp.text()
+                        logger.error(
+                            "🧠 HIVEMIND streaming error | tenant=%s | session=%s | status=%s | body=%s",
+                            tenant_id or "unknown",
+                            session_id,
+                            resp.status,
+                            error_text[:500],
+                        )
         
         except Exception as e:
             logger.error(f"RAG streaming error: {e}")

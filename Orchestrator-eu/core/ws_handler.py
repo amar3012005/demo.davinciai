@@ -313,6 +313,50 @@ class OrchestratorWSHandler:
         except ValueError:
             return 6.0
 
+    async def _await_task_if_not_current(
+        self,
+        task: Optional[asyncio.Task],
+        *,
+        session_id: str,
+        label: str,
+        timeout: Optional[float] = None,
+    ) -> None:
+        if not task:
+            return
+        current_task = asyncio.current_task()
+        if task is current_task:
+            logger.debug(f"[{session_id}] Skipping self-await for {label}")
+            return
+        try:
+            if timeout is not None:
+                await asyncio.wait_for(task, timeout=timeout)
+            else:
+                await task
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+
+    async def _cancel_task_if_not_current(
+        self,
+        task: Optional[asyncio.Task],
+        *,
+        session_id: str,
+        label: str,
+        timeout: float = 0.5,
+    ) -> None:
+        if not task or task.done():
+            return
+        current_task = asyncio.current_task()
+        if task is current_task:
+            logger.debug(f"[{session_id}] Skipping self-cancel for {label}")
+            return
+        task.cancel()
+        await self._await_task_if_not_current(
+            task,
+            session_id=session_id,
+            label=label,
+            timeout=timeout,
+        )
+
     async def _refresh_session_runtime_config(
         self,
         session: OrchestratorSession,
@@ -2075,11 +2119,11 @@ class OrchestratorWSHandler:
             elif effect == "cancel_tts":
                 # Cancel any running TTS task
                 if session.tts_task and not session.tts_task.done():
-                    session.tts_task.cancel()
-                    try:
-                        await session.tts_task
-                    except asyncio.CancelledError:
-                        pass
+                    await self._cancel_task_if_not_current(
+                        session.tts_task,
+                        session_id=session.session_id,
+                        label="cancel_tts_side_effect",
+                    )
                     logger.debug(f"[{session.session_id}] ⏸️ Cancelled TTS (side effect)")
 
             elif effect == "play_post_response_prompt":
@@ -3200,6 +3244,7 @@ class OrchestratorWSHandler:
         # Dynamic tenant voice routing: once tenant is known, enforce tenant-specific voice.
         # Explicit voice in payload still wins for that session.
         requested_voice = effective_msg.get("voice_id")
+        requested_pronunciation_dict_id = effective_msg.get("pronunciation_dict_id")
         session.voice_id_override = self._resolve_tenant_voice_id(
             session.tenant_id,
             str(requested_voice) if requested_voice else session.voice_id_override,
@@ -3208,7 +3253,11 @@ class OrchestratorWSHandler:
         )
         session.pronunciation_dict_id_override = self._resolve_tenant_pronunciation_dict_id(
             session.tenant_id,
-            session.pronunciation_dict_id_override or self.config.agent.pronunciation_dict_id,
+            (
+                str(requested_pronunciation_dict_id)
+                if requested_pronunciation_dict_id
+                else session.pronunciation_dict_id_override or self.config.agent.pronunciation_dict_id
+            ),
             session.agent_name,
             session.agent_id,
         )
@@ -3826,6 +3875,25 @@ class OrchestratorWSHandler:
             return
 
         chunk_counter = 0
+        attempts = [{
+            "label": "primary",
+            "voice_id": session.voice_id_override,
+            "pronunciation_dict_id": session.pronunciation_dict_id_override,
+        }]
+        safe_fallback_voice_id = (
+            os.getenv("DEFAULT_VOICE_ID")
+            or os.getenv("CARTESIA_VOICE_ID")
+            or session.voice_id_override
+        )
+        if (
+            safe_fallback_voice_id != session.voice_id_override
+            or session.pronunciation_dict_id_override
+        ):
+            attempts.append({
+                "label": "retry_safe",
+                "voice_id": safe_fallback_voice_id,
+                "pronunciation_dict_id": None,
+            })
 
         # Check if session is already closed
         if session.is_closed:
@@ -3849,117 +3917,171 @@ class OrchestratorWSHandler:
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
             
-            # Connect to TTS service (reconnect if needed)
-            if not session.tts_client.ws or session.tts_client.ws.closed:
-                await session.tts_client.connect(session.session_id)
-            
-            # CRITICAL: Reset tracking for THIS specific stream to ensure accurate duration
-            # Also cancel any existing playback timer that might cut off this stream
-            session.tts_total_bytes = 0
-            self._clear_playback_tracking(session)
-            if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
-                session.audio_playback_server_timer.cancel()
-                logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new TTS stream")
-            session.tts_generation_complete = False
-            
-            # Clear any stale data from tts_audio_queue before starting fresh
-            while not session.tts_audio_queue.empty():
-                try:
-                    session.tts_audio_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            
-            # Synthesize text
-            logger.info(f"[{session.session_id}] 🔊 TTS SYNTH START: voice={session.voice_id_override}, tenant={session.tenant_id}, text='{text[:60]}...'")
-            await session.tts_client.synthesize(
-                text,
-                language,
-                emotion="helpful",
-                voice_id=session.voice_id_override,
-                pronunciation_dict_id=session.pronunciation_dict_id_override,
-                tenant_id=session.tenant_id,
-            )
-            logger.info(f"[{session.session_id}] 🔊 TTS SYNTH SENT, waiting for audio queue...")
-
             # Default values (standard for our STT/TTS stack)
             sample_rate = session.tts_sample_rate or 44100
             encoding = session.tts_format or "pcm_f32le" # Default to f32 for HD Cartesia
             
-            # Receive and forward audio chunks from the background queue
-            while not session.is_closed:
-                try:
-                    # Use a timeout to allow periodic checks for session closure or cancellation
-                    data = await asyncio.wait_for(session.tts_audio_queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    if session.is_closed:
+            for attempt_index, attempt in enumerate(attempts):
+                if session.is_closed:
+                    break
+
+                # Connect to TTS service (reconnect if needed)
+                if not session.tts_client.ws or session.tts_client.ws.closed:
+                    await session.tts_client.connect(session.session_id)
+
+                # CRITICAL: Reset tracking for THIS specific stream to ensure accurate duration
+                # Also cancel any existing playback timer that might cut off this stream
+                chunk_counter = 0
+                session.tts_total_bytes = 0
+                self._clear_playback_tracking(session)
+                if session.audio_playback_server_timer and not session.audio_playback_server_timer.done():
+                    session.audio_playback_server_timer.cancel()
+                    logger.debug(f"[{session.session_id}] ⏸️ Cancelled existing playback timer for new TTS stream")
+                session.tts_generation_complete = False
+
+                # Clear any stale data from tts_audio_queue before starting fresh
+                while not session.tts_audio_queue.empty():
+                    try:
+                        session.tts_audio_queue.get_nowait()
+                    except asyncio.QueueEmpty:
                         break
-                    continue
-                
-                # Check for cancellation (for fillers)
-                if cancellation_task and cancellation_task.done():
-                    logger.debug(f"[{session.session_id}] TTS cancelled by filler task")
+
+                attempt_voice_id = attempt["voice_id"]
+                attempt_pronunciation_dict_id = attempt["pronunciation_dict_id"]
+                logger.info(
+                    f"[{session.session_id}] 🔊 TTS SYNTH START[{attempt['label']}]: "
+                    f"voice={attempt_voice_id}, tenant={session.tenant_id}, "
+                    f"pron_dict={attempt_pronunciation_dict_id or '-'}, text='{text[:60]}...'"
+                )
+                await session.tts_client.synthesize(
+                    text,
+                    language,
+                    emotion="helpful",
+                    voice_id=attempt_voice_id,
+                    pronunciation_dict_id=attempt_pronunciation_dict_id,
+                    tenant_id=session.tenant_id,
+                )
+                logger.info(f"[{session.session_id}] 🔊 TTS SYNTH SENT[{attempt['label']}], waiting for audio queue...")
+
+                # Receive and forward audio chunks from the background queue
+                while not session.is_closed:
+                    try:
+                        # Use a timeout to allow periodic checks for session closure or cancellation
+                        data = await asyncio.wait_for(session.tts_audio_queue.get(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        if session.is_closed:
+                            break
+                        continue
+
+                    # Check for cancellation (for fillers)
+                    if cancellation_task and cancellation_task.done():
+                        logger.debug(f"[{session.session_id}] TTS cancelled by filler task")
+                        break
+
+                    msg_type = data.get("type")
+                    if msg_type == "audio":
+                        if chunk_counter == 0:
+                            logger.info(
+                                f"[{session.session_id}] 🔊 TTS QUEUE FIRST AUDIO[{attempt['label']}]: "
+                                f"keys={list(data.keys())[:5]}"
+                            )
+                    elif msg_type != "metadata":
+                        logger.info(f"[{session.session_id}] 🔊 TTS QUEUE MSG: type={msg_type}, keys={list(data.keys())[:5]}")
+
+                    # Handle Metadata (crucial for setting correct sample rate/format)
+                    if msg_type == "metadata":
+                        sample_rate = data.get("sample_rate", sample_rate)
+                        encoding = data.get("format") or data.get("encoding") or encoding
+                        logger.debug(f"[{session.session_id}] 🔊 TTS Metadata updated: {sample_rate}Hz, {encoding}")
+                        continue
+
+                    if msg_type == "audio":
+                        # INTERRUPTION LOGIC: Stop if state clearly indicates user interrupted
+                        # Allow LISTENING state because the state can transition mid-stream
+                        # (e.g., server-side timer fires while audio is still being sent)
+                        state_mgr = session.state_manager
+                        if state_mgr.state not in (State.SPEAKING, State.THINKING, State.LISTENING):
+                             logger.info(f"[{session.session_id}] 🛑 Stopping TTS receive loop - state changed to {state_mgr.state.value}")
+                             break
+
+                        audio_data = data.get("data", "")
+                        if audio_data:
+                            # Extract dynamic format info if present in this specific chunk
+                            chunk_sample_rate = data.get("sample_rate", sample_rate)
+                            chunk_encoding = data.get("format") or data.get("encoding") or encoding
+
+                            # Track playback start on first chunk (for TTS streaming)
+                            if not cancellation_task and session.audio_playback_start_time is None:
+                                # CRITICAL: Flush any existing filler audio from buffer
+                                await self._enqueue_foreground_audio(session, b"", flush=True, sample_rate=chunk_sample_rate, encoding=chunk_encoding)
+
+                                session.audio_playback_turn_id += 1
+                                session.audio_playback_start_time = time.time()
+                                logger.debug(f"[{session.session_id}] 📊 Tracking TTS playback start")
+
+                            if data.get("is_binary"):
+                                audio_bytes = audio_data
+                            else:
+                                audio_bytes = base64.b64decode(audio_data)
+
+                            # Decode audio and buffer into aligned frames
+                            await self._enqueue_foreground_audio(session, audio_bytes, sample_rate=chunk_sample_rate, encoding=chunk_encoding)
+
+                            # Accumulate bytes for accurate duration
+                            if not cancellation_task:
+                                if not hasattr(session, 'tts_total_bytes'):
+                                    session.tts_total_bytes = 0
+                                session.tts_total_bytes += len(audio_bytes)
+
+                                # Update duration based on sample rate and format
+                                bytes_per_sample = 4 if "f32" in chunk_encoding else 2
+                                bytes_per_sec = chunk_sample_rate * bytes_per_sample
+                                duration_sec = session.tts_total_bytes / bytes_per_sec
+                                session.audio_playback_duration = max(duration_sec, 1.0)
+
+                            chunk_counter += 1
+                    elif msg_type == "complete":
+                        session.tts_generation_complete = True
+                        logger.info(
+                            f"[{session.session_id}] 🔊 TTS COMPLETE[{attempt['label']}]: "
+                            f"chunks_processed={chunk_counter}, total_bytes={session.tts_total_bytes}, "
+                            f"duration={session.audio_playback_duration}"
+                        )
+                        break
+
+                if chunk_counter > 0 or cancellation_task or session.is_closed:
                     break
-                
-                msg_type = data.get("type")
-                logger.info(f"[{session.session_id}] 🔊 TTS QUEUE MSG: type={msg_type}, keys={list(data.keys())[:5]}")
 
-                # Handle Metadata (crucial for setting correct sample rate/format)
-                if msg_type == "metadata":
-                    sample_rate = data.get("sample_rate", sample_rate)
-                    encoding = data.get("format") or data.get("encoding") or encoding
-                    logger.debug(f"[{session.session_id}] 🔊 TTS Metadata updated: {sample_rate}Hz, {encoding}")
-                    continue
-
-                if msg_type == "audio":
-                    # INTERRUPTION LOGIC: Stop if state clearly indicates user interrupted
-                    # Allow LISTENING state because the state can transition mid-stream
-                    # (e.g., server-side timer fires while audio is still being sent)
-                    state_mgr = session.state_manager
-                    if state_mgr.state not in (State.SPEAKING, State.THINKING, State.LISTENING):
-                         logger.info(f"[{session.session_id}] 🛑 Stopping TTS receive loop - state changed to {state_mgr.state.value}")
-                         break
-                         
-                    audio_data = data.get("data", "")
-                    if audio_data:
-                        # Extract dynamic format info if present in this specific chunk
-                        chunk_sample_rate = data.get("sample_rate", sample_rate)
-                        chunk_encoding = data.get("format") or data.get("encoding") or encoding
-                        
-                        # Track playback start on first chunk (for TTS streaming)
-                        if not cancellation_task and session.audio_playback_start_time is None:
-                            # CRITICAL: Flush any existing filler audio from buffer
-                            await self._enqueue_foreground_audio(session, b"", flush=True, sample_rate=chunk_sample_rate, encoding=chunk_encoding)
-                            
-                            session.audio_playback_turn_id += 1
-                            session.audio_playback_start_time = time.time()
-                            logger.debug(f"[{session.session_id}] 📊 Tracking TTS playback start")
-                        
-                        if data.get("is_binary"):
-                            audio_bytes = audio_data
-                        else:
-                            audio_bytes = base64.b64decode(audio_data)
-
-                        # Decode audio and buffer into aligned frames
-                        await self._enqueue_foreground_audio(session, audio_bytes, sample_rate=chunk_sample_rate, encoding=chunk_encoding)
-                        
-                        # Accumulate bytes for accurate duration
-                        if not cancellation_task:
-                            if not hasattr(session, 'tts_total_bytes'):
-                                session.tts_total_bytes = 0
-                            session.tts_total_bytes += len(audio_bytes)
-                            
-                            # Update duration based on sample rate and format
-                            bytes_per_sample = 4 if "f32" in chunk_encoding else 2
-                            bytes_per_sec = chunk_sample_rate * bytes_per_sample
-                            duration_sec = session.tts_total_bytes / bytes_per_sec
-                            session.audio_playback_duration = max(duration_sec, 1.0)
-                        
-                        chunk_counter += 1
-                elif msg_type == "complete":
-                    session.tts_generation_complete = True
-                    logger.info(f"[{session.session_id}] 🔊 TTS COMPLETE: chunks_processed={chunk_counter}, total_bytes={session.tts_total_bytes}, duration={session.audio_playback_duration}")
-                    break
+                if attempt_index < len(attempts) - 1:
+                    logger.warning(
+                        f"[{session.session_id}] ⚠️ Zero-chunk TTS result on {attempt['label']} "
+                        f"(voice={attempt_voice_id}, pron_dict={attempt_pronunciation_dict_id or '-'}) - retrying"
+                    )
+                    try:
+                        await session.tts_client.abort_stream()
+                    except Exception:
+                        pass
+                    await session.tts_client.connect(session.session_id)
+                else:
+                    logger.error(
+                        f"[{session.session_id}] ❌ TTS produced zero audio after all attempts "
+                        f"(tenant={session.tenant_id}, text='{text[:60]}...')"
+                    )
             
+            if not session.is_closed and not cancellation_task and chunk_counter == 0 and session.audio_playback_start_time is None:
+                logger.warning(
+                    f"[{session.session_id}] ⏭️ No playable TTS audio produced; "
+                    "skipping playback_done flow and recovering to LISTENING"
+                )
+                self._clear_playback_tracking(session)
+                try:
+                    playback_side_effects = await session.state_manager.transition(State.LISTENING, trigger="playback_done_auto")
+                    await self._execute_side_effects(session, playback_side_effects, language)
+                    await self._broadcast_state(session, State.LISTENING)
+                except Exception as transition_error:
+                    logger.warning(f"[{session.session_id}] ⚠️ Failed zero-audio recovery transition: {transition_error}")
+                return
+
             # Flush remaining buffer and signal completion (only if still connected)
             if not session.is_closed:
                 # Flush any remaining buffered audio
@@ -5078,11 +5200,11 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
         if exit_text:
             # Cancel any ongoing TTS/tasks before playing exit
             if session.tts_task and not session.tts_task.done():
-                session.tts_task.cancel()
-                try:
-                    await session.tts_task
-                except asyncio.CancelledError:
-                    pass
+                await self._cancel_task_if_not_current(
+                    session.tts_task,
+                    session_id=session.session_id,
+                    label="exit_pre_tts_cancel",
+                )
             
             # Transition to SPEAKING only if not already speaking (with side effects: cancel_filler)
             if session.state_manager.state != State.SPEAKING:
@@ -5102,10 +5224,11 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
             
             # Wait for exit audio to finish generating/streaming
             if session.tts_task and not session.tts_task.done():
-                try:
-                    await session.tts_task
-                except asyncio.CancelledError:
-                    pass
+                await self._await_task_if_not_current(
+                    session.tts_task,
+                    session_id=session.session_id,
+                    label="exit_tts_wait",
+                )
 
             # Wait for actual playback to finish on the client side
             # The server playback timer or client playback_done event will transition state to LISTENING

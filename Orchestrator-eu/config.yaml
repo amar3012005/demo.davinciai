@@ -50,8 +50,8 @@ services:
         language: "de-DE"
   
   rag:
-    url: "http://rag:8003"
-    stream_endpoint: "/api/v1/stream_query"
+    url: "https://core.hivemind.davinciai.eu:8050"
+    stream_endpoint: "/api/tara/stream"
     knowledge_base_path: "/home/prometheus/daytona_agent/daytona_knowledge_base"
     top_k: 5
     similarity_threshold: 0.7

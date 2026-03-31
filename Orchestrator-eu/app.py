@@ -114,6 +114,45 @@ def _merge_proxy_body(
     return merged
 
 
+def _resolve_tenant_env(tenant_id: Optional[str], field: str) -> Optional[str]:
+    tenant = _sanitize_tenant_id(tenant_id)
+    if not tenant:
+        return None
+    candidates = [
+        f"{tenant}_{field}",
+        f"{tenant.upper()}_{field.upper()}",
+    ]
+    for env_name in candidates:
+        value = (os.getenv(env_name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _build_hivemind_auth(tenant_id: str, body: Optional[Dict[str, Any]] = None) -> tuple[Dict[str, Any], Dict[str, str]]:
+    merged_body = dict(body or {})
+    headers: Dict[str, str] = {}
+    hivemind_user_id = _resolve_tenant_env(tenant_id, "hivemind_user_id")
+    hivemind_api_key = _resolve_tenant_env(tenant_id, "hivemind_apikey")
+
+    if hivemind_user_id and not merged_body.get("hivemind_user_id"):
+        merged_body["hivemind_user_id"] = hivemind_user_id
+    if hivemind_api_key:
+        headers["Authorization"] = f"Bearer {hivemind_api_key}"
+
+    masked_key = "unset"
+    if hivemind_api_key:
+        masked_key = f"{hivemind_api_key[:2]}***{hivemind_api_key[-2:]}" if len(hivemind_api_key) >= 8 else "***"
+
+    logger.info(
+        "🧠 HIVEMIND proxy auth | tenant=%s | hivemind_user_id=%s | hivemind_api_key=%s",
+        tenant_id,
+        hivemind_user_id or "unset",
+        masked_key,
+    )
+    return merged_body, headers
+
+
 def _build_cors_origins() -> list[str]:
     origins = {
         "http://localhost:3000",
@@ -866,18 +905,20 @@ async def proxy_rag_stream_query(request: Request):
         body = await request.json()
         resolved_tenant_id = _resolve_requested_tenant(request=request, body=body)
         body = _merge_proxy_body(body, resolved_tenant_id)
+        body, headers = _build_hivemind_auth(resolved_tenant_id, body)
         
         # Add conversation context tracking
         logger.info(f"📤 RAG Proxy: Forwarding query to {config.services.rag.url}")
         
         # Forward to RAG service streaming endpoint
-        rag_url = f"{config.services.rag.url}/api/v1/stream_query"
+        rag_url = f"{config.services.rag.url}{config.services.rag.stream_endpoint}"
         
         async def stream_generator():
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     rag_url,
                     json=body,
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
                     if response.status != 200:
@@ -941,9 +982,10 @@ async def proxy_rag_query(request: Request):
                 }
             },
         )
+        body, headers = _build_hivemind_auth(resolved_tenant_id, body)
         rag_url = f"{config.services.rag.url}/api/v1/query"
         async with aiohttp.ClientSession() as session:
-            async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
+            async with session.post(rag_url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     return JSONResponse({"error": error_text}, status_code=response.status)
@@ -963,9 +1005,10 @@ async def proxy_rag_retrieve(request: Request):
         body = await request.json()
         resolved_tenant_id = _resolve_requested_tenant(request=request, body=body)
         body = _merge_proxy_body(body, resolved_tenant_id)
+        body, headers = _build_hivemind_auth(resolved_tenant_id, body)
         rag_url = f"{config.services.rag.url}/api/v1/retrieve"
         async with aiohttp.ClientSession() as session:
-            async with session.post(rag_url, json=body, timeout=aiohttp.ClientTimeout(total=60)) as response:
+            async with session.post(rag_url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     return JSONResponse({"error": error_text}, status_code=response.status)
