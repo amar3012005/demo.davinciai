@@ -535,6 +535,8 @@ class CartesiaManager:
         text: str,
         voice_id: Optional[str] = None,
         language: Optional[str] = None,
+        model_id: Optional[str] = None,
+        pronunciation_dict_id: Optional[str] = None,
     ) -> bytes:
         """
         Synthesize text to complete audio bytes.
@@ -557,6 +559,8 @@ class CartesiaManager:
             collect_audio,
             voice_id=voice_id,
             language=language,
+            model_id=model_id,
+            pronunciation_dict_id=pronunciation_dict_id,
         )
         
         if stats.get("error"):

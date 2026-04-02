@@ -194,12 +194,12 @@ class TTSClient:
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self.session_id: Optional[str] = None  # Track session_id for reconnection
         
-        # Chunk batching (to prevent detected_unusual_activity from tiny chunks)
+        # Chunk batching tuned for conversational prosody without flooding Cartesia
         self._chunk_buffer: str = ""
-        # CRITICAL: Increased buffering to prioritize prosody quality.
-        # Sending whole sentences (or ~40 words) ensures Cartesia has enough context for natural intonation.
-        self._min_chunk_size: int = 250  # was 40 — wait for a full thought
-        self._max_chunk_size: int = 1000 # was 200 — allow much longer blocks
+        # Smaller chunks reduce robotic monologue pacing while still giving Cartesia
+        # enough local context for natural phrasing.
+        self._min_chunk_size: int = 90
+        self._max_chunk_size: int = 320
         self._flush_task: Optional[asyncio.Task] = None
         self._last_stream_language: str = "de"
         self._last_stream_emotion: str = "helpful"
@@ -219,8 +219,9 @@ class TTSClient:
         }
         return PRONUNCIATION_DICTS.get(tenant_id.lower())
 
-    # Acronyms Cartesia reads letter-by-letter — expand to spoken German
-    # This dictionary is applied in _normalize_tts_text() before sending to TTS
+    # Conservative acronym expansion for terms Cartesia consistently spells out.
+    # Keep this intentionally small and do not rewrite tenant-brand pronunciation
+    # that should be handled by Cartesia dictionaries.
     TTS_EXPAND = {
         "BLAIQ": "Blaiq",
         "KI": "künstliche Intelligenz",
@@ -233,9 +234,6 @@ class TTSClient:
         "ROI": "Return on Investment",
         "FAQ": "häufig gestellte Fragen",
         "CRM": "Kundenmanagement-System",
-        "B2B": "Business-to-Business",
-        "B2C": "Business-to-Consumer",
-        "AI": "äi",  # Phonetic hint for German TTS — pronounce as English "AI" not letter-by-letter
         "TARA": "Tara",  # Avoid spelling T-A-R-A
     }
 
@@ -284,12 +282,12 @@ class TTSClient:
         # German-specific: Replace slashes with "oder" for better TTS pronunciation
         normalized = re.sub(r"\s*/\s*", " oder ", normalized)
 
-        # CRITICAL: Expand acronyms that Cartesia reads letter-by-letter
-        # Only apply for German language
+        # Expand only exact acronyms. Case-insensitive replacement makes mixed-case
+        # words like "Ai" or proper nouns drift away from the original text and can
+        # fight Cartesia pronunciation dictionaries.
         if language == "de":
             for acronym, spoken in TTSClient.TTS_EXPAND.items():
-                # Use word boundary matching to avoid partial replacements
-                normalized = re.sub(rf"\b{re.escape(acronym)}\b", spoken, normalized, flags=re.IGNORECASE if acronym.isupper() else 0)
+                normalized = re.sub(rf"\b{re.escape(acronym)}\b", spoken, normalized)
 
         # Ensure terminal punctuation (Cartesia needs this for prosody cues)
         # ONLY if this is the final chunk of the response.
@@ -463,10 +461,10 @@ class TTSClient:
         text_without_tags = re.sub(r'<[^>]+>', '', self._chunk_buffer).strip()
         incoming_without_tags = re.sub(r'<[^>]+>', '', text).strip()
 
-        # QUALITY BOOST: Flush immediately if we see a sentence-ender in the incoming text
-        # Include ellipses and dashes which are common in agent responses.
-        has_punctuation = any(text.endswith(p) for p in ['.', '!', '?', '…']) or \
-                         any(p in text for p in ['. ', '.<', '! ', '? ', '… ', '— '])
+        # Flush on natural clause boundaries so Cartesia can start speaking on a
+        # phrase instead of waiting for a long paragraph.
+        has_punctuation = any(text.endswith(p) for p in [".", "!", "?", "…", ",", ";", ":"]) or \
+                         any(p in text for p in [". ", ".<", "! ", "? ", "… ", ", ", "; ", ": ", "— "])
 
         # If buffer is large enough OR incoming chunk is already large OR we hit punctuation, send immediately
         if len(text_without_tags) >= self._min_chunk_size or len(incoming_without_tags) >= self._max_chunk_size or has_punctuation:
@@ -477,7 +475,7 @@ class TTSClient:
                 self._flush_task.cancel()
             self._schedule_flush(language, emotion, voice_id, pronunciation_dict_id)
     
-    def _schedule_flush(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, delay_ms: float = 50.0):
+    def _schedule_flush(self, language: str, emotion: str, voice_id: Optional[str] = None, pronunciation_dict_id: Optional[str] = None, delay_ms: float = 80.0):
         """Schedule buffered chunks to be flushed after a short delay."""
         self._flush_task = asyncio.create_task(self._delayed_flush(language, emotion, voice_id, pronunciation_dict_id, delay_ms))
 
@@ -514,6 +512,14 @@ class TTSClient:
         # 2. German compound safety: Prefer splitting at sentence boundaries or spaces
         while len(buffer) > self._max_chunk_size:
             split_pos = buffer.rfind('. ', 0, self._max_chunk_size)
+            if split_pos == -1:
+                split_pos = buffer.rfind('! ', 0, self._max_chunk_size)
+            if split_pos == -1:
+                split_pos = buffer.rfind('? ', 0, self._max_chunk_size)
+            if split_pos == -1:
+                split_pos = buffer.rfind(', ', 0, self._max_chunk_size)
+            if split_pos == -1:
+                split_pos = buffer.rfind('; ', 0, self._max_chunk_size)
             if split_pos == -1:
                 split_pos = buffer.rfind(' ', 0, self._max_chunk_size)
             if split_pos == -1:

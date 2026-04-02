@@ -291,6 +291,8 @@ export default function AIAssistantPanel({
             agentId: (agent as any).agent_id as string || agentId || 'davinci',
             agentName: (agent as any).agent_name as string || 'DAVINCIAI',
             language: (agent as any).language_primary as string || 'de',
+            voiceId: ((agent as any).voice_id || (agent as any).cartesia_voice_id || '') as string,
+            pronunciationDictId: ((agent as any).pronunciation_dict_id || (agent as any).cartesia_pronunciation_dict_id || '') as string,
         };
     }, [agentData, fallbackAgent, agentId]);
 
@@ -577,7 +579,9 @@ export default function AIAssistantPanel({
                     user_id: uid,
                     stt_mode: 'audio',
                     tts_mode: 'audio',
-                    language: config.language
+                    language: config.language,
+                    ...(config.voiceId ? { voice_id: config.voiceId } : {}),
+                    ...(config.pronunciationDictId ? { pronunciation_dict_id: config.pronunciationDictId } : {})
                 }
             };
             ws.send(JSON.stringify(sessionConfig));

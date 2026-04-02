@@ -487,20 +487,60 @@ async def websocket_stream(
                     # Audio callback to queue audio for sender
                     def audio_callback(audio_bytes: bytes, sample_rate: int, metadata: Dict[str, Any]):
                         session.audio_queue.put_nowait((audio_bytes, metadata))
-                    
-                    # Renew Context ID for every single synthesis request since Cartesia closes them instantly upon completion
-                    turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
-                    
-                    # Run synthesis
-                    stats = await manager.stream_text_to_audio(
-                        text,
-                        audio_callback,
-                        context_id=turn_ctx_id,
-                        voice_id=voice_id,
-                        model_id=model_id,
-                        language=language,
-                        pronunciation_dict_id=pron_dict,
+
+                    async def run_synthesis_attempt(
+                        *,
+                        attempt_label: str,
+                        voice_override: Optional[str],
+                        pronunciation_override: Optional[str],
+                    ) -> Dict[str, Any]:
+                        turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
+                        logger.info(
+                            f"[{session_id}] 🔊 TTS attempt {attempt_label} "
+                            f"(voice={voice_override}, language={language}, pron_dict={pronunciation_override or '-'})"
+                        )
+                        return await manager.stream_text_to_audio(
+                            text,
+                            audio_callback,
+                            context_id=turn_ctx_id,
+                            voice_id=voice_override,
+                            model_id=model_id,
+                            language=language,
+                            pronunciation_dict_id=pronunciation_override,
+                        )
+
+                    # First attempt with requested config
+                    stats = await run_synthesis_attempt(
+                        attempt_label="primary",
+                        voice_override=voice_id,
+                        pronunciation_override=pron_dict,
                     )
+
+                    # Silent zero-chunk completion is a real failure mode with Cartesia.
+                    # Retry once with a safer payload before giving up.
+                    if stats.get("chunks_received", 0) == 0 or stats.get("total_audio_bytes", 0) == 0:
+                        logger.warning(
+                            f"[{session_id}] ⚠️ Zero-chunk synth result "
+                            f"(voice={voice_id}, language={language}, pron_dict={pron_dict or '-'})"
+                        )
+
+                        safe_voice = config.voice_id if voice_id != config.voice_id else voice_id
+                        safe_pron_dict = None
+
+                        retry_stats = await run_synthesis_attempt(
+                            attempt_label="retry_safe",
+                            voice_override=safe_voice,
+                            pronunciation_override=safe_pron_dict,
+                        )
+
+                        if retry_stats.get("chunks_received", 0) > 0 and retry_stats.get("total_audio_bytes", 0) > 0:
+                            logger.info(f"[{session_id}] ✅ Retry recovered zero-chunk synth failure")
+                            stats = retry_stats
+                        else:
+                            logger.error(
+                                f"[{session_id}] ❌ Retry also produced zero chunks "
+                                f"(safe_voice={safe_voice}, language={language})"
+                            )
                     
                     session.is_streaming = False
                     
