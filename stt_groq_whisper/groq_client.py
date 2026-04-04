@@ -255,10 +255,11 @@ class GroqWhisperClient:
             "temperature": str(self.config.temperature),
         }
         
-        # Add optional parameters
-        if language or self.config.language:
-            data["language"] = language or self.config.language
-        
+        # Add explicit language hint only when the session is intentionally locked.
+        language_hint = self.config.request_language_hint(language)
+        if language_hint:
+            data["language"] = language_hint
+
         prompt_text = self.config.build_transcription_prompt(prompt, language=language)
         if prompt_text:
             data["prompt"] = prompt_text
@@ -296,7 +297,7 @@ class GroqWhisperClient:
                     # Accept English transcriptions when Groq detects English speech.
                     # The orchestrator handles multilingual sessions (SUPPORTED_LANGUAGES=en,de).
                     # Forcing German re-transcription mangles legitimate English input.
-                    expected_language = language or self.config.language
+                    expected_language = language_hint
                     if self.config.is_german_language(expected_language):
                         result_language = (result.language or "").strip().lower()
                         if result_language.startswith("en"):

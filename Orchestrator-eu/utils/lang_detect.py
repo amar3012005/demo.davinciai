@@ -112,7 +112,12 @@ def detect_language_from_metadata(metadata: dict) -> Optional[str]:
         return None
     
     # Check common metadata fields
-    lang = metadata.get('language') or metadata.get('lang') or metadata.get('detected_language')
+    lang = (
+        metadata.get('language_code')
+        or metadata.get('language')
+        or metadata.get('lang')
+        or metadata.get('detected_language')
+    )
     
     if lang:
         # Normalize language code
@@ -123,7 +128,6 @@ def detect_language_from_metadata(metadata: dict) -> Optional[str]:
             return 'en'
     
     return None
-
 
 
 

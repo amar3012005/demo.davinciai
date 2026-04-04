@@ -58,7 +58,7 @@ class GroqWhisperConfig:
     continuation_min_duration_ms: int = int(os.getenv("CONTINUATION_MIN_DURATION_MS", "1200"))
     
     # Groq API parameters
-    language: Optional[str] = os.getenv("GROQ_LANGUAGE", "de")  # ISO-639-1 for faster processing
+    language: Optional[str] = os.getenv("GROQ_LANGUAGE", "de")  # auto, en, de
     response_format: str = os.getenv("GROQ_RESPONSE_FORMAT", "verbose_json")  # json, verbose_json, text
     temperature: float = float(os.getenv("GROQ_TEMPERATURE", "0.0"))
     include_word_timestamps: bool = os.getenv("GROQ_WORD_TIMESTAMPS", "true").lower() == "true"
@@ -112,12 +112,22 @@ class GroqWhisperConfig:
             return "en"
         return "de"
 
+    def request_language_hint(self, preferred: Optional[str] = None) -> Optional[str]:
+        """
+        Return an explicit Groq language hint only when configured intentionally.
+        """
+        raw = (preferred if preferred is not None else self.language) or ""
+        lang = raw.strip().lower()
+        if not lang or lang in {"auto", "detect", "multilingual"}:
+            return None
+        return self.resolve_language(lang)
+
     def build_transcription_prompt(self, extra_prompt: Optional[str] = None, language: Optional[str] = None) -> Optional[str]:
         """
         Build a strict no-translation transcription prompt.
         This reduces Whisper's tendency to normalize non-English speech into English.
         """
-        lang = self.resolve_language(language)
+        lang = self.request_language_hint(language)
         parts = []
         if self.base_prompt:
             parts.append(self.base_prompt.strip())
@@ -139,8 +149,10 @@ class GroqWhisperConfig:
             )
         else:
             parts.append(
-                "Transcribe the spoken audio verbatim in the original spoken language. "
+                "Transcribe the spoken audio exactly as spoken. "
+                "If the speaker switches languages, preserve each spoken portion in that same language. "
                 "Do not translate, summarize, or paraphrase. "
+                "Preserve names, brands, and product names as spoken. "
                 "If audio is unclear, transcribe only clearly spoken words and omit uncertain fragments rather than inventing them."
             )
         if extra_prompt:
@@ -178,7 +190,8 @@ class GroqWhisperConfig:
         masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
         logger.info(f"🔑 Groq API key configured: {masked_key}")
         
-        self.language = self.resolve_language(self.language)
+        if self.language:
+            self.language = self.language.strip().lower()
 
         if self.model not in ["whisper-large-v3-turbo", "whisper-large-v3"]:
             logger.warning(f"Unknown model '{self.model}', using 'whisper-large-v3-turbo'")

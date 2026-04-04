@@ -39,7 +39,7 @@ from core.pipeline import ProcessingPipeline
 from core.history_manager import HistoryManager
 from core.session_summary_manager import SessionSummaryManager
 from dialogue.manager import MultiLangDialogueManager, DialogueType
-from utils.lang_detect import detect_language
+from utils.lang_detect import detect_language_from_metadata
 from fsm.appointment_fsm import SimpleAppointmentFSM, DEFAULT_V1_SCHEMA
 from config_loader import OrchestratorConfig
 
@@ -1553,23 +1553,10 @@ class OrchestratorWSHandler:
         session.last_activity = time.time()
         session.timeout_count = 0
         
-        # Detect language logic
-        # PRIORITY 1: STT Metadata (e.g. Sarvam 'language_code') - Used for Translation Mode
-        # This handles cases where audio is Hindi, but text is translated English.
-        # We need to know it was Hindi to respond in Hindi.
-        detected_lang = data.get("language_code")
-        
-        # PRIORITY 2: Direct language field
-        if not detected_lang:
-            detected_lang = data.get("language")
-        
-        # PRIORITY 3: Text-based detection (Fallback)
-        if not detected_lang:
-            # Only detect if enough text, else default to session/config default
-            if len(text) > 5:
-                detected_lang = detect_language(text, self.config.languages.supported)
+        # Trust STT metadata on the live path to avoid extra orchestrator latency.
+        detected_lang = detect_language_from_metadata(data)
 
-        # If still nothing, fallback to session default or configured default language
+        # If STT omitted language entirely, keep the existing session/default language.
         if not detected_lang:
             detected_lang = session.current_language or self.config.languages.default
             

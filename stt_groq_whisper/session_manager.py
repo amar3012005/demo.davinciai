@@ -133,6 +133,10 @@ class GroqWhisperSession:
         """Use a normalized per-session language, defaulting to German."""
         return self.config.resolve_language(self.config.language)
 
+    def _request_language_hint(self) -> Optional[str]:
+        """Only send a Groq language hint when the session is explicitly locked."""
+        return self.config.request_language_hint(self.config.language)
+
     def _is_likely_sentence_continuation(self, text: str) -> bool:
         sample = (text or "").strip().lower()
         if not sample:
@@ -375,7 +379,7 @@ class GroqWhisperSession:
             result = await self.groq_client.transcribe(
                 audio_bytes=audio_bytes,
                 prompt=context_prompt,
-                language=self._resolved_language()
+                language=self._request_language_hint()
             )
             
             if result and not result.is_empty:
@@ -408,6 +412,7 @@ class GroqWhisperSession:
                 await self._emit_transcript(
                     text=text,
                     is_final=False,
+                    detected_language=result.language,
                     words=result.words,
                     latency_ms=self.groq_client.last_latency_ms,
                     avg_logprob=result.avg_logprob,
@@ -427,7 +432,7 @@ class GroqWhisperSession:
     
     def _build_context_prompt(self) -> Optional[str]:
         """Build context prompt from recent transcriptions"""
-        if self.config.is_german_language(self._resolved_language()):
+        if self.config.is_german_language(self._request_language_hint()):
             # Context chaining can reinforce an accidental English normalization across chunks.
             # For German-first sessions, prefer clean native-language transcription over chain continuity.
             return None
@@ -511,7 +516,7 @@ class GroqWhisperSession:
             
             # In full mode, let the Groq client build the strict language-aware prompt.
             # Passing a prebuilt prompt here would get wrapped again and can exceed Groq's prompt limit.
-            forced_language = self._resolved_language()
+            forced_language = self._request_language_hint()
 
             # Transcribe full audio buffer
             result = await self.groq_client.transcribe(
@@ -541,6 +546,7 @@ class GroqWhisperSession:
                         await self._emit_transcript(
                             text=final_text,
                             is_final=True,
+                            detected_language=result.language,
                             words=result.words,
                             latency_ms=self.groq_client.last_latency_ms,
                             avg_logprob=result.avg_logprob,
@@ -571,6 +577,7 @@ class GroqWhisperSession:
                 await self._emit_transcript(
                     text=final_text,
                     is_final=True,
+                    detected_language=getattr(self, "last_detected_language", None),
                     latency_ms=self.groq_client.last_latency_ms if self.groq_client else None,
                     avg_logprob=getattr(self, 'last_avg_logprob', None),
                     no_speech_prob=getattr(self, 'last_no_speech_prob', None),
@@ -673,7 +680,7 @@ class GroqWhisperSession:
             logger.warning(f"🚫 [{self.session_id}] Prompt hallucination detected: '{final_text[:80]}...'")
             return True
 
-        if self.config.is_german_language(self._resolved_language()):
+        if self.config.is_german_language(self._request_language_hint()):
             result_language = (result.language or "").strip().lower()
             if result_language.startswith("en"):
                 logger.warning(f"🚫 [{self.session_id}] Filtering English result during German-forced session: '{final_text[:80]}...'")
@@ -725,6 +732,7 @@ class GroqWhisperSession:
         self,
         text: str,
         is_final: bool = False,
+        detected_language: Optional[str] = None,
         words: Optional[list] = None,
         latency_ms: Optional[float] = None,
         avg_logprob: Optional[float] = None,
@@ -736,6 +744,8 @@ class GroqWhisperSession:
     ):
         """Emit transcript to client callback and orchestrator"""
         try:
+            emitted_language = self.config.request_language_hint(detected_language) or self._resolved_language()
+            self.last_detected_language = emitted_language
             message = {
                 "type": "data",
                 "data": {
@@ -744,8 +754,8 @@ class GroqWhisperSession:
                     "request_id": f"{self.session_id}_{int(time.time() * 1000)}",
                     "timestamp": time.time(),
                     "source": "groq_whisper",
-                    "language": self._resolved_language(),
-                    "language_code": self._resolved_language(),
+                    "language": emitted_language,
+                    "language_code": emitted_language,
                 }
             }
             
@@ -779,8 +789,8 @@ class GroqWhisperSession:
                 await self.orchestrator_ws.send_transcript(
                     text=text,
                     is_final=is_final,
-                    language=self._resolved_language(),
-                    language_code=self._resolved_language(),
+                    language=emitted_language,
+                    language_code=emitted_language,
                     words=words,
                     latency_ms=latency_ms,
                     avg_logprob=avg_logprob,
