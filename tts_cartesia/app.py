@@ -75,6 +75,8 @@ class SessionState:
         self.current_voice: Optional[str] = None
         self.current_model: Optional[str] = None
         self.current_language: Optional[str] = None
+        self.current_dict: Optional[str] = None
+        self.stream_context_id: Optional[str] = None
 
 active_sessions: Dict[str, SessionState] = {}
 
@@ -567,6 +569,7 @@ async def websocket_stream(
                 elif msg_type == "stream_chunk":
                     # Streaming text chunk
                     text_chunk = message.get("text", "")
+                    incoming_context_id = message.get("context_id")
                     
                     # Capture config from chunk if provided
                     if message.get("voice"):
@@ -577,6 +580,8 @@ async def websocket_stream(
                         session.current_language = message.get("language")
                     if message.get("pronunciation_dict_id"):
                         session.current_dict = message.get("pronunciation_dict_id")
+                    if incoming_context_id:
+                        session.stream_context_id = incoming_context_id
                     
                     if text_chunk:
                         # Initialize streaming turn if not already active
@@ -598,7 +603,8 @@ async def websocket_stream(
                                     def stream_audio_callback(audio_bytes: bytes, sample_rate: int, metadata: Dict[str, Any]):
                                         session.audio_queue.put_nowait((audio_bytes, metadata))
                                     
-                                    turn_ctx_id = f"{session.context_id}-{uuid.uuid4().hex[:6]}"
+                                    turn_ctx_id = session.stream_context_id or f"{session.context_id}-{uuid.uuid4().hex[:6]}"
+                                    session.stream_context_id = turn_ctx_id
                                     
                                     stats = await manager.stream_text_to_audio(
                                         text_iter(),
@@ -636,6 +642,7 @@ async def websocket_stream(
                                     session.is_streaming = False
                                     session.text_queue = None
                                     session.stream_task = None
+                                    session.stream_context_id = None
 
                             session.stream_task = asyncio.create_task(run_stream())
                         
@@ -650,6 +657,27 @@ async def websocket_stream(
                         await session.text_queue.put(None)
                     else:
                         await websocket.send_json({"type": "complete", "chunks": 0})
+
+                elif msg_type == "clear":
+                    logger.info(f"[{session_id}] Clear received for active stream")
+                    if session.text_queue:
+                        try:
+                            while not session.text_queue.empty():
+                                session.text_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        await session.text_queue.put(None)
+                    if session.stream_task and not session.stream_task.done():
+                        session.stream_task.cancel()
+                        try:
+                            await session.stream_task
+                        except asyncio.CancelledError:
+                            pass
+                    session.is_streaming = False
+                    session.text_queue = None
+                    session.stream_task = None
+                    session.stream_context_id = None
+                    await websocket.send_json({"type": "cleared"})
                 
                 elif msg_type == "ping":
                     await websocket.send_json({"type": "pong"})
