@@ -32,76 +32,6 @@ services:
       - coolify.service.subName=redis
 
   # ═══════════════════════════════════════════════════════════
-  # RAG Service (Internal port 4001)
-  # ═══════════════════════════════════════════════════════════
-  rag-eu:
-    build:
-      context: ./rag-eu
-      dockerfile: Dockerfile
-    command: >
-      sh -c 'export LLM_API_KEY="$${LLM_API_KEY:-$$GROQ_API_KEY}"; export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn daytona_agent.services.rag.app:app --host 0.0.0.0 --port 4001'
-    volumes:
-      - rag_eu_index:/app/index
-    environment:
-      # Internal service URLs (hardcoded — never change per-env)
-      REDIS_URL: redis://redis-eu:6379/0
-      COOLIFY_CONTAINER_NAME: rag-eu
-
-      # LLM config (from Coolify env / .env.eu)
-      LLM_PROVIDER: "${LLM_PROVIDER}"
-      LLM_MODEL: "${LLM_MODEL}"
-      ANALYTICS_MODEL: "${ANALYTICS_MODEL}"
-
-      # Organization
-      ORGANIZATION_NAME: "${ORGANIZATION_NAME}"
-      ORGANIZATION_LOCATION: "${ORGANIZATION_LOCATION}"
-      TENANT_ID: "${TENANT_ID}"
-      LOG_LEVEL: "${LOG_LEVEL}"
-
-      # Qdrant
-      QDRANT_URL: "${QDRANT_URL}"
-      QDRANT_API_KEY: "${QDRANT_API_KEY}"
-      QDRANT_COLLECTION: "${QDRANT_COLLECTION}"
-
-      # Feature flags (hardcoded for production stability)
-      USE_NEW_DETECTIVE: "false"
-      USE_MISSION_BRAIN: "false"
-      USE_LIVE_GRAPH: "false"
-      USE_HIVE_INTERFACE: "false"
-      DAYTONA_RAG_ENABLE_CACHE: "false"
-      DAYTONA_RAG_CACHE_TTL: "0"
-      ENABLE_HIVE_MIND: "${ENABLE_HIVE_MIND}"
-      ENABLE_LOCAL_RETRIEVAL: "${ENABLE_LOCAL_RETRIEVAL}"
-      ENABLE_INGESTION_SERVICE: "${ENABLE_INGESTION_SERVICE}"
-      USE_ULTIMATE_TARA: "${USE_ULTIMATE_TARA}"
-      HIVEMIND_IN_VISUAL_COPILOT: "${HIVEMIND_IN_VISUAL_COPILOT}"
-      ENABLE_STAGE_AWARE_RETRIEVAL: "true"
-      ENABLE_MICRO_REASONING: "true"
-      POLICY_MODE_DEFAULT: "sales"
-      RAG_FAST_LOCAL_MODE: "true"
-      DAVINCIAI_BACKEND_URL: "${DAVINCIAI_BACKEND_URL}"
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    extra_hosts:
-      - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
-      - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"
-    networks:
-      eu-stack: null
-    restart: unless-stopped
-    depends_on:
-      redis-eu:
-        condition: service_healthy
-    labels:
-      - coolify.managed=true
-      - coolify.type=service
-      - coolify.name=rag-eu
-      - coolify.service.subType=application
-      - coolify.service.subName=rag
-    env_file:
-      - .env.eu
-
-  # ═══════════════════════════════════════════════════════════
   # STT Service (Internal port 4002) — Groq Whisper
   # ═══════════════════════════════════════════════════════════
   stt-eu:
@@ -202,51 +132,6 @@ services:
       - .env.eu
 
   # ═══════════════════════════════════════════════════════════
-  # Visual Copilot Service (Internal port 4005)
-  # ═══════════════════════════════════════════════════════════
-  visual-copilot-eu:
-    build:
-      context: ./rag-visual-copilot
-      dockerfile: Dockerfile
-    command: >
-      sh -c 'export GROQ_API_KEY="$${GROQ_API_KEY:-$$LLM_API_KEY}"; python -m uvicorn app:app --host 0.0.0.0 --port 4005'
-    environment:
-      # Internal service config (hardcoded)
-      REDIS_URL: redis://redis-eu:6379/0
-      PORT: "4005"
-      COOLIFY_CONTAINER_NAME: visual-copilot-eu
-
-      # LLM config
-      LLM_MODEL: "${LLM_MODEL}"
-      ANALYTICS_MODEL: "${ANALYTICS_MODEL}"
-      MIND_READER_MODEL: "${MIND_READER_MODEL}"
-
-      # Qdrant
-      QDRANT_URL: "${QDRANT_URL}"
-      QDRANT_API_KEY: "${QDRANT_API_KEY}"
-      QDRANT_COLLECTION: "${QDRANT_COLLECTION}"
-
-      LOG_LEVEL: "${LOG_LEVEL}"
-      TENANT_ID: "${TENANT_ID}"
-    restart: unless-stopped
-    depends_on:
-      redis-eu:
-        condition: service_healthy
-    extra_hosts:
-      - "24826665-41d6-4ea6-b13f-fc42438c4c55.eu-central-1-0.aws.cloud.qdrant.io:3.126.6.235"
-      - "878ba705-a90e-44d7-96fc-782399dd97ae.europe-west3-0.gcp.cloud.qdrant.io:34.107.67.89"
-    networks:
-      eu-stack: null
-    labels:
-      - coolify.managed=true
-      - coolify.type=service
-      - coolify.name=visual-copilot-eu
-      - coolify.service.subType=application
-      - coolify.service.subName=visual-copilot
-    env_file:
-      - .env.eu
-
-  # ═══════════════════════════════════════════════════════════
   # Orchestrator (Internal 4004 → External 8030 with SSL for WSS)
   # ═══════════════════════════════════════════════════════════
   orchestrator-eu:
@@ -266,7 +151,6 @@ services:
       RAG_STREAM_ENDPOINT: /api/tara/stream
       STT_SERVICE_URL: http://stt-eu:4002
       TTS_SERVICE_URL: http://tts-eu:4003
-      VISUAL_COPILOT_SERVICE_URL: http://visual-copilot-eu:4005
 
       # Production URLs (hardcoded for this deployment)
       PUBLIC_URL: "https://demo.davinciai.eu:8030"
@@ -324,8 +208,6 @@ services:
         condition: service_healthy
       tts-eu:
         condition: service_started
-      visual-copilot-eu:
-        condition: service_started
     labels:
       - coolify.managed=true
       - coolify.type=service
@@ -345,8 +227,6 @@ services:
 volumes:
   redis_eu_data:
     name: redis_eu_data
-  rag_eu_index:
-    name: rag_eu_index
 
 networks:
   coolify:
