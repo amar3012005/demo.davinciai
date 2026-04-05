@@ -37,6 +37,7 @@ class CartesiaConfig:
     # Voice settings
     language: str = field(default_factory=lambda: os.getenv("CARTESIA_LANGUAGE", "").strip() or "de")
     speed: float = field(default_factory=lambda: float(os.getenv("CARTESIA_SPEED", "").strip() or "0.95"))
+    max_buffer_delay_ms: int = field(default_factory=lambda: int(os.getenv("CARTESIA_MAX_BUFFER_DELAY_MS", "0").strip() or "0"))
 
     # Pronunciation dictionary for tenant-specific brand names
     pronunciation_dict_id: Optional[str] = field(default_factory=lambda: os.getenv("CARTESIA_PRONUNCIATION_DICT_ID", "").strip() or None)
@@ -81,6 +82,12 @@ class CartesiaConfig:
             logger.warning(f"Speed {self.speed} out of range [0.5-2.0], clamping to 0.9")
             self.speed = 0.9
 
+        # Validate Cartesia buffering. When the orchestrator already chunks on
+        # clause boundaries, keep this at 0 to avoid re-buffering latency.
+        if not (0 <= self.max_buffer_delay_ms <= 5000):
+            logger.warning(f"max_buffer_delay_ms {self.max_buffer_delay_ms} out of range [0-5000], clamping to 0")
+            self.max_buffer_delay_ms = 0
+
         # Validate output format
         valid_formats = ["pcm_s16le", "pcm_f32le", "pcm_mulaw", "pcm_alaw"]
 
@@ -101,6 +108,7 @@ class CartesiaConfig:
         logger.info(f"🔊 Voice ID: {self.voice_id} (German-native)")
         logger.info(f"🌐 Language: {self.language} (for multilingual models)")
         logger.info(f"⚡ Speed: {self.speed} (0.95 optimized for German clarity)")
+        logger.info(f"⏱️ Max buffer delay: {self.max_buffer_delay_ms}ms")
         logger.info(f"📊 Sample rate: {self.sample_rate}Hz (16kHz real-time optimized)")
         logger.info(f"🔄 Encoding: {self.output_format} (16-bit for browser compatibility)")
         logger.info(f"🔄 Connection pool size: {self.pool_size}")

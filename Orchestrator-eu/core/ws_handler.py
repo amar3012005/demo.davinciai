@@ -1520,6 +1520,43 @@ class OrchestratorWSHandler:
 
         return False
 
+    @staticmethod
+    def _should_flush_tts_chunk(buffer_text: str, latest_token: str, is_final_chunk: bool = False) -> bool:
+        """Flush on natural clause boundaries so Cartesia receives speech-shaped chunks.
+
+        We keep latency low by flushing once we hit a sentence/clause boundary or
+        once the buffered text is long enough to be spoken naturally.
+        """
+        if not buffer_text:
+            return False
+
+        stripped = buffer_text.rstrip()
+        if is_final_chunk:
+            return True
+
+        # Sentence boundary: safe to hand off to Cartesia immediately.
+        if re.search(r'[.!?]["\')\]]*$', stripped):
+            return True
+
+        # Clause boundary: let Cartesia articulate after a reasonable phrase.
+        if re.search(r'[,;:]["\')\]]*$', stripped) and len(stripped) >= 28:
+            return True
+
+        # Newline boundaries are always safe.
+        if "\n" in buffer_text:
+            return True
+
+        # Fallback: don't let a long run-on fragment sit forever.
+        if len(stripped) >= 72:
+            return True
+
+        # If the latest token started with whitespace and the buffer is already
+        # long enough to sound natural, flush it rather than waiting for more.
+        if len(stripped) >= 36 and latest_token and latest_token[:1].isspace():
+            return True
+
+        return False
+
     async def _handle_stt_result(self, session: OrchestratorSession, data: Dict[str, Any]):
         """Handle STT transcription result"""
         # Check if session is closed
@@ -2757,6 +2794,7 @@ class OrchestratorWSHandler:
             _context_data: Dict[str, Any] = dict(session.current_policy_context) if session.current_policy_context else {}
             if not _context_data.get("policy_mode"):
                 _context_data["policy_mode"] = "sales"
+            tts_live_buffer = ""
             async for token_data in self.pipeline.process_query(
                 query=user_text,
                 session_id=session.session_id,
@@ -2821,15 +2859,21 @@ class OrchestratorWSHandler:
                         session.filler_task.cancel()
                         logger.debug(f"[{session.session_id}] ⏸️ Cancelled filler task on first text token")
                 if not batch_tts_mode:
-                    logger.debug(f"[{session.session_id}] 🎵 Sending to TTS: '{token}' (Voice: {session.voice_id_override})")
-                    await session.tts_client.stream_chunk(
-                        token,
-                        output_language,
-                        emotion="helpful",
-                        voice_id=current_voice_id,
-                        pronunciation_dict_id=current_pronunciation_dict_id,
-                        tenant_id=current_tenant_id,
-                    )
+                    tts_live_buffer += token
+                    if self._should_flush_tts_chunk(tts_live_buffer, token):
+                        logger.debug(
+                            f"[{session.session_id}] 🎵 Sending clause to TTS: '{tts_live_buffer[:80]}' "
+                            f"(Voice: {session.voice_id_override})"
+                        )
+                        await session.tts_client.stream_chunk(
+                            tts_live_buffer,
+                            output_language,
+                            emotion="helpful",
+                            voice_id=current_voice_id,
+                            pronunciation_dict_id=current_pronunciation_dict_id,
+                            tenant_id=current_tenant_id,
+                        )
+                        tts_live_buffer = ""
 
             # Cancel latency fillers since RAG response is complete and TTS is about to start
             if session.filler_task and not session.filler_task.done():
@@ -2905,6 +2949,20 @@ class OrchestratorWSHandler:
 
             # Signal end of text stream to TTS (triggers EOS to ElevenLabs)
             if not session.is_closed:
+                if not batch_tts_mode and tts_live_buffer:
+                    logger.debug(
+                        f"[{session.session_id}] 🎵 Flushing final clause to TTS: '{tts_live_buffer[:80]}' "
+                        f"(Voice: {session.voice_id_override})"
+                    )
+                    await session.tts_client.stream_chunk(
+                        tts_live_buffer,
+                        output_language,
+                        emotion="helpful",
+                        voice_id=current_voice_id,
+                        pronunciation_dict_id=current_pronunciation_dict_id,
+                        tenant_id=current_tenant_id,
+                    )
+                    tts_live_buffer = ""
                 logger.info(f"[{session.session_id}] 🔚 Sending stream_end to TTS (response: {len(response_text)} chars | Cumulative TTS chars: {session.tts_streamed_chars})")
                 await session.tts_client.stream_end()
             else:

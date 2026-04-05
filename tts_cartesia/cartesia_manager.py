@@ -427,6 +427,9 @@ class CartesiaManager:
                         if hasattr(self.config, 'speed') and self.config.speed:
                             message["speed"] = self.config.speed
 
+                        if hasattr(self.config, 'max_buffer_delay_ms') and self.config.max_buffer_delay_ms is not None:
+                            message["max_buffer_delay_ms"] = int(self.config.max_buffer_delay_ms)
+
                         # Add pronunciation dictionary for tenant-specific brand names
                         dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
                         if dict_id and dict_id.strip().strip('"').strip("'"):
@@ -461,6 +464,8 @@ class CartesiaManager:
                             close_message["language"] = raw_lang.split("-")[0].split("_")[0]
                         if hasattr(self.config, 'speed') and self.config.speed:
                             close_message["speed"] = self.config.speed
+                        if hasattr(self.config, 'max_buffer_delay_ms') and self.config.max_buffer_delay_ms is not None:
+                            close_message["max_buffer_delay_ms"] = int(self.config.max_buffer_delay_ms)
                         dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
                         if dict_id and dict_id.strip().strip('"').strip("'"):
                             clean_dict_id = dict_id.strip().strip('"').strip("'")
