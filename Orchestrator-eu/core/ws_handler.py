@@ -1495,7 +1495,9 @@ class OrchestratorWSHandler:
             return True
 
         # Only apply temporal rejection if we have timing data
-        if speech_ms is not None and speech_ms < 450 and len(stripped) < 8:
+        # Keep genuinely short but meaningful turns like "Revenue", "Help", or "Stop".
+        # Only reject ultra-short bursts on timing alone; confidence metrics still apply below.
+        if speech_ms is not None and speech_ms < 450 and len(stripped) < 4:
             return True
 
         # Only apply confidence-based rejection if metrics are available

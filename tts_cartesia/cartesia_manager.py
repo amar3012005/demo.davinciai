@@ -370,6 +370,7 @@ class CartesiaManager:
                 """Send text chunks to Cartesia via multiplexed connection"""
                 nonlocal stream_start_time
                 try:
+                    sent_chunks = 0
                     async for text_chunk in text_iter:
                         if not text_chunk or not text_chunk.strip():
                             continue
@@ -441,10 +442,33 @@ class CartesiaManager:
                             stream_start_time = time.time()
                         
                         await conn.send(message)
+                        sent_chunks += 1
 
-                    # Note: Do NOT send an empty close message — it causes Cartesia to
-                    # return an error (missing voice) that races ahead of audio chunks.
-                    # The last real chunk with continue=False already signals end of context.
+                    # Multi-chunk streams must be explicitly closed so Cartesia
+                    # does not keep the context half-open for a later turn.
+                    # A single chunk already opens and closes the context.
+                    if sent_chunks > 1:
+                        close_message = {
+                            "context_id": ctx_id,
+                            "model_id": target_model,
+                            "transcript": "",
+                            "voice": (voice_id and len(voice_id.strip()) > 0) and {"mode": "id", "id": voice_id} or self.config.get_voice_config(),
+                            "output_format": self.config.get_output_format_config(),
+                            "continue": False,
+                        }
+                        raw_lang = language or self.config.language
+                        if raw_lang:
+                            close_message["language"] = raw_lang.split("-")[0].split("_")[0]
+                        if hasattr(self.config, 'speed') and self.config.speed:
+                            close_message["speed"] = self.config.speed
+                        dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
+                        if dict_id and dict_id.strip().strip('"').strip("'"):
+                            clean_dict_id = dict_id.strip().strip('"').strip("'")
+                            if clean_dict_id.startswith("pdict_"):
+                                close_message["pronunciation_dict_id"] = clean_dict_id
+                        logger.debug(f"[{ctx_id[:8]}] Sending explicit stream close for multi-chunk turn")
+                        await conn.send(close_message)
+
                     logger.info(f"[{ctx_id[:8]}] ✅ All text sent, waiting for audio chunks...")
 
                 except Exception as e:
