@@ -4,8 +4,8 @@ Test 2: Continuation Flags in CartesiaManager (RED phase)
 Verifies that stream_text_to_audio() sends the correct `continue` field on
 each outbound Cartesia message:
   - First chunk in a new context  → continue=False
-  - Every subsequent chunk        → continue=True
-  - The empty-string flush message → continue=False (closes the context)
+  - Intermediate chunks            → continue=True
+  - The final real chunk        → continue=False (closes the context)
 
 The Cartesia API uses this flag for prosody continuity across chunks;
 wrong values produce audible glitches or silent failures.
@@ -71,13 +71,13 @@ class TestContinuationFlagLogic:
         )
 
     def test_subsequent_chunk_continue_is_true(self):
-        """After the first message is sent, stream_start_time is set → continue=True."""
+        """An intermediate chunk should continue an existing context."""
         import time
 
         stream_start_time = time.time()  # Set after first send
         continue_flag = stream_start_time is not None
         assert continue_flag is True, (
-            "Subsequent chunks must have continue=True for prosody continuity"
+            "Intermediate chunks must have continue=True for prosody continuity"
         )
 
     def test_continue_flag_type_is_bool(self):
@@ -92,24 +92,26 @@ class TestContinuationFlagLogic:
         assert isinstance(flag, bool)
 
     def test_flag_transitions_in_sequence(self):
-        """Simulate a 3-chunk stream: F, T, T."""
+        """Simulate a 3-chunk stream: F, T, F."""
         import time
 
         stream_start_time = None
         flags = []
 
-        for i in range(3):
-            flags.append(stream_start_time is not None)
+        sent_chunks = 0
+        for is_final in (False, False, True):
+            flags.append(sent_chunks > 0 and not is_final)
             if stream_start_time is None:
                 stream_start_time = time.time()
+            sent_chunks += 1
 
-        assert flags == [False, True, True], f"Expected [False, True, True], got {flags}"
+        assert flags == [False, True, False], f"Expected [False, True, False], got {flags}"
 
     def test_empty_text_chunk_is_skipped_not_sent(self):
         """
         The send_text() coroutine skips chunks where text.strip() is falsy.
         This means an empty string never becomes a Cartesia message.
-        Empty flush is handled separately and should have continue=False.
+        Empty chunks are skipped entirely; the final real chunk closes the context.
         """
         chunks = ["Hallo", "", "   ", "Welt"]
         skipped = [c for c in chunks if not c or not c.strip()]
@@ -226,7 +228,7 @@ class TestContinuationFlagsEndToEnd:
         )
 
     async def test_two_chunk_stream_flags(self, mock_manager):
-        """Two-chunk stream: [continue=False, continue=True]."""
+        """Two-chunk stream: [continue=False, continue=False]."""
         from cartesia_manager import CartesiaConnection, ConnectionState
 
         sent: list[dict] = []
@@ -270,11 +272,10 @@ class TestContinuationFlagsEndToEnd:
                     context_id=ctx_id,
                 )
 
-        assert len(sent) == 3, f"Expected 3 sent messages, got {len(sent)}: {sent}"
+        assert len(sent) == 2, f"Expected 2 sent messages, got {len(sent)}: {sent}"
         assert sent[0].get("continue") is False, "First chunk must have continue=False"
-        assert sent[1].get("continue") is True, "Second chunk must have continue=True"
-        assert sent[2].get("transcript") == "", "Final flush message must close with empty transcript"
-        assert sent[2].get("continue") is False, "Final flush message must have continue=False"
+        assert sent[1].get("continue") is False, "Final chunk must have continue=False"
+        assert sent[1].get("transcript") == "Welt", "Final chunk must carry the real transcript"
 
     async def test_receive_error_propagated_in_stats(self, mock_manager):
         """If Cartesia returns an error message, stats must contain the error key."""

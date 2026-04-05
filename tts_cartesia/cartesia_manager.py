@@ -371,6 +371,54 @@ class CartesiaManager:
                 nonlocal stream_start_time
                 try:
                     sent_chunks = 0
+                    pending_chunk: Optional[str] = None
+
+                    async def send_chunk(clean_text: str, is_final: bool) -> None:
+                        nonlocal stream_start_time, sent_chunks
+                        target_model = model_id or self.config.model
+
+                        # Build base message
+                        message = {
+                            "context_id": ctx_id,
+                            "model_id": target_model,
+                            "transcript": clean_text,
+                            "voice": (voice_id and len(voice_id.strip()) > 0) and {"mode": "id", "id": voice_id} or self.config.get_voice_config(),
+                            "output_format": self.config.get_output_format_config(),
+                            "continue": sent_chunks > 0 and not is_final,
+                        }
+
+                        # CRITICAL: Always send language parameter for correct phonology
+                        # Cartesia Sonic-3 auto-detects but defaults to English without explicit language
+                        raw_lang = language or self.config.language
+                        if raw_lang:
+                            # Normalize language code: "de-DE" → "de", "en_US" → "en"
+                            message["language"] = raw_lang.split("-")[0].split("_")[0]
+                            logger.debug(f"[{ctx_id[:8]}] Language: {message['language']}")
+
+                        # Add speed control (0.9 recommended for German compound words)
+                        if hasattr(self.config, 'speed') and self.config.speed:
+                            message["speed"] = self.config.speed
+
+                        if hasattr(self.config, 'max_buffer_delay_ms') and self.config.max_buffer_delay_ms is not None:
+                            message["max_buffer_delay_ms"] = int(self.config.max_buffer_delay_ms)
+
+                        # Add pronunciation dictionary for tenant-specific brand names
+                        dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
+                        if dict_id and dict_id.strip().strip('"').strip("'"):
+                            clean_dict_id = dict_id.strip().strip('"').strip("'")
+                            if clean_dict_id.startswith("pdict_"):
+                                message["pronunciation_dict_id"] = clean_dict_id
+                                logger.debug(f"[{ctx_id[:8]}] Pronunciation dict: {clean_dict_id}")
+                            else:
+                                logger.warning(f"[{ctx_id[:8]}] Ignoring invalid pronunciation_dict_id: '{dict_id}'")
+
+                        if stream_start_time is None:
+                            logger.info(f"[{ctx_id[:8]}] Sending first chunk: {clean_text[:30]}...")
+                            stream_start_time = time.time()
+
+                        await conn.send(message)
+                        sent_chunks += 1
+
                     async for text_chunk in text_iter:
                         if not text_chunk or not text_chunk.strip():
                             continue
@@ -403,76 +451,12 @@ class CartesiaManager:
                             logger.debug(f"[{ctx_id[:8]}] Skipping chunk with no speakable text")
                             continue
 
-                        target_model = model_id or self.config.model
+                        if pending_chunk is not None:
+                            await send_chunk(pending_chunk, is_final=False)
 
-                        # Build base message
-                        message = {
-                            "context_id": ctx_id,
-                            "model_id": target_model,
-                            "transcript": clean_text,
-                            "voice": (voice_id and len(voice_id.strip()) > 0) and {"mode": "id", "id": voice_id} or self.config.get_voice_config(),
-                            "output_format": self.config.get_output_format_config(),
-                            "continue": stream_start_time is not None,
-                        }
-
-                        # CRITICAL: Always send language parameter for correct phonology
-                        # Cartesia Sonic-3 auto-detects but defaults to English without explicit language
-                        raw_lang = language or self.config.language
-                        if raw_lang:
-                            # Normalize language code: "de-DE" → "de", "en_US" → "en"
-                            message["language"] = raw_lang.split("-")[0].split("_")[0]
-                            logger.debug(f"[{ctx_id[:8]}] Language: {message['language']}")
-
-                        # Add speed control (0.9 recommended for German compound words)
-                        if hasattr(self.config, 'speed') and self.config.speed:
-                            message["speed"] = self.config.speed
-
-                        if hasattr(self.config, 'max_buffer_delay_ms') and self.config.max_buffer_delay_ms is not None:
-                            message["max_buffer_delay_ms"] = int(self.config.max_buffer_delay_ms)
-
-                        # Add pronunciation dictionary for tenant-specific brand names
-                        dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
-                        if dict_id and dict_id.strip().strip('"').strip("'"):
-                            clean_dict_id = dict_id.strip().strip('"').strip("'")
-                            if clean_dict_id.startswith("pdict_"):
-                                message["pronunciation_dict_id"] = clean_dict_id
-                                logger.debug(f"[{ctx_id[:8]}] Pronunciation dict: {clean_dict_id}")
-                            else:
-                                logger.warning(f"[{ctx_id[:8]}] Ignoring invalid pronunciation_dict_id: '{dict_id}'")
-                        
-                        if stream_start_time is None:
-                            logger.info(f"[{ctx_id[:8]}] Sending first chunk: {text_chunk[:30]}...")
-                            stream_start_time = time.time()
-                        
-                        await conn.send(message)
-                        sent_chunks += 1
-
-                    # Multi-chunk streams must be explicitly closed so Cartesia
-                    # does not keep the context half-open for a later turn.
-                    # A single chunk already opens and closes the context.
-                    if sent_chunks > 1:
-                        close_message = {
-                            "context_id": ctx_id,
-                            "model_id": target_model,
-                            "transcript": "",
-                            "voice": (voice_id and len(voice_id.strip()) > 0) and {"mode": "id", "id": voice_id} or self.config.get_voice_config(),
-                            "output_format": self.config.get_output_format_config(),
-                            "continue": False,
-                        }
-                        raw_lang = language or self.config.language
-                        if raw_lang:
-                            close_message["language"] = raw_lang.split("-")[0].split("_")[0]
-                        if hasattr(self.config, 'speed') and self.config.speed:
-                            close_message["speed"] = self.config.speed
-                        if hasattr(self.config, 'max_buffer_delay_ms') and self.config.max_buffer_delay_ms is not None:
-                            close_message["max_buffer_delay_ms"] = int(self.config.max_buffer_delay_ms)
-                        dict_id = pronunciation_dict_id or getattr(self.config, 'pronunciation_dict_id', None)
-                        if dict_id and dict_id.strip().strip('"').strip("'"):
-                            clean_dict_id = dict_id.strip().strip('"').strip("'")
-                            if clean_dict_id.startswith("pdict_"):
-                                close_message["pronunciation_dict_id"] = clean_dict_id
-                        logger.debug(f"[{ctx_id[:8]}] Sending explicit stream close for multi-chunk turn")
-                        await conn.send(close_message)
+                        pending_chunk = clean_text
+                    if pending_chunk is not None:
+                        await send_chunk(pending_chunk, is_final=True)
 
                     logger.info(f"[{ctx_id[:8]}] ✅ All text sent, waiting for audio chunks...")
 
