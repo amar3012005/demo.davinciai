@@ -728,41 +728,65 @@ class RAGClient:
                     timeout=aiohttp.ClientTimeout(total=30)
                 ) as resp:
                     if resp.status == 200:
-                        async for line in resp.content:
-                            line_str = line.decode('utf-8').strip()
-                            if line_str:  # Parse NDJSON (not SSE)
+                        buffer = ""
+                        async for chunk in resp.content.iter_any():
+                            if not chunk:
+                                continue
+                            buffer += chunk.decode("utf-8")
+                            while "\n" in buffer:
+                                raw_line, buffer = buffer.split("\n", 1)
+                                line_str = raw_line.rstrip("\r")
+                                if not line_str:
+                                    continue
                                 try:
                                     data = json.loads(line_str)
                                     event_type = str(data.get("type", "")).strip().lower()
                                     token = data.get("text", "")
-                                    if not token:
+                                    if token == "":
                                         token = data.get("content", "")
                                     is_final = bool(data.get("is_final", False))
 
-                                    # HIVEMIND stream_tara emits NDJSON events like:
-                                    # {"type":"text","content":"..."} and {"type":"done", ...}
                                     if event_type == "text":
                                         is_final = False
                                     elif event_type == "done":
                                         is_final = True
-                                    
+
                                     logger.debug(f"RAG streaming received: '{token}' (is_final={is_final})")
-                                    
-                                    # Yield token if it has content, even if it's the final chunk
-                                    # (Conversational fast-paths often send only one chunk marked as final)
-                                    if token:
+
+                                    if token != "":
                                         logger.debug(f"RAG yielding token: '{token}'")
                                         yield token
-                                    
+
                                     if is_final:
-                                        # Yield llm_usage metadata if present in the final chunk
                                         llm_usage = data.get("llm_usage")
                                         if llm_usage:
                                             yield {"__llm_usage__": llm_usage}
-                                        logger.debug(f"RAG streaming marked as final")
+                                        logger.debug("RAG streaming marked as final")
                                 except json.JSONDecodeError as e:
                                     logger.error(f"RAG JSON parse error: {e} for line: {line_str}")
                                     continue
+
+                        trailing = buffer.rstrip("\r")
+                        if trailing:
+                            try:
+                                data = json.loads(trailing)
+                                event_type = str(data.get("type", "")).strip().lower()
+                                token = data.get("text", "")
+                                if token == "":
+                                    token = data.get("content", "")
+                                is_final = bool(data.get("is_final", False))
+                                if event_type == "text":
+                                    is_final = False
+                                elif event_type == "done":
+                                    is_final = True
+                                if token != "":
+                                    yield token
+                                if is_final:
+                                    llm_usage = data.get("llm_usage")
+                                    if llm_usage:
+                                        yield {"__llm_usage__": llm_usage}
+                            except json.JSONDecodeError as e:
+                                logger.error(f"RAG trailing JSON parse error: {e} for line: {trailing}")
                     else:
                         error_text = await resp.text()
                         logger.error(

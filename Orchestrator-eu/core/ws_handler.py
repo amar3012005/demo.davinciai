@@ -2800,12 +2800,8 @@ class OrchestratorWSHandler:
 
                 logger.debug(f"[{session.session_id}] 📝 RAG token: '{token}' (len={len(token)})")
 
-                # Send non-empty tokens to TTS
-                # Guard against tokens that lack inter-word spaces (e.g. subword tokenizers)
-                if response_text and token and not response_text[-1].isspace() and not token[0].isspace():
-                    response_text += " " + token
-                else:
-                    response_text += token
+                # Preserve the exact streamed answer from HIVEMIND.
+                response_text += token
                 session.current_response_text = response_text
 
                 # Send text chunk to browser (skip if closed)
@@ -2893,6 +2889,14 @@ class OrchestratorWSHandler:
                 # Clear TTS buffer state without closing connection (avoid reconnect latency)
                 session.tts_client.reset_buffer()
                 logger.debug(f"[{session.session_id}] 🔄 TTS buffer cleared for batch synthesis")
+
+                if not response_text:
+                    logger.warning(f"[{session.session_id}] Empty HIVEMIND response in batch mode - skipping TTS synthesis")
+                    if state_mgr.state != State.LISTENING:
+                        listening_side_effects = await state_mgr.transition(State.LISTENING, trigger="empty_hivemind_response")
+                        await self._execute_side_effects(session, listening_side_effects, output_language)
+                        await self._broadcast_state(session, State.LISTENING)
+                    return
 
                 await self._stream_tts_to_browser(session, response_text, output_language)
                 return

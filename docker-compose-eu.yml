@@ -313,7 +313,7 @@ services:
       # Orchestrator tuning
       ORCHESTRATOR_TRANSCRIPT_TIMEOUT_S: "3.0"
       ORCHESTRATOR_BARGE_IN_VALIDATION_TIMEOUT_S: "6.0"
-      ORCHESTRATOR_BATCH_TTS: "true"
+      ORCHESTRATOR_BATCH_TTS: "false"
 
       COOLIFY_CONTAINER_NAME: orchestrator-eu
     networks:

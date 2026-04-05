@@ -163,13 +163,8 @@ class ProcessingPipeline:
                     "timestamp": time.time()
                 }
             
-            # Reconstruct with whitespace safety: tokens may or may not carry leading spaces
-            complete_answer_parts: list = []
-            for t in full_answer:
-                if complete_answer_parts and t and not complete_answer_parts[-1][-1:].isspace() and not t[:1].isspace():
-                    complete_answer_parts.append(" ")
-                complete_answer_parts.append(t)
-            complete_answer = "".join(complete_answer_parts)
+            # Preserve streamed text exactly as HIVEMIND emitted it.
+            complete_answer = "".join(full_answer)
             logger.info(f"[{session_id}] ✅ RAG streaming complete: {token_count} tokens | Response: {complete_answer[:100]}...")
             
             # Signal completion with usage metadata
