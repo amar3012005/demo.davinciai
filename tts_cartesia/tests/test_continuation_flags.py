@@ -3,9 +3,8 @@ Test 2: Continuation Flags in CartesiaManager (RED phase)
 
 Verifies that stream_text_to_audio() sends the correct `continue` field on
 each outbound Cartesia message:
-  - First chunk in a new context  → continue=False
-  - Intermediate chunks            → continue=True
-  - The final real chunk        → continue=False (closes the context)
+  - Any non-final chunk            → continue=True
+  - The final real chunk           → continue=False (closes the context)
 
 The Cartesia API uses this flag for prosody continuity across chunks;
 wrong values produce audible glitches or silent failures.
@@ -54,58 +53,39 @@ class TestContinuationFlagLogic:
     would send over the wire for multi-chunk text streams.
 
     The key invariant (from the implementation in cartesia_manager.py):
-        message["continue"] = stream_start_time is not None
-
-    - Before the first send:  stream_start_time is None → continue=False
-    - After the first send:   stream_start_time is set  → continue=True
+        message["continue"] = not is_final
     """
 
-    def test_first_chunk_continue_is_false(self):
-        """The `continue` flag for the first message must be False."""
-        stream_start_time = None
-
-        # Simulate what send_text() sets before sending the first chunk
-        continue_flag = stream_start_time is not None
-        assert continue_flag is False, (
-            "First chunk must have continue=False to open a new Cartesia context"
+    def test_first_non_final_chunk_continue_is_true(self):
+        """If more chunks are coming, the first chunk must keep the context open."""
+        is_final = False
+        continue_flag = not is_final
+        assert continue_flag is True, (
+            "First non-final chunk must have continue=True so Cartesia keeps the context open"
         )
 
-    def test_subsequent_chunk_continue_is_true(self):
-        """An intermediate chunk should continue an existing context."""
-        import time
-
-        stream_start_time = time.time()  # Set after first send
-        continue_flag = stream_start_time is not None
-        assert continue_flag is True, (
-            "Intermediate chunks must have continue=True for prosody continuity"
+    def test_final_chunk_continue_is_false(self):
+        """The final chunk must close the Cartesia context."""
+        is_final = True
+        continue_flag = not is_final
+        assert continue_flag is False, (
+            "Final chunk must have continue=False to close the context"
         )
 
     def test_continue_flag_type_is_bool(self):
         """The `continue` field must be a Python bool, not a truthy int or None."""
-        stream_start_time = None
-        flag = stream_start_time is not None
+        flag = not False
         assert isinstance(flag, bool)
-
-        import time
-        stream_start_time = time.time()
-        flag = stream_start_time is not None
+        flag = not True
         assert isinstance(flag, bool)
 
     def test_flag_transitions_in_sequence(self):
-        """Simulate a 3-chunk stream: F, T, F."""
-        import time
-
-        stream_start_time = None
+        """Simulate a 3-chunk stream: T, T, F."""
         flags = []
-
-        sent_chunks = 0
         for is_final in (False, False, True):
-            flags.append(sent_chunks > 0 and not is_final)
-            if stream_start_time is None:
-                stream_start_time = time.time()
-            sent_chunks += 1
+            flags.append(not is_final)
 
-        assert flags == [False, True, False], f"Expected [False, True, False], got {flags}"
+        assert flags == [True, True, False], f"Expected [True, True, False], got {flags}"
 
     def test_empty_text_chunk_is_skipped_not_sent(self):
         """
@@ -127,7 +107,7 @@ class TestContinuationFlagLogic:
         ctx_id = str(uuid.uuid4())
 
         messages = [
-            {"context_id": ctx_id, "transcript": "Hallo", "continue": False},
+            {"context_id": ctx_id, "transcript": "Hallo", "continue": True},
             {"context_id": ctx_id, "transcript": "Welt", "continue": True},
         ]
 
@@ -224,11 +204,11 @@ class TestContinuationFlagsEndToEnd:
         assert len(sent) >= 1, "Expected at least one message to be sent"
         first_msg = sent[0]
         assert first_msg.get("continue") is False, (
-            f"First message must have continue=False, got {first_msg.get('continue')!r}"
+            f"Single-chunk message must have continue=False, got {first_msg.get('continue')!r}"
         )
 
     async def test_two_chunk_stream_flags(self, mock_manager):
-        """Two-chunk stream: [continue=False, continue=False]."""
+        """Two-chunk stream: [continue=True, continue=False]."""
         from cartesia_manager import CartesiaConnection, ConnectionState
 
         sent: list[dict] = []
@@ -273,9 +253,62 @@ class TestContinuationFlagsEndToEnd:
                 )
 
         assert len(sent) == 2, f"Expected 2 sent messages, got {len(sent)}: {sent}"
-        assert sent[0].get("continue") is False, "First chunk must have continue=False"
+        assert sent[0].get("continue") is True, "First chunk must have continue=True"
         assert sent[1].get("continue") is False, "Final chunk must have continue=False"
         assert sent[1].get("transcript") == "Welt", "Final chunk must carry the real transcript"
+
+    async def test_error_followed_by_audio_does_not_fail_stream(self, mock_manager):
+        """A provisional Cartesia error frame must not abort a stream that still emits audio."""
+        from cartesia_manager import CartesiaConnection, ConnectionState
+
+        ctx_id = str(uuid.uuid4())
+        raw_audio = b"\x00\x01\x02\x03"
+        b64_audio = base64.b64encode(raw_audio).decode()
+        received_audio: list[bytes] = []
+
+        async def fake_send(data: dict) -> None:
+            pass
+
+        conn = MagicMock(spec=CartesiaConnection)
+        conn.state = ConnectionState.CONNECTED
+        conn._connected_event = asyncio.Event()
+        conn._connected_event.set()
+        conn.is_busy = False
+        conn._dispatch_lock = asyncio.Lock()
+        conn._dispatch_queues = {}
+        conn.send = fake_send
+        conn.is_available = MagicMock(return_value=True)
+        conn.ensure_connected = AsyncMock(return_value=True)
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _inject():
+            await asyncio.sleep(0.05)
+            await queue.put({"type": "error", "context_id": ctx_id, "message": "Context closed"})
+            await asyncio.sleep(0.01)
+            await queue.put({"type": "chunk", "context_id": ctx_id, "data": b64_audio})
+            await asyncio.sleep(0.01)
+            await queue.put({"type": "done", "context_id": ctx_id})
+
+        asyncio.create_task(_inject())
+
+        async def get_conn():
+            conn._dispatch_queues[ctx_id] = queue
+            return conn
+
+        async def one_chunk():
+            yield "Hallo"
+
+        with patch.object(mock_manager, "get_connection", new=AsyncMock(side_effect=get_conn)):
+            with patch("cartesia_manager.uuid.uuid4", return_value=ctx_id):
+                stats = await mock_manager.stream_text_to_audio(
+                    one_chunk(),
+                    audio_callback=lambda b, sr, m: received_audio.append(b),
+                    context_id=ctx_id,
+                )
+
+        assert stats.get("error") is None, f"Expected no terminal error, got: {stats.get('error')}"
+        assert received_audio == [raw_audio], f"Expected received audio after provisional error, got: {received_audio!r}"
 
     async def test_receive_error_propagated_in_stats(self, mock_manager):
         """If Cartesia returns an error message, stats must contain the error key."""

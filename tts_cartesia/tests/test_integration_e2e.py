@@ -260,8 +260,8 @@ class TestCartersiaManagerEndToEnd:
             f"Expected {expected_bytes} bytes, got {stats['total_audio_bytes']}"
         )
 
-    async def test_first_message_has_continue_false(self):
-        """First Cartesia message in a stream must have continue=False."""
+    async def test_single_message_has_continue_false(self):
+        """Single-chunk streams must close immediately with continue=False."""
         ctx_id = str(uuid.uuid4())
         manager, conn, queue, sent, get_conn = self._make_manager_with_mock_conn(ctx_id)
 
@@ -278,8 +278,29 @@ class TestCartersiaManagerEndToEnd:
 
         assert len(sent) >= 1, "At least one message must have been sent"
         assert sent[0].get("continue") is False, (
-            f"First message must have continue=False, got {sent[0].get('continue')!r}"
+            f"Single message must have continue=False, got {sent[0].get('continue')!r}"
         )
+
+    async def test_multi_chunk_stream_uses_true_then_false(self):
+        """Multi-chunk streams must keep the context open until the final chunk."""
+        ctx_id = str(uuid.uuid4())
+        manager, conn, queue, sent, get_conn = self._make_manager_with_mock_conn(ctx_id)
+
+        async def two_tokens():
+            yield "Hallo"
+            yield " Welt"
+
+        with patch.object(manager, "get_connection", new=AsyncMock(side_effect=get_conn)):
+            with patch("cartesia_manager.uuid.uuid4", return_value=ctx_id):
+                await manager.stream_text_to_audio(
+                    two_tokens(),
+                    audio_callback=lambda b, sr, m: None,
+                    context_id=ctx_id,
+                )
+
+        assert len(sent) == 2, f"Expected 2 messages, got {len(sent)}: {sent}"
+        assert sent[0].get("continue") is True, f"Expected first chunk continue=True, got {sent[0].get('continue')!r}"
+        assert sent[1].get("continue") is False, f"Expected final chunk continue=False, got {sent[1].get('continue')!r}"
 
     async def test_german_text_pipeline_full_flow(self):
         """

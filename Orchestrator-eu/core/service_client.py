@@ -173,14 +173,27 @@ class STTClient:
     
     async def close(self):
         """Close STT connection (WebSocket and session)"""
-        if self.ws:
-            await self.ws.close()
+        try:
+            if self.ws:
+                await self.ws.close()
+        except asyncio.CancelledError:
+            logger.debug("STT WebSocket close cancelled during shutdown")
+        finally:
             self.ws = None
-        if self.session:
-            await self.session.close()
+
+        try:
+            if self.session:
+                await self.session.close()
+        except asyncio.CancelledError:
+            logger.debug("STT aiohttp session close cancelled during shutdown")
+        finally:
             self.session = None
+
         # Allow time for underlying transport to close
-        await asyncio.sleep(0.01)
+        try:
+            await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            logger.debug("STT close sleep cancelled during shutdown")
 
 
 class TTSClient:
@@ -528,14 +541,27 @@ class TTSClient:
     
     async def close(self):
         """Close TTS connection (WebSocket and session)"""
-        if self.ws:
-            await self.ws.close()
+        try:
+            if self.ws:
+                await self.ws.close()
+        except asyncio.CancelledError:
+            logger.debug("TTS WebSocket close cancelled during shutdown")
+        finally:
             self.ws = None
-        if self.session:
-            await self.session.close()
+
+        try:
+            if self.session:
+                await self.session.close()
+        except asyncio.CancelledError:
+            logger.debug("TTS aiohttp session close cancelled during shutdown")
+        finally:
             self.session = None
+
         # Allow time for underlying transport to close
-        await asyncio.sleep(0.01)
+        try:
+            await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            logger.debug("TTS close sleep cancelled during shutdown")
 
 
 class RAGClient:

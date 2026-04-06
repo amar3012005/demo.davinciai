@@ -339,7 +339,6 @@ class CartesiaManager:
             
             # Shared state
             send_complete = asyncio.Event()
-            receive_complete = asyncio.Event()
             receive_error: Optional[str] = None
             
             # Cartesia Sonic 3 only supports 5 SSML emotion values.
@@ -384,7 +383,10 @@ class CartesiaManager:
                             "transcript": clean_text,
                             "voice": (voice_id and len(voice_id.strip()) > 0) and {"mode": "id", "id": voice_id} or self.config.get_voice_config(),
                             "output_format": self.config.get_output_format_config(),
-                            "continue": sent_chunks > 0 and not is_final,
+                            # Cartesia expects every chunk that will be followed by
+                            # more input to set continue=true. Only the final chunk
+                            # of the turn should close the context.
+                            "continue": not is_final,
                         }
 
                         # CRITICAL: Always send language parameter for correct phonology
@@ -471,6 +473,7 @@ class CartesiaManager:
                 nonlocal first_chunk_time, receive_error
                 try:
                     logger.info(f"[{ctx_id[:8]}] Starting audio receive loop (waiting for Cartesia chunks)...")
+                    provisional_error: Optional[str] = None
                     while True:
                         try:
                             # Wait for message from dispatcher
@@ -481,12 +484,17 @@ class CartesiaManager:
                             msg_type = data.get("type")
                             
                             if msg_type == "error":
-                                receive_error = data.get("message") or data.get("error")
-                                break
+                                provisional_error = data.get("message") or data.get("error")
+                                logger.warning(
+                                    f"[{ctx_id[:8]}] Cartesia error frame received before stream completion: "
+                                    f"{provisional_error}"
+                                )
+                                continue
                             
                             if msg_type == "chunk":
                                 audio_b64 = data.get("data")
                                 if audio_b64:
+                                    provisional_error = None
                                     audio_bytes = base64.b64decode(audio_b64)
                                     stats["chunks_received"] += 1
                                     stats["total_audio_bytes"] += len(audio_bytes)
@@ -513,11 +521,15 @@ class CartesiaManager:
                                         logger.error(f"Callback error: {e}")
                                         
                             elif msg_type == "done":
+                                if provisional_error and stats["chunks_received"] == 0:
+                                    receive_error = provisional_error
                                 logger.info(f"✅ [{ctx_id[:8]}] Stream complete")
                                 break
                                 
                         except asyncio.TimeoutError:
                             if send_complete.is_set():
+                                if provisional_error and stats["chunks_received"] == 0:
+                                    receive_error = provisional_error
                                 logger.warning(f"[{ctx_id[:8]}] ⏱️ Receive timeout after send complete (chunks received: {stats['chunks_received']})")
                                 break
                             else:
@@ -527,8 +539,6 @@ class CartesiaManager:
                 except Exception as e:
                     logger.error(f"Receive error: {e}")
                     receive_error = str(e)
-                finally:
-                    receive_complete.set()
             
             # Run concurrently
             await asyncio.gather(send_text(), receive_audio())

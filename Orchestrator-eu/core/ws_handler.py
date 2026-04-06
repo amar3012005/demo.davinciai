@@ -5833,10 +5833,21 @@ Respond in JSON format only: {{"is_genuine": true/false, "interruption_type": ".
                 task.cancel()
         
         # Close service connections
-        if session.stt_client:
-            await session.stt_client.close()
-        if session.tts_client:
-            await session.tts_client.close()
+        try:
+            if session.stt_client:
+                await session.stt_client.close()
+        except asyncio.CancelledError:
+            logger.debug(f"[{session.session_id}] STT client close cancelled during cleanup")
+        except Exception as e:
+            logger.debug(f"[{session.session_id}] STT client close failed during cleanup: {e}")
+
+        try:
+            if session.tts_client:
+                await session.tts_client.close()
+        except asyncio.CancelledError:
+            logger.debug(f"[{session.session_id}] TTS client close cancelled during cleanup")
+        except Exception as e:
+            logger.debug(f"[{session.session_id}] TTS client close failed during cleanup: {e}")
 
         # Clear live conversational memory for the finished session so it
         # cannot leak into the next browser session.

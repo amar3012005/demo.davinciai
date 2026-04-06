@@ -70,6 +70,7 @@ class SessionState:
         self.chunks_sent = 0
         self.total_audio_bytes = 0
         self.last_activity = time.time()
+        self.stream_end_requested = False
         
         # Context for streaming turn
         self.current_voice: Optional[str] = None
@@ -582,6 +583,13 @@ async def websocket_stream(
                         session.current_dict = message.get("pronunciation_dict_id")
                     if incoming_context_id:
                         session.stream_context_id = incoming_context_id
+
+                    if session.stream_end_requested:
+                        logger.warning(
+                            f"[{session_id}] Late stream_chunk ignored after stream_end "
+                            f"(ctx={session.stream_context_id or 'unset'})"
+                        )
+                        continue
                     
                     if text_chunk:
                         # Initialize streaming turn if not already active
@@ -643,6 +651,7 @@ async def websocket_stream(
                                     session.text_queue = None
                                     session.stream_task = None
                                     session.stream_context_id = None
+                                    session.stream_end_requested = False
 
                             session.stream_task = asyncio.create_task(run_stream())
                         
@@ -654,6 +663,7 @@ async def websocket_stream(
                     # Signaling end of streaming for current turn
                     if session.text_queue:
                         logger.info(f"[{session_id}] Stream end received, closing turn")
+                        session.stream_end_requested = True
                         await session.text_queue.put(None)
                     else:
                         await websocket.send_json({"type": "complete", "chunks": 0})
